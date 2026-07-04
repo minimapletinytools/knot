@@ -1,0 +1,28 @@
+knot - the language
+tangle - the node graph editor for the language
+twine - a basic RTE using the language
+beaver - a 3d print slicer using the language to customize slicing
+
+
+# knot and tangle
+next steps:
+- define language spec
+- map each part of language spec to node graph represenattion and ensure 1-1ness
+- define commenting/annotation spec to nodes can be positioned in code
+
+open questions:
+- dealing with global inputs
+- dealing with outputs
+- how to handle IO operations
+- logging (allowable side effects, but come up some user stories so yo ucan desgin it better)
+
+
+
+
+# twine
+- use kumiki as a case study
+- detail out laziness
+- detail out caching
+- detail out what triggers code execution
+- figure out IO of course
+- detail out reverse execution solving possibilities and limitations
