@@ -4,6 +4,8 @@ twine - a basic RTE using the language
 beaver - a 3d print slicer using the language to customize slicing
 
 
+
+
 # knot and tangle
 next steps:
 - define language spec
@@ -13,10 +15,11 @@ next steps:
 open questions:
 - dealing with global inputs
 - dealing with outputs
-- how to handle IO operations
+- built in moands and do operation for IO and stuf
+    - but need to figure out node syntax for dealing with tihs.
+- containers/interfaces
+    - built in set of typeclasses but allow use defined containers to implement them?
 - logging (allowable side effects, but come up some user stories so yo ucan desgin it better)
-
-
 
 
 # twine
