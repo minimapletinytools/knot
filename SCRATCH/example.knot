@@ -1,0 +1,280 @@
+
+
+# node
+# box (node group)
+# boxe
+
+
+{- Block comment: example.knot
+   Demonstrates every feature in the v0.1 language spec. -}
+
+
+-- ============================================================
+-- Type aliases and ADTs
+-- ============================================================
+
+type alias Point = { x : Float, y : Float }
+
+# data entry fields show up 
+
+type alias Segment = { start : Point, end : Point }
+
+type Shape
+  = Circle Point Float          -- center, radius
+  | Rectangle Point Point       -- top-left, bottom-right
+  | Triangle Point Point Point
+
+type Option a
+  = Some a
+  | None
+
+type Result e a
+  = Ok a
+  | Err e
+
+
+
+
+
+-- ============================================================
+-- Primitives and basic definitions
+-- ============================================================
+
+pi :: Float
+pi = 3.14159265358979
+
+greeting :: String
+greeting = "hello"
+
+isReady :: Bool
+isReady = True
+
+
+-- ============================================================
+-- Records: construction, access, update
+-- ============================================================
+
+origin :: Point
+origin = { x = 0.0, y = 0.0 }
+
+-- field access via dot notation (no spaces)
+originX :: Float
+originX = origin.x
+
+-- record update (produces a new record)
+shiftedOrigin :: Point
+shiftedOrigin = { origin | x = 5.0 }
+
+multiUpdate :: Point
+multiUpdate = { origin | x = 3.0, y = 4.0 }
+
+
+-- ============================================================
+-- Extensible record types
+-- ============================================================
+
+-- works on any record that has at least x and y Float fields
+distance :: { r | x : Float, y : Float } -> { r | x : Float, y : Float } -> Float
+distance a b =
+  let
+    dx = a.x - b.x
+    dy = a.y - b.y
+  in
+  (dx * dx + dy * dy)   -- sqrt omitted for brevity
+
+
+-- ============================================================
+-- Function application, let bindings, pipes
+-- ============================================================
+
+@nodeId("area-fn")
+@position(200, 100)
+@doc("Compute area of a shape")
+area :: Shape -> Float
+area shape =
+  case shape of
+    Circle _ r      -> pi * r * r
+    Rectangle a b   ->
+      let
+        w = b.x - a.x
+        h = b.y - a.y
+      in
+      w * h
+    Triangle _ _ _  -> 0.0   -- partial: warns but allowed
+
+
+-- pipe operators: |> forward pipe, >> forward composition
+describeArea :: Shape -> String
+describeArea shape =
+  shape
+  |> area
+  |> show     -- show :: Float -> String
+
+
+-- forward composition producing a new function
+areaToString :: Shape -> String
+areaToString = area >> show
+
+
+-- ============================================================
+-- Lambdas
+-- ============================================================
+
+double :: Int -> Int
+double = \x -> x * 2
+
+add :: Int -> Int -> Int
+add = \x y -> x + y
+
+
+-- ============================================================
+-- Conditionals
+-- ============================================================
+
+classify :: Float -> String
+classify r =
+  if r > 10.0
+  then "large"
+  else if r > 1.0
+  then "medium"
+  else "small"
+
+
+-- ============================================================
+-- Pattern matching (exhaustive and partial)
+-- ============================================================
+
+describeShape :: Shape -> String
+describeShape shape =
+  case shape of
+    Circle _ r    -> "circle with radius " <> show r
+    Rectangle a b -> "rectangle"
+    Triangle _ _ _ -> "triangle"
+
+-- intentionally partial (compiler warns, not errors)
+unsafeUnwrap :: Option a -> a
+unsafeUnwrap opt =
+  case opt of
+    Some x -> x
+    -- None unhandled: partial function, warning issued
+
+
+-- ============================================================
+-- Collection interface: map, foldl, foldr, filter, length
+-- ============================================================
+
+numbers :: List Int
+numbers = [1, 2, 3, 4, 5]
+
+doubled :: List Int
+doubled = map double numbers
+
+evens :: List Int
+evens = filter (\x -> x == 0) numbers   -- placeholder predicate
+
+total :: Int
+total = foldl (\acc x -> acc + x) 0 numbers
+
+count :: Int
+count = length numbers
+
+
+-- ============================================================
+-- Semigroup / Monoid
+-- ============================================================
+
+combined :: String
+combined = "hello" <> " " <> "world"
+
+emptyList :: List Int
+emptyList = empty   -- Monoid.empty
+
+
+-- ============================================================
+-- Option chaining via do-notation (Context / bind)
+-- ============================================================
+
+safeDivide :: Int -> Int -> Option Int
+safeDivide _ 0 = None
+safeDivide x y = Some (x + y)   -- placeholder arithmetic
+
+computation :: Option Int
+computation =
+  do
+    a <- safeDivide 10 2
+    b <- safeDivide a 1
+    pure (a + b)
+
+
+-- ============================================================
+-- Result chaining
+-- ============================================================
+
+parsePositive :: Int -> Result String Int
+parsePositive n =
+  if n > 0
+  then Ok n
+  else Err "must be positive"
+
+pipeline :: Result String Int
+pipeline =
+  do
+    x <- parsePositive 5
+    y <- parsePositive x
+    pure (x + y)
+
+
+-- ============================================================
+-- IO
+-- ============================================================
+
+main :: IO Unit
+main =
+  do
+    pure ()
+
+
+-- ============================================================
+-- Annotation examples
+-- ============================================================
+
+-- stacked declaration annotations on a top-level definition
+@nodeId("scale-fn")
+@position(400, 300)
+@label("Scale Shape")
+@doc("Uniformly scales a circle's radius by a factor")
+@color("#a0c4ff")
+@group("geometry")
+scaleCircle :: Float -> Shape -> Shape
+scaleCircle factor shape =
+  case shape of
+    Circle c r -> Circle c (r * factor)
+    other      -> other
+
+-- annotations on let bindings
+processShape :: Shape -> String
+processShape s =
+  let
+    @nodeId("step-area")
+    @position(100, 200)
+    a = area s
+
+    @nodeId("step-label")
+    @position(250, 200)
+    label = classify a
+  in
+  label <> ": " <> show a
+
+-- inline postfix annotations on pipeline stages
+annotatedPipeline :: Shape -> String
+annotatedPipeline s =
+  s
+  |> area     @nodeId("pipe-area")    @position(100, 400)
+  |> show     @nodeId("pipe-show")    @position(250, 400)
+  |> classify @nodeId("pipe-classify") @position(400, 400)
+
+-- collapsed node (renders folded in the graph by default)
+@nodeId("helper-collapsed")
+@collapsed
+helperFn :: Int -> Int
+helperFn x = x + 1

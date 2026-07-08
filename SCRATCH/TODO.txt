@@ -29,3 +29,25 @@ open questions:
 - detail out what triggers code execution
 - figure out IO of course
 - detail out reverse execution solving possibilities and limitations
+
+
+
+-----
+
+scratch area
+
+top level variable declarations allowd, these just behave like file scoped let bindings I think?
+
+A scope is a function is a box around scoped expressions in the node graph
+
+dragging from outside into a scope is capturing, you can not drag from a scope to the outside without going through an output
+
+there is a function list of all available functions, and it is scoped to whatever box you're in
+
+hidden function nodes only show up in the function the list
+
+shown functions appear in the UI where they got defined
+
+
+
+
