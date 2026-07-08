@@ -260,13 +260,21 @@ do
 
 ## 8. Metadata & Annotations
 
-Annotations use `@name(args)` syntax and can be attached to any named binding or
-sub-expression. They carry node graph layout metadata, stable IDs, documentation, and
-other tooling hints. They have no effect on runtime semantics.
+Annotations can be attached to any named binding. They carry node graph layout metadata,
+stable IDs, reverse execution logic, documentation, and other tooling hints. They have
+no effect on forward runtime semantics.
 
-### 8.1 Declaration annotations
+Annotations are evaluated at **graph construction time** — after type-checking but
+before the graph runs. This means annotation values can be full Knot expressions
+(including function references and conditionals), and all annotation fields are
+type-checked like any other Knot code.
 
-Placed on the line(s) immediately above a top-level definition or a `let` binding:
+Two syntaxes are supported and can be freely mixed:
+
+### 8.1 Stacked single-key form: `@name(args)`
+
+Placed on the line(s) immediately above a top-level definition or a `let` binding.
+Good for simple scalar annotations:
 
 ```knot
 @nodeId("f1")
@@ -275,7 +283,6 @@ Placed on the line(s) immediately above a top-level definition or a `let` bindin
 myFunc :: Int -> Int
 myFunc x = x + 1
 
--- also valid on let bindings
 let
   @nodeId("n1")
   @position(150, 300)
@@ -283,55 +290,141 @@ let
 in result
 ```
 
-Multiple `@` lines stack and all apply to the binding that follows.
+Multiple `@` lines stack — all apply to the binding that follows.
 
-### 8.2 Inline sub-expression annotations
+### 8.2 Block form: `@{ ... }`
 
-For annotating individual stages of a pipeline or other sub-expressions, `@annotation`
-is written **postfix**, immediately after the expression atom it targets. It binds
-tighter than any operator, so `f @nodeId("n1") |> g` means `(f @nodeId("n1")) |> g`.
+A single annotation block containing a record expression. Any valid Knot expression
+is allowed as a field value — function references, lambdas, conditionals, let bindings.
+Good for complex annotations or when many keys are needed at once:
+
+```knot
+@{
+  nodeId   = "f1",
+  position = (100.0, 200.0),
+  label    = "My Function",
+  color    = "#a0c4ff"
+}
+myFunc :: Int -> Int
+myFunc x = x + 1
+```
+
+Both forms can be mixed on the same binding — stacked `@name` lines and a `@{ }` block
+are merged, with the block taking precedence on any key that appears in both:
+
+```knot
+@nodeId("f1")
+@position(100, 200)
+@{ color = "#a0c4ff", unravel = myCustomUnraveler }
+myFunc :: Int -> Int
+myFunc x = x + 1
+```
+
+### 8.3 Inline sub-expression annotations
+
+For annotating individual stages of a pipeline, `@annotation` is written **postfix**,
+immediately after the expression atom it targets. Both forms work inline:
 
 ```knot
 x = f @nodeId("n1") @position(100, 200)
-  |> g @nodeId("n2") @position(200, 200)
-  |> h @nodeId("n3") @position(300, 200)
-  |> y
+  |> g @{ nodeId = "n2", position = (200.0, 200.0) }
+  |> h
 ```
 
-For complex sub-expressions (not just a single identifier), wrap in parens first:
+For complex sub-expressions wrap in parens first:
 
 ```knot
-x = (f a b) @nodeId("n1") @position(100, 200)
+x = (f a b) @{ nodeId = "n1", position = (100.0, 200.0) }
   |> g
 ```
 
-When inline annotations become unwieldy, extract to named `let` bindings and annotate
-those instead — that is always the fallback:
+Prefer extracting to named `let` bindings when inline annotations get unwieldy.
 
-```knot
-x =
-  let
-    @nodeId("n1") @position(100, 200)
-    step1 = f
-    @nodeId("n2") @position(200, 200)
-    step2 = step1 |> g
-  in
-    step2 |> h |> y
-```
+### 8.4 Standard annotation keys
 
-### 8.3 Standard annotation keys
-
-| Annotation | Args | Meaning |
+| Key | Type | Meaning |
 |---|---|---|
-| `@nodeId(id)` | String | Stable unique ID for the node — persists across edits |
-| `@position(x, y)` | Float, Float | Canvas position of the node |
-| `@label(text)` | String | Display name override (defaults to the binding name) |
-| `@doc(text)` | String | Documentation string shown in the graph UI |
-| `@color(hex)` | String | Node color in the graph |
-| `@group(name)` | String | Visual group/cluster the node belongs to |
-| `@collapsed` | — | Node renders collapsed in the graph by default |
+| `nodeId` | `String` | Stable unique ID — persists across edits |
+| `position` | `(Float, Float)` | Canvas position |
+| `label` | `String` | Display name override |
+| `doc` | `String` | Documentation string shown in graph UI |
+| `color` | `String` | Node color (hex) |
+| `group` | `String` | Visual group/cluster |
+| `collapsed` | `Bool` | Whether node renders collapsed by default |
+| `unravel` | `Unraveler` | Reverse execution function — see §9 |
 
 The annotation set is open — new keys can be added without changing the language.
+
+---
+
+## 9. Unravel (Reverse Execution)
+
+Every binding in the node graph can optionally carry an **unravel function** — a
+reverse execution rule that, given a desired change in a node's output, computes the
+corresponding desired changes to its inputs. This is what enables the graph to be
+driven backwards: change a visualized output, propagate the change upstream to find
+which input values (typically literals) to modify.
+
+### 9.1 What an unravel function is
+
+An unravel function is a regular Knot function attached to a binding via the `unravel`
+annotation key. Its signature mirrors the forward function but runs in reverse:
+
+```knot
+-- forward:  inputs -> output
+-- unravel:  (inputs, output_sensitivity) -> input_sensitivities
+
+@{ unravel = \inputs sensitivity -> ... }
+x = f y z
+```
+
+The runtime calls a node's unravel during a backward pass through the graph, passing
+the desired output change (sensitivity) and the original inputs. The unravel returns
+desired changes for each input, which are then propagated further upstream.
+
+### 9.2 Default unravelers
+
+Built-in operations have sensible default unravelers — no annotation needed for simple
+cases. For example, addition splits the output sensitivity evenly across its inputs by
+default. The annotation only needs to appear when overriding the default behavior.
+
+### 9.3 Unravel on higher-order functions
+
+When a node takes a function as input (e.g. `foldl`, `map`), its unravel receives not
+just the function value but also that function's own unravel, and calls it during the
+backward pass. Function strands in the graph carry their unravel bundled alongside
+their forward implementation — passing a function to a higher-order node automatically
+makes its unravel available for the backward pass.
+
+### 9.4 Conflict resolution
+
+When multiple downstream paths converge on the same node during a backward pass, that
+node may receive conflicting desired values from different paths. The default strategy
+is to average them; this is configurable per-node via a `solver` annotation key
+(distinct from `unravel`). If the system cannot find a stable solution within a set
+number of iterations, it surfaces a warning rather than silently producing a wrong
+result.
+
+### 9.5 Annotation examples
+
+```knot
+-- simple override: assign full delta to first argument instead of splitting
+@{ unravel = \(x, y) delta -> (delta, 0.0) }
+sum = x + y
+
+-- conditional strategy based on input values
+@{
+  unravel = \inputs sensitivity ->
+    if isLinear inputs
+    then leastNormUnravel inputs sensitivity
+    else iterativeUnravel inputs sensitivity
+}
+result = complexTransform input
+
+-- reference a named unravel function defined elsewhere
+@{ unravel = myDomainUnraveler }
+output = domainSpecificOp input
+```
 
 ---
 

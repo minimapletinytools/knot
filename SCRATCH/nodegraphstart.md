@@ -6,6 +6,7 @@ head - the input end of a knot
 tail - the output of a knot
 loose head - the head of a knot with nothing connecting to it
 loose tail - the tail of a knot with nothing connected to it
+unravel - pullback function for reverse inference
 
 load or strand? - value? maybe just use value, or how about bead?
 ?? - multiplexed otuput nod
