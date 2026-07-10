@@ -1,3 +1,11 @@
+seems to be AI generated, but explains semantics and how it maps to nodes a bit more, 
+
+you can probably delete this doc, 
+
+nodegraphstart.md will explain node semastic,s
+and langua-spec-notes shoud be built upn for syntax, I guess later we can add semantics to it
+but three's also hella runtime stuff, so... anyways, we still don't need this doc.  ol combine with languae-specsnotes and nodegraphstart
+
 # Node-Graph / Functional-Language Semantics — v1 Draft Spec
 
 Status: working draft, first pass. Scope is intentionally narrow (see §0). This document
