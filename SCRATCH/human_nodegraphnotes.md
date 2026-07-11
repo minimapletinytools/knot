@@ -102,11 +102,37 @@ generic connectors can chain together too keeping their generic-ness
 
 TODO consider entire program as a node, then maybe we allow multiple output connectors)
 
+### combined nodes
+
+combined nodes are a special treatement of definition nodes and callsite nodes combined into one. THere are a few cases:
+
+1. If a definition node has only one callsite, and the callsite is completely connected (all inputs and outputs connected)
+
+normal case, this is basically making a lambda and appyling it to something
+
+2. if a definition node has only one calliste, and it is only partially connected
+
+this is an intermediary state, it can be boxed again and converted into a function definition node from a curried function. 
+
+we could consider treating this like a loose end of a non trivial let binding
+i.e. `let _ = (\x y z -> ....) $ input1 _ input2` <- not real syntax, would be for intermediate state only if we chose to serialize invalid loose end states.
+
+3. a partially connected combined node that got converted (boxed) into a curried funnctino definiton node
+
+or maybe don't do this, it may be better to NOT do combined nodes in this case. Just force the explicit split definition node -> callsite node and then boxing the one partially connecetd callsite node into a curried function definition node. The cons of this approach is that you will need to do this split automatically for the user when they convert the partially conected combined node into a boxed function definition node and there may need to be special UI case for this.
+
+
 ## connection
 
 a connection is a line drawn from one "output" to one "input"
 
-### loose connections, connections can just be dangling around as a inctermediary non-serialized state. In these cases, the loose ned cna be converted into a let binding or into a callsite node in the case of function types.
+### loose connections
+
+connections can just be dangling around as a inctermediary non-serialized state. In these cases, the loose ends cna be converted into a let binding or into a callsite node in the case of function types.
+
+in code we can choose to 
+- represent loose ends as unnamed let bindings i.e. `_ = ...`
+- treat them as an invalid intermediary unserialized state that only exists on the node graph side of things
 
 ### node boundary interfacing connections (currying)
 funcution definition nodes may have inputs and outputs within the node that connect to the nodes within the outer box node. 
@@ -125,6 +151,7 @@ in order to do recusion you must let bind the function into a variable, then usi
 
 what does something like
 `fix f = let x = f y, y = x in x` look like in the node graph?
+
 
 # Examples
 
