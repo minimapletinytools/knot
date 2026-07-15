@@ -33,16 +33,20 @@ open questions:
 
 ------
 
+# STUFF TO ADD TO SPEC
+
 the language supports 2 special things in addition via its annotations
 
 1. function pullbacks (unravel); which provide nistructions on how to modify inputs to obtain given output.
 all bulit in functions have default unravles, but they may be too tangled, so users are expected to provide higher level unravels on their defined functions (knots) to keep things simple, the AI is expected to assist a lot here.
 
-
 2. custom output modifiers (todo cute name): we may want to unravel from a specific point in the node graph rather than its final output. in UI a specific  output for many node gets dragged into a custom output modifier node. This node may be bound to one of the final output objects using some function which has applicatino specific interpretation. For eamxlpe, we may have a series of pillars, and the num_pillars output (from a constant value node say) determines the # of pillars, we drag that out to a custom output modifier node and then we drag the output pillar object to this node as well usin ga function that displays the # pillar modifier box each time you select any of the pillars. in code, I guess this is an annotation on the output (as a let bound variable) and the annotation takes a function that can somehow read soem of teh final outputs of the graph and also use app specific functions to bind different output modifier interfaces to the outputs of the graph)
 
 
 
+
+
+we probably want some x -> x operators (e.g. fromIntegral) to have inlinable versions, either a "pill" looking thing on the line. Maybe we can even make them chainable pills sinec it's common to apply a few of these. They can then be toggled to show up as a full box if you want for some reason. some built x -> x functions are default pilled, all user definde ones are default expanded.
 
 
 
