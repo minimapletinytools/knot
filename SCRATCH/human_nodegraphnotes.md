@@ -1,4 +1,5 @@
 
+# terminology scratch
 skein/field - scope
 knot - node
 rope - connection
@@ -6,7 +7,11 @@ head - the input end of a knot
 tail - the output of a knot
 loose head - the head of a knot with nothing connecting to it
 loose tail - the tail of a knot with nothing connected to it
+tucks, thimble, eyelet? - connectors
 unravel - pullback function for reverse inference
+bind - captures
+bottom - Möbius? lol
+
 
 load, strand, bead, weave, filament? - value? maybe just use value, or how about bead? maybe strand could be used for promitives and bulit ins?
 
@@ -28,6 +33,16 @@ pulley
 
 
 ?? - multiplexed otuput nod
+
+# TODO scratch
+
+- node rendering styles, so detail out how we visually distinguish different types of function nodes
+
+- operators and operator precedence, we need this info to do the reverse mapping, I guess you can just enforce one style with a linter which we sorta need to do to keep reverse mapping manageable.
+
+
+
+
 # Core Primitives
 
 ## valueboxes
@@ -59,6 +74,17 @@ types may take on generic and interface types (may be come more inferred or conc
 
 ### literal nodes
 
+literal nodes contain some special UI input field (num filed string field, dropdown, etc) that allows you to set the literal value. They have one output connector.
+
+literal nodes can be "nubbed" into a connector so that a complete node + connection is not shown. All literal nodes are nubbed by default unless they have been let bound to a variable. You can add an annotation to make literal nodes not be nubbed
+
+visually, a nub portrudes out from the input connector outside fo the node by a half semicircel, and the literal input field is in a pillbox shape with the portruding half semicricle as one of its ends.
+
+some datatypes may have special literal syntax (e.g. maps, lists, maybe user defined ones) 
+if the input field is one lineable, then it can be nubbed, otherwise nubbing is not supported.
+
+maps, and lists of literals by default come with their special literal input fields.
+
 ### let bindings (value nodes)
 
 a let binding binds a value type to a node, it is directly connected to a connection (not via an input connector on the node, the node itself is connected to the connection)
@@ -74,6 +100,8 @@ value nodes may also be symbolicated (pick better term) in the scope, allowing i
 ...
 (created from the aether) 🐴--->someinputnode
 ```
+
+TODO consider having a special let bound literal node, if not, it's just a regular let bound node with a nubbed literal input which is fine too I guess.
 
 
 ### function nodes
@@ -92,6 +120,16 @@ node that 2 may be boxed to produce a function definition node
 #### pillboxed function nodes  (slubs)
 
 functions nodes fo type `x -> y` can be "slubbed" meaning they get a more inline representation on as a "pill" looking thing dircetly on the connector rather than a full node with input and output. Slubs can be chained together to form... caterpillars? many built in functions are set to be slubbed by default, all user defined functions are not slubbed by default and can be annotated to be slubbed by default. callsite nodes can be made to be slubbed or not slubbed (overriding the default) with an annotation.
+
+#### simple function nodes (twists?)
+
+functions can be flagged sa simple which makes them render a little more compatly... NAH but at least color some built in function sdifferently maybe
+
+#### ADT ctor nodes
+
+algebraic data type ctor nodes  have a drop down to toggle which exclusive variant is being used to construct it. Otherwise, they are just function nodes. 
+
+while the editor is open (i.e. not serialized) it attepmts to "Remmeber" what was connected to teh previous variants and restores it if you toggle back to it
 
 
 ### boxed nodes (knots)
@@ -125,9 +163,24 @@ a callsite node may have many typed input connectors and one typed output connec
 
 a callsite node may have generic connectors and become more typed as inputs and outputs get added to it
 
-generic connectors can chain together too keeping their generic-ness
+generic connectors can chain together in keeping their generic-ness. They only become concrete when connected to inputs/outputs that force its type to be conceret.
 
 TODO consider entire program as a node, then maybe we allow multiple output connectors)
+
+
+#### expanding connectors (enable daisy chaining)
+
+TODO some built in nodes need to support epanding connectors e.g. maps and lists so that you don't need to chain a bunch of append/insert nodes together to build a list from a static set of inputs.
+
+Once you fill in one connector, another optionla connector opens up. the node is still treated as fully connected in this case.
+
+easy enough for built ins, we should allow user defined types to support this interface too someday. I guess in general, anything of the type
+
+`fun :: a -> b -> b`
+
+can be tagged as "expandable" or whatever which enables this special interface which really just 
+
+`... fun a1 . fun a2 . fun a3 $ b` or jsut `b` if there is no input
 
 ### combined nodes
 
@@ -185,6 +238,11 @@ what does something like
 ## the global scope
 
 TODO how to access built ins from the global scopes? in particular, we need to be able to create callsite nodes from bulit in functions, and we also need to be able to use bulit in functions are function value nodes to use as inputs into higher order functions
+
+
+### imports
+
+there is some menu somewhere that lets you add / remove imported modules. imported modules are always sorted by name. tangle doesn't care about import qualifications, so all qualifications are treated the same in the viewer. In the reverse mapping, things are not qualified if they don't need to be, otherwise qualified, or we could do always fully qualified which might be easier to miplement.
 
 
 # Examples
