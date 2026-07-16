@@ -11,7 +11,10 @@ tucks, thimble, eyelet? - connectors
 unravel - pullback function for reverse inference
 bind - captures
 bottom - Möbius? lol
-
+?? - annotation
+bundle? - boxing nodes
+value - ?
+primitive value - ?
 
 load, strand, bead, weave, filament? - value? maybe just use value, or how about bead? maybe strand could be used for promitives and bulit ins?
 
@@ -44,39 +47,104 @@ pulley
     -graph primitives, nodes, connnectors, 
     -special node types
     -BONUS combined nodes
-    
+- consider having entry point functions just be boxed funciton nodes that you fill in (with input and ouputs predefined, can't create new ones) and then module import/export could be done via nodes on the left/right (but that's silly for imports cuz we'd probably rather just pull imported stuff from teh aether.)
+- zoom in mode focuses in on any boxed node, the entire application is similarly as such.
+
+# START AGAIN HERE
+
+This spec outlines the Tangle UI and its mapping with the knot programming language
+
+# Core Concepts
+
+There are 3 main concpets in knot
+
+- nodes (knots)
+- connectors (head and tails of knots)
+- connection (rope)
+
+each may have several variations to represent the entirety of the language.
+
+nodes are quantized typed expressions and are composed with other nodes with connectors and connections to represent expressions.
+
+connectors have types, and these types may be generic gradually become inferred as things get connected to them
+
+# Node
+
+## function node
+
+functions can be thought of in 2 cases
+
+1. completely called to produce an output value 
+2. partially called to produce a boxable incomplete callsite node
+
+nodes must carefully distinguish between these 3 cases
+
+1 and 2 are referred to as usage nodes (also referred to as callsite node for functions)
+
+node that 2 may be boxed to produce a function definition node
+
+fuction nodes may ethire be built in/imported or user defined, built in functions nodes are "created from the aether" and user defined ones are boxed from other nodes.
+
+### pillboxed function nodes  (slubs)
+
+functions nodes fo type `x -> y` can be "slubbed" meaning they get a more inline representation on as a "pill" looking thing dircetly on the connector rather than a full node with input and output. Slubs can be chained together to form... caterpillars? many built in functions are set to be slubbed by default, all user defined functions are not slubbed by default and can be annotated to be slubbed by default `@slub_by_default`. callsite nodes can be made to be slubbed or not slubbed (overriding the default) with an annotation `@slub`.
+
+### simple function nodes (twists?)
+
+functions can be flagged sa simple which makes them render a little more compatly... NAH but at least color some built in function sdifferently maybe
+
+### ADT ctor nodes
+
+algebraic data type ctor nodes  have a drop down to toggle which exclusive variant is being used to construct it. Otherwise, they are just function nodes. 
+
+while the editor is open (i.e. not serialized) it attepmts to "Remmeber" what was connected to teh previous variants and restores it if you toggle back to it
 
 
 
+### boxed nodes (knots)
 
-# Core Primitives
+nodes can be boxed to produce a scope. The boxed contents must have exactly one loose output end. Depending on the contents of the box, the boxing node may be of different types
 
-## valueboxes
+- a function definition node if it has open node boundary input/output connections
+- a value node if it has no node boundary input connections (a value expression can be annotated `@explicitly_box` to be boxed, monadic value expressions must be tagged `@no_box`)
 
-a databox represents valuetypes, they show up in a few ways
-
-- as a literal node
-- as a node input: must show variable name
-- as a node input with collapsed literal node 
-- as a live preview when clicking on a connection
-
-### valuebox content types
-
-there are many value types. The interface must show the type, and in the literal cases, conveniently display the values and allow them to be edited.
-
-- primitive
-- record
-- ADT
-- built-in containers: containers are ADTs but they should have their own custom intefrace
-- function types
-- (future) custom types: containers are ADT
+see connection section as well
 
 
-#### generics
-types may take on generic and interface types (may be come more inferred or concrete as stuff gets connected to it)
+#### function definition nodes 
+
+function definition nodes represent lambdas in code, or named functions if let bound to a varibale
+
+- definition nodes are actually literal nodes containing a function value type
+- definition nodes can be created by boxing partially called callsite nodes
+- definition nodes have a specila interface allowing function value nodes to be pulled out of it
 
 
-## node
+#### monadic context
+
+
+If the output type of a box is monadic, the boxed node can have monadic context and dose by default (disable with `@no_monadic_context`) 
+
+mondaic context nodes enable binding connectors allowing monadic outputs to be conecting using bind connectors to to non monadic inputs.
+
+connections within a monadic context node can auto bind `m a` into function nodes that have `a` type input using a different connection graphic indicating it is a bind
+
+ (`m a` value) --->>---> (`a -> m b` function node) --->>---> (`m b` value)
+
+nested nodes within a monadic context node do not inherit the monadic context (TODO we could allow capturing monadically bound varibales i.e `a <- return x` but for nwo, just require them geting piped through a `m a` typed input)
+
+
+#### hidden impl
+
+boxed nodes with no captures can be annotated as `@hidden` which makes everything inside them dissapear in teh UI.
+(maybe `@buried` ? or `@obtuse` cuz I liket hat word)
+
+
+## special syntax nodes
+
+### application entry point node
+
+this is a special boxed function node that must exist for the program to be valid. otheriwes it behaves the same...
 
 ### literal nodes
 
@@ -100,17 +168,6 @@ have a drop down to chooes its type
 ### list literal nodes
 
 we support list and map literal syntax, these get represented as daisy chained ctors with nubbed inputs. If a map/list ctor node with all inputs are nubbed, then it is represteed in code as a literal, otherwise it gets represented using the usual unsugard repeated `:` application
-
-### application input nodes
-
-when tangle runs in a context, it will have some "application input nodes" which are functions like
-
-global_settings :: Settings
-
-and sotemise stuff like 
-
-read_settings :: IO Settings
-
 
 ### tuple nodes
 
@@ -154,7 +211,7 @@ let binding nodes contain the name of the variable that the value is bound to
 
 let bindings have a singel "named" output node, these output nodes are specila as they can be multiplexed (multiple conectors coming out of it)
 
-value nodes may also be symbolicated (pick better term) in the scope, allowing it to be created from the aether
+value nodes may also be symbolicated (pick better term) via `@symbolicate(symbol)` in the scope, allowing it to be created from the aether
 
 ```
 --->🐴 (symbolicated let binding)
@@ -164,87 +221,26 @@ value nodes may also be symbolicated (pick better term) in the scope, allowing i
 
 TODO consider having a special let bound literal node, if not, it's just a regular let bound node with a nubbed literal input which is fine too I guess.
 
+### bulit in, imported, and symoblicated nodes
 
-### function nodes
+built in, imported, and symbolicated stuff is basically stuff avaliable in the scope that isn't a primitive but doesn't have an input connector coming into it and isn't a boxed callsite node. So these are built in functions/values and symoblicated let bindings that are "created from the aether" (how abotu pulled from a wormhole)
 
-functions can be thought of in 2 cases
+The built in function callsite nodes can be converted to definitino nodes to be used as higher order function args. They can also be rpresented by boxing the callsite node and in code is tagged as `@explicity_boxed` or something like thta.  These ones are also alowed to be nubbed!
 
-1. completely called to produce an output value 
-2. partially called to produce a boxable incomplete callsite node
-
-nodes must carefully distinguish between these 3 cases
-
-1 and 2 are referred to as usage nodes (also referred to as callsite node for functions)
-
-node that 2 may be boxed to produce a function definition node
-
-#### pillboxed function nodes  (slubs)
-
-functions nodes fo type `x -> y` can be "slubbed" meaning they get a more inline representation on as a "pill" looking thing dircetly on the connector rather than a full node with input and output. Slubs can be chained together to form... caterpillars? many built in functions are set to be slubbed by default, all user defined functions are not slubbed by default and can be annotated to be slubbed by default `@slub_by_default`. callsite nodes can be made to be slubbed or not slubbed (overriding the default) with an annotation `@slub`.
-
-#### simple function nodes (twists?)
-
-functions can be flagged sa simple which makes them render a little more compatly... NAH but at least color some built in function sdifferently maybe
-
-#### ADT ctor nodes
-
-algebraic data type ctor nodes  have a drop down to toggle which exclusive variant is being used to construct it. Otherwise, they are just function nodes. 
-
-while the editor is open (i.e. not serialized) it attepmts to "Remmeber" what was connected to teh previous variants and restores it if you toggle back to it
+Such stuff is also effectviely hidden by default. You can unhide by adding a `@explicitly_show` or soemthing like that. We might want an alterantiev interface for 
 
 
-### boxed nodes (knots)
+#### application built in nodes
 
-nodes can be boxed to produce a scope, depending on the contents of the box, the boxing node may be of different types
+we may have a specila category for application builtints (vs knot bulit ins) as they are likely to get used a not more e.g.
 
-- a function definition node if it has open node boundary input/output connections
-- a value node if it has no node boundary input connections
-- a mondaic context node if it produces a monadic output value type (node must be explicitly tagged as supporting monadic context only if this condition is met and this enables monadic bind connectors)
-
-TODO if funciton nodes are knots, what are primitive nodes?
-
-#### function definition nodes 
-
-function definition nodes represent lambdas in code, or named functions if let bound to a varibale
-
-- definition nodes are actually literal nodes containing a function value type
-- definition nodes can be created by boxing partially called callsite nodes
-- definition nodes have a specila interface allowing function value nodes to be pulled out of it
+global_settings :: Settings or
+read_settings :: IO Settings
 
 
-#### monadic context
-
-:O mondaic context nodes enable binding connectors allowing monadic outputs to be conecting using bind connectors to to non monadic inputs so lang as the final output of the context node is in the monadic context
-
-connections within a monadic context node can auto bind `m a` into function nodes that have `a` type input using a different connection graphic indicating it is a bind
-
- (`m a` value) --->>---> (`a -> m b` function node) --->>---> (`m b` value)
 
 
-nested nodes within a monadic context node do not inherit the monadic context, 
-TODO we could allow capturing monadically bound varibales i.e `a <- return x` but for nwo, just require them geting piped through a `m a` typed input
-
-if the application output is IO a, then teh entire applicatino scope gets the monadic conetxt
-NOTE the onething that's knida nnoying about this is then it sorta looks like your whole program is wrapped in IO when in reality most of the functions should be pure, but the entire bacground (which is the applicatino node) has the monadic context styling... I gues sfunciton notes on top will cover the monadic context styling which would rpobabyl be just some different background color.
-
-#### hidden impl nodes
-
-boxed nodes with no captures can be annotated as `@hidden` which makes everything inside them dissapear in teh UI.
-(maybe `@buried` ? or `@obtuse` cuz I liket hat word)
-
-
-#### application entry point node
-
-the entire application is itself a node.
-there is as ingle entry point function, its type depends on the application host. it could be like `a -> b` just `b` or `IO b` etc
-the inputs and coutput connectors are at the edges of the screen and scroll together with the viewport. 
-
-TODO consider allowing multiple outputs for apps with mulitple entry ponits, alterantivel, you could have specila app output nodes rather than using right edge of screen, another choice isjust ho vae mulitlpe "tabs" in the editor, but then you can't easily share code between them, maybe tabs could filter stuff out not relevant to the other entry point funcitons though
-TODO considre allowing tuple outputs to be broken out into meltiple outputs
-
-TODO consider encoding applicatino input nodes on the left side of the screen (could be goood fi there only a few of them)
-
-### connectors
+# connectors
 
 a callsite node may have many typed input connectors and one typed output connector
 
@@ -254,11 +250,19 @@ generic connectors can chain together in keeping their generic-ness. They only b
 
 TODO consider entire program as a node, then maybe we allow multiple output connectors)
 
-#### optional connectors
+## output connectors
+
+a node must have exactly one output connector and it does not have a name
+ 
+## conceret input connectors
+
+a node may have 0 or more input connectors, and these do have a name
+
+## optional connectors
 
 some connectors are optional for specila bulit in case s(daisy chaining and records, maybe future optional fields?)
 
-#### expanding connectors (enable daisy chaining)
+## expanding connectors (enable daisy chaining)
 
 TODO some built in nodes need to support epanding connectors e.g. maps and lists so that you don't need to chain a bunch of append/insert nodes together to build a list from a static set of inputs.
 
@@ -273,7 +277,82 @@ can be annotated as `@enable_daisy_chaining` " or whatever which enables this sp
 
 `... fun a1 . fun a2 . fun a3 $ b` or jsut `b` if there is no input
 
-### combined nodes
+## boxed node internal connectors
+
+boxed nodes have connectors on teh inside which wire its inputs/outputs to the implementation inside. The inputs can be labeled which determines the name of the variable in the function def/lambda.
+
+when zoomed into a boxed node, teh internal input/output connectors go on the left/right edge of the screen 
+
+## export bindings connector
+
+modules with no entry points can export stuff. To export you drag a value to an optional "export connector" on the right edge of the screen and the export connector also has a string entry field so you can name the exported value. if a let bound value was dragged in this way to an optional export connector (i.e. not an exsiting noe) then the let bound varibale name is used by default.
+
+
+
+
+
+# connection
+
+a connection is a line drawn from one "output" to one "input"
+
+## loose connections
+
+connections can just be dangling around as a inctermediary non-serialized state. In these cases, the loose ends cna be converted into a let binding or into a callsite node in the case of function types.
+
+in code we can choose to 
+- represent loose ends as unnamed let bindings i.e. `_ = ...`
+- treat them as an invalid intermediary unserialized state that only exists on the node graph side of things
+
+## node boundary interfacing connections (currying)
+funcution definition nodes may have inputs and outputs within the node that connect to the nodes within the outer box node. 
+
+## node boundary crossing input connections (captures)
+function definition nodes may have connections permeate them
+this forces the function definition node to be in the deepest scope of all captures, although in pracitce, the scope is determined by whatever scope one is in when the node got created and capturing from inaccesible scopes is forbidden by the UI.
+
+QUESTION: do we allow node boundary crossing output connections? this is useful for boxing nodes just for the aske of organization
+
+## monadic bind connection
+
+see monadic context above
+
+## recursion
+
+in order to do recusion you must let bind the function into a variable, then using the let bound function inside the function looks like a capture
+
+what does something like
+`fix f = let x = f y, y = x in x` look like in the node graph?
+
+
+
+
+# Additional Interfaces
+
+
+
+## Application Runtime Inputs and Outputs
+
+TODO
+
+## Accessing stuff in the current scope
+
+We need to create nodes from stuff avaliable in the scope, in particular:
+
+- we need to be able to create callsite nodes from bulit in functions
+- we also need to be able to create definition nodes to use as inputs into higher order functions
+- we need to be able to fetch symbols from the current scope as well
+- we should be able to copy existing globals/symbols 
+
+to do this, lets have a single drop down search menu (and hotkey) that lets you search for stuff and then create bulit in and symboicated nodes out of them. 
+
+## imports
+
+there is some menu somewhere that lets you add / remove imported modules. imported modules are always sorted by name. tangle doesn't care about import qualifications, so all qualifications are treated the same in the viewer. In the reverse mapping, things are not qualified if they don't need to be, otherwise qualified, or we could do always fully qualified which might be easier to miplement.
+
+
+
+# V2 features
+## combined definition callsite nodes
 
 combined nodes are a special treatement of definition nodes and callsite nodes combined into one. expressions representing nodes that can be combined are combined by defalut if conditions are met, or it can be disabled with `@no_combine` to enable this behavior. 
 
@@ -300,51 +379,4 @@ i.e. `let _ = (\x y z -> ....) $ input1 _ input2` <- not real syntax, would be f
 3. a partially connected combined node that got converted (boxed) into a curried funnctino definiton node
 
 NO or maybe don't do this, it may be better to NOT do combined nodes in this case. Just force the explicit split definition node -> callsite node and then boxing the one partially connecetd callsite node into a curried function definition node. The cons of this approach is that you will need to do this split automatically for the user when they convert the partially conected combined node into a boxed function definition node and there may need to be special UI case for this.
-
-
-## connection
-
-a connection is a line drawn from one "output" to one "input"
-
-### loose connections
-
-connections can just be dangling around as a inctermediary non-serialized state. In these cases, the loose ends cna be converted into a let binding or into a callsite node in the case of function types.
-
-in code we can choose to 
-- represent loose ends as unnamed let bindings i.e. `_ = ...`
-- treat them as an invalid intermediary unserialized state that only exists on the node graph side of things
-
-### node boundary interfacing connections (currying)
-funcution definition nodes may have inputs and outputs within the node that connect to the nodes within the outer box node. 
-
-### node boundary crossing input connections (captures)
-function definition nodes may have connections permeate them
-this forces the function definition node to be in the deepest scope of all captures, although in pracitce, the scope is determined by whatever scope one is in when the node got created and capturing from inaccesible scopes is forbidden by the UI.
-
-QUESTION: do we allow node boundary crossing output connections? this is useful for boxing nodes just for the aske of organization
-
-
-
-## recursion
-
-in order to do recusion you must let bind the function into a variable, then using the let bound function inside the function looks like a capture
-
-what does something like
-`fix f = let x = f y, y = x in x` look like in the node graph?
-
-
-## the global scope
-
-TODO how to access built ins from the global scopes? in particular, we need to be able to create callsite nodes from bulit in functions, and we also need to be able to use bulit in functions are function value nodes to use as inputs into higher order functions
-
-
-### imports
-
-there is some menu somewhere that lets you add / remove imported modules. imported modules are always sorted by name. tangle doesn't care about import qualifications, so all qualifications are treated the same in the viewer. In the reverse mapping, things are not qualified if they don't need to be, otherwise qualified, or we could do always fully qualified which might be easier to miplement.
-
-
-
-# Examples
-
-
 
