@@ -37,8 +37,14 @@ pulley
 # TODO scratch
 
 - node rendering styles, so detail out how we visually distinguish different types of function nodes
-
+    - TODO make a list of the different things youw ant styled
 - operators and operator precedence, we need this info to do the reverse mapping, I guess you can just enforce one style with a linter which we sorta need to do to keep reverse mapping manageable.
+- REORGANIZE
+    -application interfaces (program outputs, import selector)
+    -graph primitives, nodes, connnectors, 
+    -special node types
+    -BONUS combined nodes
+    
 
 
 
@@ -94,6 +100,17 @@ have a drop down to chooes its type
 ### list literal nodes
 
 we support list and map literal syntax, these get represented as daisy chained ctors with nubbed inputs. If a map/list ctor node with all inputs are nubbed, then it is represteed in code as a literal, otherwise it gets represented using the usual unsugard repeated `:` application
+
+### application input nodes
+
+when tangle runs in a context, it will have some "application input nodes" which are functions like
+
+global_settings :: Settings
+
+and sotemise stuff like 
+
+read_settings :: IO Settings
+
 
 ### tuple nodes
 
@@ -195,7 +212,7 @@ function definition nodes represent lambdas in code, or named functions if let b
 - definition nodes have a specila interface allowing function value nodes to be pulled out of it
 
 
-#### monadic context nodes
+#### monadic context
 
 :O mondaic context nodes enable binding connectors allowing monadic outputs to be conecting using bind connectors to to non monadic inputs so lang as the final output of the context node is in the monadic context
 
@@ -204,10 +221,28 @@ connections within a monadic context node can auto bind `m a` into function node
  (`m a` value) --->>---> (`a -> m b` function node) --->>---> (`m b` value)
 
 
+nested nodes within a monadic context node do not inherit the monadic context, 
+TODO we could allow capturing monadically bound varibales i.e `a <- return x` but for nwo, just require them geting piped through a `m a` typed input
+
+if the application output is IO a, then teh entire applicatino scope gets the monadic conetxt
+NOTE the onething that's knida nnoying about this is then it sorta looks like your whole program is wrapped in IO when in reality most of the functions should be pure, but the entire bacground (which is the applicatino node) has the monadic context styling... I gues sfunciton notes on top will cover the monadic context styling which would rpobabyl be just some different background color.
+
 #### hidden impl nodes
 
 boxed nodes with no captures can be annotated as `@hidden` which makes everything inside them dissapear in teh UI.
 (maybe `@buried` ? or `@obtuse` cuz I liket hat word)
+
+
+#### application entry point node
+
+the entire application is itself a node.
+there is as ingle entry point function, its type depends on the application host. it could be like `a -> b` just `b` or `IO b` etc
+the inputs and coutput connectors are at the edges of the screen and scroll together with the viewport. 
+
+TODO consider allowing multiple outputs for apps with mulitple entry ponits, alterantivel, you could have specila app output nodes rather than using right edge of screen, another choice isjust ho vae mulitlpe "tabs" in the editor, but then you can't easily share code between them, maybe tabs could filter stuff out not relevant to the other entry point funcitons though
+TODO considre allowing tuple outputs to be broken out into meltiple outputs
+
+TODO consider encoding applicatino input nodes on the left side of the screen (could be goood fi there only a few of them)
 
 ### connectors
 
