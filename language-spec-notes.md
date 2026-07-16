@@ -22,7 +22,38 @@ decision below.
 
 ---
 
-## 2. Syntax Conventions
+## 2. Relationship to Haskell & Elm
+
+Knot represents a middle ground between Haskell and Elm, tailored specifically to visual node graphs.
+
+### 2.1 From Haskell
+* **Lazy evaluation (call-by-need)**: Values are computed only when demanded (unlike Elm's strict evaluation). This allows for infinite structures and deferred graph computation.
+* **Built-in Interfaces**: Overloaded operations use a typeclass-like interface system (e.g., `Eq`, `Ord`, `Num`, `Integral`, `Fractional`).
+* **Type Signatures**: Standard `::` syntax.
+* **Spaced Dot Composition**: Spaced dot (`f . g`) denotes standard function composition.
+* **Monadic/List Operators**: Operators like bind (`>>=`) and list cons (`::`) are preserved.
+
+### 2.2 From Elm
+* **Record Syntax**: `{ field = value }` for construction, `{ record | field = value }` for updates, and dot access without spaces (`record.field`).
+* **Type Declarations**: ADTs are defined using the `type` keyword instead of `data`, and aliases use `type alias`.
+* **Module & Import System**: Every file is a module, imports are qualified by default, and namespace control is managed via the `exposing` keyword.
+* **No `where` clauses**: All local scope bindings must use `let...in` (matching Elm's let-only scoping).
+* **Pipe Operators**: Forward pipe (`|>`) and forward composition (`>>`) are preferred for chaining operations.
+* **No Map Literals**: Maps are constructed using `Map.fromList` (matching Elm's `Dict.fromList`).
+* **Simplified Imports**: No `qualified` or `hiding` keywords (matching Elm's import design).
+
+### 2.3 Omitted from Haskell/Elm
+* **No user-defined interfaces/instances**: Unlike Haskell's typeclasses (or Elm's extensible record polymorphism), the interface set in v0 is closed to keep compile-time dictionary passing and type checking simple.
+* **No custom symbolic operators**: Unlike both Haskell and Elm, users cannot define new operators (e.g., `+++`), ensuring 1-to-1 parsing and node-graph mapping remain clean.
+
+### 2.4 Different / Custom
+* **Closed Interface Instances**: Unlike Haskell, interface instances are pre-defined by the compiler for core primitive types.
+* **Metadata & Annotations (`@name(...)` / `@{...}`)**: A compiler-checked layout and tool annotation system designed for graph coordinates, documentation, and metadata.
+* **Unravel System (Reverse Execution)**: Backwards execution solving rule annotations (`unravel`), allowing changes to flow in reverse through the graph.
+
+---
+
+## 3. Syntax Conventions
 
 - Type signatures use `::` (Haskell style)
 - `type` keyword for ADTs (Elm style, not `data`)
@@ -36,7 +67,7 @@ decision below.
 
 ---
 
-## 3. Type System
+## 4. Type System
 
 ### 3.1 Primitive Types
 
@@ -130,7 +161,7 @@ case pair of
 
 ---
 
-## 4. Expressions
+## 5. Expressions
 
 ### 4.1 Function Application
 
@@ -226,7 +257,7 @@ To ensure unambiguous parsing and 1-to-1 visual node graph mapping, Knot defines
 
 ---
 
-## 5. Definitions
+## 6. Definitions
 
 ```knot
 -- type signature
@@ -245,9 +276,9 @@ name arg1 =
 
 ---
 
-## 6. Interfaces (Built-in, Closed in v0)
+## 7. Interfaces (Built-in, Closed in v0)
 
-The interface set is fixed — user-defined interfaces are not supported in v0 (see §10
+The interface set is fixed — user-defined interfaces are not supported in v0 (see §13
 for the v2 plan). Only built-in types have instances.
 
 ### 6.1 Core Interfaces
@@ -327,7 +358,7 @@ Built-in instances: `Option`, `Result`, `IO`, `List`.
 
 ---
 
-## 7. Built-in Monads & Do-Notation
+## 8. Built-in Monads & Do-Notation
 
 | Type         | Purpose                                      |
 |--------------|----------------------------------------------|
@@ -346,7 +377,7 @@ do
 
 ---
 
-## 8. Modules & Imports
+## 9. Modules & Imports
 
 Knot adopts Elm-style module and import syntax. Every file defines a single module.
 
@@ -379,7 +410,7 @@ import String exposing (length, concat)
 
 ---
 
-## 9. Metadata & Annotations
+## 10. Metadata & Annotations
 
 Annotations can be attached to any named binding. They carry node graph layout metadata,
 stable IDs, reverse execution logic, documentation, and other tooling hints. They have
@@ -472,13 +503,13 @@ Prefer extracting to named `let` bindings when inline annotations get unwieldy.
 | `color` | `String` | Node color (hex) |
 | `group` | `String` | Visual group/cluster |
 | `collapsed` | `Bool` | Whether node renders collapsed by default |
-| `unravel` | `Unraveler` | Reverse execution function — see §9 |
+| `unravel` | `Unraveler` | Reverse execution function — see §11 |
 
 The annotation set is open — new keys can be added without changing the language.
 
 ---
 
-## 10. Unravel (Reverse Execution)
+## 11. Unravel (Reverse Execution)
 
 Every binding in the node graph can optionally carry an **unravel function** — a
 reverse execution rule that, given a desired change in a node's output, computes the
@@ -549,7 +580,7 @@ output = domainSpecificOp input
 
 ---
 
-## 11. Open Questions
+## 12. Open Questions
 
 1. **Metadata/annotation syntax** — TBD.
 2. **Logging / observable side effects** — what's the story for debug output or
@@ -557,7 +588,7 @@ output = domainSpecificOp input
 
 ---
 
-## 12. Planned for v2
+## 13. Planned for v2
 
 - **User-defined interfaces** — allow users to declare their own interfaces and implement
   them for custom types. Requires a constraint-solving/dictionary-passing subsystem;
