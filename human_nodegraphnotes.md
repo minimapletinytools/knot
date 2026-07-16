@@ -84,7 +84,28 @@ visually, a nub portrudes out from the input connector outside fo the node by a 
 some datatypes may have special literal syntax (e.g. maps, lists, maybe user defined ones) 
 if the input field is one lineable, then it can be nubbed, otherwise nubbing is not supported.
 
-maps, and lists of literals by default come with their special literal input fields.
+have a drop down to choose its type
+
+
+### operator nodes
+
+have a drop down to chooes its type
+
+### list literal nodes
+
+we support list and map literal syntax, these get represented as daisy chained ctors with nubbed inputs. If a map/list ctor node with all inputs are nubbed, then it is represteed in code as a literal, otherwise it gets represented using the usual unsugard repeated `:` application
+
+### tuple nodes
+
+tuple nodes are  just function nodes and have a configuration dropdown that lets you choose # of elements effectively changing the tuple function node to a different ctor/output type
+
+tuple access nodes (get the nth element in a tuple) are specila in that they auto change types based on what gets inserted into it, this is just node sugaring, it code it uses like `\(,,,x)->x` syntax or whatever, lenses and other cute tricks to generically access tuples are omitted.
+
+
+### if else nodes
+TODO
+### case nodes
+TODO
 
 ### let bindings (value nodes)
 
@@ -156,7 +177,15 @@ function definition nodes represent lambdas in code, or named functions if let b
 
 :O mondaic context nodes enable binding connectors allowing monadic outputs to be conecting using bind connectors to to non monadic inputs so lang as the final output of the context node is in the monadic context
 
-connections with 
+connections within a monadic context node can auto bind `m a` into function nodes that have `a` type input using a different connection graphic indicating it is a bind
+
+ (`m a` value) --->>---> (`a -> m b` function node) --->>---> (`m b` value)
+
+
+#### hidden impl nodes
+
+boxed nodes with no captures can be annotated as `@hidden` which makes everything inside them dissapear in teh UI.
+(maybe `@buried` ? or `@obtuse` cuz I liket hat word)
 
 ### connectors
 
@@ -185,18 +214,22 @@ can be annotated as `@enable_daisy_chaining` " or whatever which enables this sp
 
 ### combined nodes
 
-combined nodes are a special treatement of definition nodes and callsite nodes combined into one. expressions representing nodes that can be combined can be annotated with `@combine` to enable this behavior. THere are a few cases:
+combined nodes are a special treatement of definition nodes and callsite nodes combined into one. expressions representing nodes that can be combined are combined by defalut if conditions are met, or it can be disabled with `@no_combine` to enable this behavior. 
+
+note you can also have a definition node tha is let bound to be combined as well. this is different than the callsite cmobined case as a let binding takes the function definition node as a higher order function input. A let bound combined function definition node has a label at the top naming teh variable it got let bound to. a let bound definition node can not be further combined with its callsite node though!
+
+Here are the 3 cases of combined callsite nodes
 
 
 
-1. If a definition node has only one callsite, and the callsite is completely connected (all inputs connected)
+1. If a unbound definition node has only one callsite, and the callsite is completely connected (all inputs connected)
 
 normal case, this is basically making a lambda and appyling it to something. 
 
 disconnected output is fine, it's just an unused output, could be rpresented in code as `let _ = \x -> ....`
 
 
-2. if a definition node has only one calliste, and it is only partially connected inputs
+2. if a unbound definition node has only one calliste, and it is only partially connected inputs
 
 this is an intermediary state, it can be boxed again and converted into a function definition node from a curried function. 
 
@@ -205,7 +238,7 @@ i.e. `let _ = (\x y z -> ....) $ input1 _ input2` <- not real syntax, would be f
 
 3. a partially connected combined node that got converted (boxed) into a curried funnctino definiton node
 
-or maybe don't do this, it may be better to NOT do combined nodes in this case. Just force the explicit split definition node -> callsite node and then boxing the one partially connecetd callsite node into a curried function definition node. The cons of this approach is that you will need to do this split automatically for the user when they convert the partially conected combined node into a boxed function definition node and there may need to be special UI case for this.
+NO or maybe don't do this, it may be better to NOT do combined nodes in this case. Just force the explicit split definition node -> callsite node and then boxing the one partially connecetd callsite node into a curried function definition node. The cons of this approach is that you will need to do this split automatically for the user when they convert the partially conected combined node into a boxed function definition node and there may need to be special UI case for this.
 
 
 ## connection
@@ -250,23 +283,7 @@ there is some menu somewhere that lets you add / remove imported modules. import
 
 
 
-## builtin node unique behavior
-
-### literal nodes
-
-have a drop down to choose its type
-
-### operator nodes
-
-have a drop down to chooes its type
-
-### list literal nodes
-
-we support list and map literal syntax, these get represented as daisy chained ctors with nubbed inputs. If a map/list ctor node with all inputs are nubbed, then it is represteed in code as a literal, otherwise it gets represented using the usual unsugard repeated `:` application
-
-### tuple nodes
-
-tuple nodes are function nodes and have a configuration dropdown that lets you choose # of elements effectively changing the tuple function node to a different ctor/output type
-
 # Examples
+
+
 
