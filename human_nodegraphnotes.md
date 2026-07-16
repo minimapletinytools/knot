@@ -115,8 +115,19 @@ let bound record nodes are special! They have mulitple optional output connector
 
 looks like a funciton node of type `a -> bool -> a -> a` but maybe different graphic/color cuz its special
 
+
+### pattern match nodes
+
+these are similar to literal nodes but they have special UI to allow you to match against ADT ctors and take wildcards
+VERY SPECIAL TODO figure out what UI is for this...
+
 ### case nodes
-this noe is special, starts by showing a value, a case match, and a output value, once connected, 2 more optional things pop up for another match and output value (if either is connected, the other ones becomes non optional and 2 more optional ones pop up)
+
+this noe is special, starts by showing a value, a pattern match, and a output value, once connected, 2 more optional things pop up for another match and output value (if either is connected, the other ones becomes non optional and 2 more optional ones pop up)
+
+actually, after a value is connected, another optional value filed pops up allowing you to do multi case nodes :O
+
+a case node that appears on a function input in a definition node has a UI to tag it as pattern match which converts it into a sugared pattern match syntax on the function. This can only be done for one such case node!
 
 ### let bindings (value nodes)
 
