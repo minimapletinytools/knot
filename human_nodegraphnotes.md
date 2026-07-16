@@ -101,11 +101,22 @@ tuple nodes are  just function nodes and have a configuration dropdown that lets
 
 tuple access nodes (get the nth element in a tuple) are specila in that they auto change types based on what gets inserted into it, this is just node sugaring, it code it uses like `\(,,,x)->x` syntax or whatever, lenses and other cute tricks to generically access tuples are omitted.
 
+### record create nodes
+record create nodes are just funciton nodes but contain a drop down that lets you choose which record you are creating
+
+### record update nodes
+record update nodes are special, they have no ereuired input of the record being updated and then have several opitonal connectors. This maps to the `{ record | field = value, ... }` elm record update syntax. you can still do regular haskell style updateing by creating new record nodes but that sucks in both UI and in code so that's why we have specila record update syntax
+
+### let bound record nodes
+
+let bound record nodes are special! They have mulitple optional output connectors for each of their fields as well as an output connector for the entire record! `record.field` in code is alwasy represented in this way. I guess if you do `.field record` we could have this show up as a regular `.filed` function with `record` as its input? or we could just lint this case away, probbaly better that way.
 
 ### if else nodes
-TODO
+
+looks like a funciton node of type `a -> bool -> a -> a` but maybe different graphic/color cuz its special
+
 ### case nodes
-TODO
+this noe is special, starts by showing a value, a case match, and a output value, once connected, 2 more optional things pop up for another match and output value (if either is connected, the other ones becomes non optional and 2 more optional ones pop up)
 
 ### let bindings (value nodes)
 
@@ -197,12 +208,16 @@ generic connectors can chain together in keeping their generic-ness. They only b
 
 TODO consider entire program as a node, then maybe we allow multiple output connectors)
 
+#### optional connectors
+
+some connectors are optional for specila bulit in case s(daisy chaining and records, maybe future optional fields?)
 
 #### expanding connectors (enable daisy chaining)
 
 TODO some built in nodes need to support epanding connectors e.g. maps and lists so that you don't need to chain a bunch of append/insert nodes together to build a list from a static set of inputs.
 
 Once you fill in one connector, another optionla connector opens up. the node is still treated as fully connected in this case.
+
 
 easy enough for built ins, we should allow user defined types to support this interface too someday. I guess in general, anything of the type
 
