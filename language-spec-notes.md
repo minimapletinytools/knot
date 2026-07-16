@@ -31,7 +31,7 @@ Knot represents a middle ground between Haskell and Elm, tailored specifically t
 * **Built-in Interfaces**: Overloaded operations use a typeclass-like interface system (e.g., `Eq`, `Ord`, `Num`, `Integral`, `Fractional`).
 * **Type Signatures**: Standard `::` syntax.
 * **Spaced Dot Composition**: Spaced dot (`f . g`) denotes standard function composition.
-* **Monadic/List Operators**: Operators like bind (`>>=`) and list cons (`::`) are preserved.
+* **Monadic/List Operators**: Operators like bind (`>>=`) and list cons (`:`) are preserved.
 
 ### 2.2 From Elm
 * **Record Syntax**: `{ field = value }` for construction, `{ record | field = value }` for updates, and dot access without spaces (`record.field`).
@@ -41,10 +41,14 @@ Knot represents a middle ground between Haskell and Elm, tailored specifically t
 * **Pipe Operators**: Forward pipe (`|>`) and forward composition (`>>`) are preferred for chaining operations.
 * **No Map Literals**: Maps are constructed using `Map.fromList` (matching Elm's `Dict.fromList`).
 * **Simplified Imports**: No `qualified` or `hiding` keywords (matching Elm's import design).
+* **Pattern Aliases (`as`)**: Pattern aliases use `as` instead of Haskell's `@` to prevent syntactic conflicts with layout annotations.
+* **No Guards**: Pattern matching does not support guards, matching Elm's simpler `case` expressions.
 
 ### 2.3 Omitted from Haskell/Elm
 * **No user-defined interfaces/instances**: Unlike Haskell's typeclasses (or Elm's extensible record polymorphism), the interface set in v0 is closed to keep compile-time dictionary passing and type checking simple.
 * **No custom symbolic operators**: Unlike both Haskell and Elm, users cannot define new operators (e.g., `+++`), ensuring 1-to-1 parsing and node-graph mapping remain clean.
+* **No List Comprehensions**: Haskell's list comprehension syntax (`[x | x <- xs]`) is omitted in favor of standard map/filter functions.
+* **No Record Shorthand Destructuring**: Elm's shorthand record pattern matching (`{ x, y }`) is omitted.
 
 ### 2.4 Different / Custom
 * **Closed Interface Instances**: Unlike Haskell, interface instances are pre-defined by the compiler for core primitive types.
@@ -218,12 +222,31 @@ case shape of
 
 Incomplete matches produce a compiler warning (not an error — partial functions allowed).
 
+#### Pattern Matching Rules:
+- **No guards**: Pattern guards (using `|` or `if`) are not supported. Use nested `if...then...else` expressions inside the match branches instead.
+- **List pattern matching**: Uses the `:` operator for cons (Haskell style):
+  ```knot
+  case list of
+    []     -> 0
+    x : xs -> x + sum xs
+  ```
+- **Pattern aliases**: Uses the `as` keyword (Elm style) to bind a sub-pattern to a name:
+  ```knot
+  case list of
+    (x : xs) as fullList -> fullList
+  ```
+  *(Using the `as` keyword avoids syntactic collision with layout annotations, which use `@`)*.
+- **No Record shorthand desugaring**: Shorthand record pattern matching (such as `{ x, y }`) is not supported. Match on the record using an alias and access fields via dot notation (e.g. `r as point -> point.x`).
+
+
 ### 4.7 List & Map Literals
 
 #### List Literals
 ```knot
 [1, 2, 3]
 ```
+
+**No List Comprehensions**: Haskell-style list comprehensions (e.g. `[x * 2 | x <- list]`) are not supported. Use standard library functions like `map`, `filter`, and `foldl` instead.
 
 #### Map Construction
 Following Elm, Knot does not define a custom map literal syntax. Instead, maps are constructed from a list of tuple key-value pairs using the built-in `Map.fromList` function:
