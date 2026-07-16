@@ -1,3 +1,6 @@
+auto generated interprteer note,se you can probbaly delet this file 
+
+
 # Knot Interpreter — Implementation Notes
 
 Language: Rust. Performance is not a primary concern for v0.

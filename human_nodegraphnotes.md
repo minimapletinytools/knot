@@ -76,7 +76,8 @@ types may take on generic and interface types (may be come more inferred or conc
 
 literal nodes contain some special UI input field (num filed string field, dropdown, etc) that allows you to set the literal value. They have one output connector.
 
-literal nodes can be "nubbed" into a connector so that a complete node + connection is not shown. All literal nodes are nubbed by default unless they have been let bound to a variable. You can add an annotation to make literal nodes not be nubbed
+literal nodes can be "nubbed" into a connector so that a complete node + connection is not shown. All literal nodes are nubbed by default unless they have been let bound to a variable. You can add an annotation to make literal nodes not be nubbed `@no_nub`
+`
 
 visually, a nub portrudes out from the input connector outside fo the node by a half semicircel, and the literal input field is in a pillbox shape with the portruding half semicricle as one of its ends.
 
@@ -119,7 +120,7 @@ node that 2 may be boxed to produce a function definition node
 
 #### pillboxed function nodes  (slubs)
 
-functions nodes fo type `x -> y` can be "slubbed" meaning they get a more inline representation on as a "pill" looking thing dircetly on the connector rather than a full node with input and output. Slubs can be chained together to form... caterpillars? many built in functions are set to be slubbed by default, all user defined functions are not slubbed by default and can be annotated to be slubbed by default. callsite nodes can be made to be slubbed or not slubbed (overriding the default) with an annotation.
+functions nodes fo type `x -> y` can be "slubbed" meaning they get a more inline representation on as a "pill" looking thing dircetly on the connector rather than a full node with input and output. Slubs can be chained together to form... caterpillars? many built in functions are set to be slubbed by default, all user defined functions are not slubbed by default and can be annotated to be slubbed by default `@slub_by_default`. callsite nodes can be made to be slubbed or not slubbed (overriding the default) with an annotation `@slub`.
 
 #### simple function nodes (twists?)
 
@@ -178,19 +179,22 @@ easy enough for built ins, we should allow user defined types to support this in
 
 `fun :: a -> b -> b`
 
-can be tagged as "expandable" or whatever which enables this special interface which really just 
+can be annotated as `@enable_daisy_chaining` " or whatever which enables this special interface which really just 
 
 `... fun a1 . fun a2 . fun a3 $ b` or jsut `b` if there is no input
 
 ### combined nodes
 
-combined nodes are a special treatement of definition nodes and callsite nodes combined into one. THere are a few cases:
+combined nodes are a special treatement of definition nodes and callsite nodes combined into one. expressions representing nodes that can be combined can be annotated with `@combine` to enable this behavior. THere are a few cases:
+
+
 
 1. If a definition node has only one callsite, and the callsite is completely connected (all inputs connected)
 
 normal case, this is basically making a lambda and appyling it to something. 
 
 disconnected output is fine, it's just an unused output, could be rpresented in code as `let _ = \x -> ....`
+
 
 2. if a definition node has only one calliste, and it is only partially connected inputs
 
@@ -244,6 +248,25 @@ TODO how to access built ins from the global scopes? in particular, we need to b
 
 there is some menu somewhere that lets you add / remove imported modules. imported modules are always sorted by name. tangle doesn't care about import qualifications, so all qualifications are treated the same in the viewer. In the reverse mapping, things are not qualified if they don't need to be, otherwise qualified, or we could do always fully qualified which might be easier to miplement.
 
+
+
+## builtin node unique behavior
+
+### literal nodes
+
+have a drop down to choose its type
+
+### operator nodes
+
+have a drop down to chooes its type
+
+### list literal nodes
+
+we support list and map literal syntax, these get represented as daisy chained ctors with nubbed inputs. If a map/list ctor node with all inputs are nubbed, then it is represteed in code as a literal, otherwise it gets represented using the usual unsugard repeated `:` application
+
+### tuple nodes
+
+tuple nodes are function nodes and have a configuration dropdown that lets you choose # of elements effectively changing the tuple function node to a different ctor/output type
 
 # Examples
 

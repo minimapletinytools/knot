@@ -111,6 +111,23 @@ type Result e a
 
 `a -> b -> c` — standard curried function type. All functions are curried by default.
 
+### 3.8 Tuple Types
+
+Fixed-size collections of values of potentially different types.
+
+```knot
+-- construction
+pair :: (Int, String)
+pair = (42, "hello")
+
+triple :: (Float, Float, Float)
+triple = (1.0, 2.0, 3.0)
+
+-- pattern matching
+case pair of
+  (x, y) -> x
+```
+
 ---
 
 ## 4. Expressions
@@ -170,13 +187,42 @@ case shape of
 
 Incomplete matches produce a compiler warning (not an error — partial functions allowed).
 
-### 4.7 List Literals
+### 4.7 List & Map Literals
 
+#### List Literals
 ```knot
 [1, 2, 3]
 ```
 
-Map literal syntax TBD.
+#### Map Construction
+Following Elm, Knot does not define a custom map literal syntax. Instead, maps are constructed from a list of tuple key-value pairs using the built-in `Map.fromList` function:
+
+```knot
+myMap :: Map String Int
+myMap = Map.fromList [ ("apple", 1), ("banana", 2) ]
+```
+
+### 4.8 Built-in Operators & Precedence
+
+To ensure unambiguous parsing and 1-to-1 visual node graph mapping, Knot defines a strict set of built-in operators and precedence rules:
+
+| Precedence | Operators | Associativity | Description |
+|:---|:---|:---|:---|
+| 9 | `.` | Left | Function composition |
+| 8 | `^` | Right | Exponentiation |
+| 7 | `*`, `/`, `div`, `mod` | Left | Multiplication, division, modulo |
+| 6 | `+`, `-`, `<>` | Left | Addition, subtraction, semigroup append |
+| 5 | `::` | Right | List construction (cons) |
+| 4 | `==`, `/=`, `<`, `<=`, `>`, `>=` | None | Comparison |
+| 3 | `&&` | Right | Logical AND (lazy evaluation) |
+| 2 | `\|\|` | Right | Logical OR (lazy evaluation) |
+| 1 | `\|>`, `>>` | Left | Forward pipe, forward composition |
+| 0 | `$` | Right | Function application |
+
+#### Boolean Operators
+- `(&&) :: Bool -> Bool -> Bool` — Logical AND. Short-circuits (lazy in its second argument).
+- `(||) :: Bool -> Bool -> Bool` — Logical OR. Short-circuits (lazy in its second argument).
+- `not  :: Bool -> Bool` — Logical negation (prefix function).
 
 ---
 
@@ -214,7 +260,49 @@ for the v2 plan). Only built-in types have instances.
 | `Semigroup a` | `(<>) :: a -> a -> a`                           |
 | `Monoid a`    | `empty :: a` (implies `Semigroup`)              |
 
-### 6.2 Collection Interface 
+The `Ordering` ADT is defined as:
+```knot
+type Ordering
+  = LT
+  | EQ
+  | GT
+```
+
+### 6.2 Numeric Interfaces
+
+Following Haskell's design, Knot uses interfaces to support overloaded arithmetic operations on `Int` and `Float`:
+
+```knot
+-- Basic numeric operations
+interface Num a where
+  (+)    :: a -> a -> a
+  (-)    :: a -> a -> a
+  (*)    :: a -> a -> a
+  negate :: a -> a
+  abs    :: a -> a
+  signum :: a -> a
+
+-- Fractional types (Float)
+interface Num a => Fractional a where
+  (/)    :: a -> a -> a
+  recip  :: a -> a
+
+-- Integral types (Int)
+interface (Num a, Ord a) => Integral a where
+  div    :: a -> a -> a
+  mod    :: a -> a -> a
+```
+
+Instances are built-in for:
+- `Num Int` and `Num Float`
+- `Integral Int`
+- `Fractional Float`
+
+#### Conversion Helpers
+- `fromIntegral :: (Integral a, Num b) => a -> b`
+  Converts an integral value (e.g. `Int`) to any other numeric type (e.g. `Float`).
+
+### 6.3 Collection Interface 
 
 Implemented by `List` and `Map`:
 
@@ -228,7 +316,7 @@ length :: f a -> Int
 
 Consider doing functor, foldable, and doing interface hierarchy, but the above is fine for V1
 
-### 6.3 Context Interface (Monadic Chaining)
+### 6.4 Context Interface (Monadic Chaining)
 
 ```knot
 pure :: a -> f a
@@ -258,7 +346,40 @@ do
 
 ---
 
-## 8. Metadata & Annotations
+## 8. Modules & Imports
+
+Knot adopts Elm-style module and import syntax. Every file defines a single module.
+
+### 8.1 Module Declaration
+
+The module header specifies the module name and the list of exposed types, ADT variants, and functions:
+
+```knot
+module Geometry exposing (Point, distance, Shape(..))
+```
+
+Exposing everything in the module:
+```knot
+module Geometry exposing (..)
+```
+
+### 8.2 Imports
+
+Imports are **qualified by default** to prevent namespace pollution:
+
+```knot
+import List
+import Map as M
+import String exposing (length, concat)
+```
+
+- `import List` imports the module `List`. Functions must be qualified: `List.map`.
+- `import Map as M` imports the module `Map` with an alias. Functions are accessed via `M.lookup`.
+- `import String exposing (length, concat)` brings `length` and `concat` directly into the local scope, while keeping other functions qualified (e.g. `String.reverse`).
+
+---
+
+## 9. Metadata & Annotations
 
 Annotations can be attached to any named binding. They carry node graph layout metadata,
 stable IDs, reverse execution logic, documentation, and other tooling hints. They have
@@ -357,7 +478,7 @@ The annotation set is open — new keys can be added without changing the langua
 
 ---
 
-## 9. Unravel (Reverse Execution)
+## 10. Unravel (Reverse Execution)
 
 Every binding in the node graph can optionally carry an **unravel function** — a
 reverse execution rule that, given a desired change in a node's output, computes the
@@ -428,17 +549,15 @@ output = domainSpecificOp input
 
 ---
 
-## 9. Open Questions
+## 11. Open Questions
 
-1. **Map literal syntax** — TBD.
-2. **Module/import syntax** — TBD.
-3. **Metadata/annotation syntax** — TBD.
-4. **Logging / observable side effects** — what's the story for debug output or
+1. **Metadata/annotation syntax** — TBD.
+2. **Logging / observable side effects** — what's the story for debug output or
    structured logging within `IO`? Needs user stories before designing.
 
 ---
 
-## 10. Planned for v2
+## 12. Planned for v2
 
 - **User-defined interfaces** — allow users to declare their own interfaces and implement
   them for custom types. Requires a constraint-solving/dictionary-passing subsystem;
