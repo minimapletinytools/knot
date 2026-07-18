@@ -91,9 +91,9 @@ functions nodes fo type `x -> y` can be "slubbed" meaning they get a more inline
 
 V2 we can support slubbed output connectors inside boxed nodes. This is not really useful except for doing undefined in an unfinished function.
 
-### simple function nodes (twists?)
+### V2 simple function nodes (twists?)
 
-functions can be flagged sa simple which makes them render a little more compatly... NAH but at least color some built in function sdifferently maybe
+functions can be flagged sa simple which makes them render a little more compatly...
 
 ### ADT ctor nodes
 
@@ -138,9 +138,7 @@ nested nodes within a monadic context node do not inherit the monadic context (T
 
 #### hidden impl
 
-boxed nodes with no captures can be annotated as `@hidden` which makes everything inside them dissapear in teh UI.
-(maybe `@buried` ? or `@obtuse` cuz I liket hat word)
-
+boxed nodes can be annotated as `@hidden` which makes everything inside them dissapear in the UI and they show regular size. (maybe `@buried` ? or `@obtuse` cuz I liket hat word). captures still come in from the top and dissaper into the box
 
 ## special syntax nodes
 
