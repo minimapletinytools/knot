@@ -89,6 +89,8 @@ fuction nodes may ethire be built in/imported or user defined, built in function
 
 functions nodes fo type `x -> y` can be "slubbed" meaning they get a more inline representation on as a "pill" looking thing dircetly on the connector rather than a full node with input and output. Slubs can be chained together to form... caterpillars? many built in functions are set to be slubbed by default, all user defined functions are not slubbed by default and can be annotated to be slubbed by default `@slub_by_default`. callsite nodes can be made to be slubbed or not slubbed (overriding the default) with an annotation `@slub`.
 
+V2 we can support slubbed output connectors inside boxed nodes. This is not really useful except for doing undefined in an unfinished function.
+
 ### simple function nodes (twists?)
 
 functions can be flagged sa simple which makes them render a little more compatly... NAH but at least color some built in function sdifferently maybe
@@ -253,21 +255,24 @@ TODO consider entire program as a node, then maybe we allow multiple output conn
 ## output connectors
 
 a node must have exactly one output connector and it does not have a name
- 
-## conceret input connectors
 
+### disconnected output connector
+
+a disconnected output of `expression` is represented in code as `let _ = expression`
+
+## input connectors
+ 
 a node may have 0 or more input connectors, and these do have a name
 
-## optional connectors
+## optional input connectors
 
-some connectors are optional for specila bulit in case s(daisy chaining and records, maybe future optional fields?)
+some connectors are optional (daisy chaining and records, maybe future optional fields?)
 
-## expanding connectors (enable daisy chaining)
+## expanding input connectors (enable daisy chaining)
 
-TODO some built in nodes need to support epanding connectors e.g. maps and lists so that you don't need to chain a bunch of append/insert nodes together to build a list from a static set of inputs.
+some built in nodes need to support epanding connectors e.g. maps and lists so that you don't need to chain a bunch of append/insert nodes together to build a list from a static set of inputs.
 
 Once you fill in one connector, another optionla connector opens up. the node is still treated as fully connected in this case.
-
 
 easy enough for built ins, we should allow user defined types to support this interface too someday. I guess in general, anything of the type
 
@@ -282,6 +287,14 @@ can be annotated as `@enable_daisy_chaining` " or whatever which enables this sp
 boxed nodes have connectors on teh inside which wire its inputs/outputs to the implementation inside. The inputs can be labeled which determines the name of the variable in the function def/lambda.
 
 when zoomed into a boxed node, teh internal input/output connectors go on the left/right edge of the screen 
+
+### disconnected internal connectors
+
+a disconnected internal input connector is an unused input when there is only one pattern match
+i.e. `let f a b c = a + c` I guess in practice we should lint it to use holes `let f a _b c = a + c` or maybe `let f a _ c = a + c`
+
+a disconnecte internal output connector is just a hole `let f a b c = _`
+
 
 ## export bindings connector
 

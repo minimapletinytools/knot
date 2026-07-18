@@ -32,6 +32,7 @@ Knot represents a middle ground between Haskell and Elm, tailored specifically t
 * **Type Signatures**: Standard `::` syntax.
 * **Spaced Dot Composition**: Spaced dot (`f . g`) denotes standard function composition.
 * **Monadic/List Operators**: Operators like bind (`>>=`) and list cons (`:`) are preserved.
+* **Holes**: `_` and `_somename` can be used in place of expressions as holes
 
 ### 2.2 From Elm
 * **Record Syntax**: `{ field = value }` for construction, `{ record | field = value }` for updates, and dot access without spaces (`record.field`).
@@ -54,6 +55,7 @@ Knot represents a middle ground between Haskell and Elm, tailored specifically t
 * **Closed Interface Instances**: Unlike Haskell, interface instances are pre-defined by the compiler for core primitive types.
 * **Metadata & Annotations (`@name(...)` / `@{...}`)**: A compiler-checked layout and tool annotation system designed for graph coordinates, documentation, and metadata.
 * **Unravel System (Reverse Execution)**: Backwards execution solving rule annotations (`unravel`), allowing changes to flow in reverse through the graph.
+* **Holes in LHS of let bindings**: `let _ = expression` is allowed and dropped by the compiler.
 
 ---
 
@@ -603,7 +605,51 @@ output = domainSpecificOp input
 
 ---
 
-## 12. Open Questions
+## 12. Typed Holes
+
+Knot uses `_` (and named variants `_name`) as **typed holes** — placeholders for
+expressions that have not yet been supplied. Holes are intentionally invalid: programs
+containing holes do not compile, but the compiler reports the expected type at each hole
+site, making incomplete programs informative rather than silent.
+
+### 12.2 Expression holes
+
+`_` is valid in any expression position. The compiler reports what type is required:
+
+```knot
+-- disconnected middle argument
+result = f a _ c          -- error: _ :: SomeType (expected at this position)
+
+-- missing function body
+identity = \x -> _        -- error: _ :: a (the return type of the lambda)
+
+-- partial literal
+config = { host = "localhost", port = _ }   -- error: _ :: Int
+```
+
+Named holes disambiguate when multiple holes appear in one expression:
+
+```knot
+result = zipWith _f _xs _ys
+-- error: _f  :: a -> b -> c
+--        _xs :: List a
+--        _ys :: List b
+```
+
+### 12.3 Pattern match and Binding holes (`let _ = ...`)
+
+`_` in a pattern match discards the value — this is valid, not an
+error. 
+
+
+### 12.5 Annotation compatibility
+
+Holes cannot carry annotations — `_ @nodeId("x")` is a parse error. Annotate
+the enclosing expression or the binding instead.
+
+---
+
+## 13. Open Questions
 
 1. **Metadata/annotation syntax** — TBD.
 2. **Logging / observable side effects** — what's the story for debug output or
@@ -611,7 +657,7 @@ output = domainSpecificOp input
 
 ---
 
-## 13. Planned for v2
+## 14. Planned for v2
 
 - **User-defined interfaces** — allow users to declare their own interfaces and implement
   them for custom types. Requires a constraint-solving/dictionary-passing subsystem;
