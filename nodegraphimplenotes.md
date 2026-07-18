@@ -3,6 +3,11 @@
 - should we support select on all features which shows a different ui for deleting and moving (in the case of boxed input connectors in focus mode)?
     - more mobile friendly
     - similarly to click and hold to edit icons on desktop
+- typeclasses need a visual language defined more clearly
+- extensible records need a visal language defined mor eclearl in praticluar
+    - extensible records should have a let bound record like syntax for reading
+    - something for writing
+    - some visual language when used as an input
 
 # type visual language
 
@@ -69,7 +74,7 @@ and then you can click on filter to filter for just that
 - connected (no visual, line just dissapears into connector)
 - dangling
     - type (matches input connector style)
-    - normal / monadic / pattern match (monadic matches the monadic output connector style, pattern match matches pattern match input connector style)
+    - normal / monadic (monadic matches the monadic output connector style)
 
 
 ### interaction modes
@@ -79,7 +84,7 @@ and then you can click on filter to filter for just that
 hovering over etiher the rope or its loose end shows full expression for rope type
 
 
-# connectors (heads/tails of knots)
+# regular connectors (heads/tails of knots)
 
 connectors exist on both boxed and non boxed nodes, they use the exact same visual language in both cases, except in the boxed case lines come out both sides, perhaps in the boxed case we need to do something different becasue we need space for the label somewhere?
 
@@ -90,7 +95,6 @@ connectors exist on both boxed and non boxed nodes, they use the exact same visu
 - heads only
     - disconnected (optional)
     - nubbed (connector does not show at all)
-    - pattern match connector
 - tails only
     - multiplexable output (outputs for let bindings and definition nodes)
     - monadic output (only shows in monadic context, can be used as a non monadic output too of course, depends what it connects to)
@@ -129,6 +133,10 @@ TODO figure out how to show label and value together in the nub
 
 shows the connection type, and also shows the nubbed input value fully
 
+# pattern matching connectors
+
+VERY SPECIAL TODO FIGURE THIS OUT
+
 
 # generic nodes
 
@@ -150,7 +158,6 @@ shows the connection type, and also shows the nubbed input value fully
         - triangles: ADT
     - yellow: let binding
         - triangles: pattern matched ADT
-    - light yellow: pattern match node
     - light red: bulit in math operators
     - red: bulit in control operators
     - pink: other common built in functions
@@ -181,9 +188,17 @@ if the let binding is symoblicated to an emoji, the emoji covers the output node
 
 then you can create a emoji somewhere in space (pulled from scope search menu) which is just an emoji with a mulitplexed output connector. I guess the emoji is also labeled with the let binding var name....
 
-
-
 # inline pillbox nodes (slubs)
+
+# record update node
+TODO regular case
+TODO extensible record case
+
+# let bound record and ADT value nodes
+
+have one output connector at the top for the entire record and output connectors below it for each of its fields
+
+also works for let bound ADT nodes which have been lazy matched to a particular pattern
 
 ## visual states
 - a pillbox shape, may be chained with lines between a longer pillbox 
@@ -231,6 +246,11 @@ boxed nodes can be focused in on, a focused node grey/blurs out stuff outside th
 - right lick > hide/unhide node 
 - you can drag nodes in and out of boxed nodes (focused or unfocused)
 
+# unravels and unravellers
+
+unravels and unravellers have no UI representation for now, they are a code only concept for now
+
+V2 give UI representation
 
 # node positioning 
 

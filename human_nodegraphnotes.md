@@ -89,7 +89,13 @@ fuction nodes may ethire be built in/imported or user defined, built in function
 
 functions nodes fo type `x -> y` can be "slubbed" meaning they get a more inline representation on as a "pill" looking thing dircetly on the connector rather than a full node with input and output. Slubs can be chained together to form... caterpillars? many built in functions are set to be slubbed by default, all user defined functions are not slubbed by default and can be annotated to be slubbed by default `@slub_by_default`. callsite nodes can be made to be slubbed or not slubbed (overriding the default) with an annotation `@slub`.
 
-V2 we can support slubbed output connectors inside boxed nodes. This is not really useful except for doing undefined in an unfinished function.
+slubbing is represented in code with the `|>` operator between to functions of type `x -> y`
+
+if a slub chain is boxed with both ends connected to the internal connectors of the box, it is then represented in code with the `>>` operator.
+
+V2 we can look into supporting slubs attaching to nubs, and this wolud be very useful because yo umight hav ea curried function in a middle of a slub chain and then it can keep teh slub chain look. Maybe make this a V1 feature cuz it's pretty cool.
+
+V2 we can support  the `<|` operator
 
 ### V2 simple function nodes (twists?)
 
@@ -127,13 +133,9 @@ function definition nodes represent lambdas in code, or named functions if let b
 
 If the output type of a box is monadic, the boxed node can have monadic context and dose by default (disable with `@no_monadic_context`) 
 
-mondaic context nodes enable binding connectors allowing monadic outputs to be conecting using bind connectors to to non monadic inputs.
+mondaic context enables let binding non monadic vars to monadic inputs. The line connecting to the let binding takes the monadic connection appearence i.e. "----->>------>". you can right click to toggle to let bind the monadic value itself but by default it's a monadic let bind if you are in the monadic context.
 
-connections within a monadic context node can auto bind `m a` into function nodes that have `a` type input using a different connection graphic indicating it is a bind
-
- (`m a` value) --->>---> (`a -> m b` function node) --->>---> (`m b` value)
-
-nested nodes within a monadic context node do not inherit the monadic context (TODO we could allow capturing monadically bound varibales i.e `a <- return x` but for nwo, just require them geting piped through a `m a` typed input)
+nested nodes within a monadic context node do not inherit the monadic context (they might have their own), but they can capture monadically bound variables
 
 
 #### hidden impl
@@ -148,7 +150,7 @@ this is a special boxed function node that must exist for the program to be vali
 
 ### literal nodes
 
-literal nodes contain some special UI input field (num filed string field, dropdown, etc) that allows you to set the literal value. They have one output connector.
+literal nodes contain some special UI input field (num filed string field, dropdown, etc) that allows you to set the literal value. They have one output connector. have a drop down to choose its type
 
 literal nodes can be "nubbed" into a connector so that a complete node + connection is not shown. All literal nodes are nubbed by default unless they have been let bound to a variable. You can add an annotation to make literal nodes not be nubbed `@no_nub`
 `
@@ -158,7 +160,11 @@ visually, a nub portrudes out from the input connector outside fo the node by a 
 some datatypes may have special literal syntax (e.g. maps, lists, maybe user defined ones) 
 if the input field is one lineable, then it can be nubbed, otherwise nubbing is not supported.
 
-have a drop down to choose its type
+
+V2 we can support nubbed output connectors inside boxed nodes. This is not really useful except for doing undefined in an unfinished function.
+
+
+
 
 
 ### operator nodes
@@ -189,11 +195,6 @@ let bound record nodes are special! They have mulitple optional output connector
 
 looks like a funciton node of type `a -> bool -> a -> a` but maybe different graphic/color cuz its special
 
-
-### pattern match nodes
-
-these are similar to literal nodes but they have special UI to allow you to match against ADT ctors and take wildcards
-VERY SPECIAL TODO figure out what UI is for this...
 
 ### case nodes
 
@@ -286,6 +287,12 @@ boxed nodes have connectors on teh inside which wire its inputs/outputs to the i
 
 when zoomed into a boxed node, teh internal input/output connectors go on the left/right edge of the screen 
 
+
+### pattern match connectors
+
+VERY SPECIAL TODO  one big connector that has several inputs in it and several outputs on the other side (and inside the box)
+TODO figure out how this works
+
 ### disconnected internal connectors
 
 a disconnected internal input connector is an unused input when there is only one pattern match
@@ -325,7 +332,11 @@ QUESTION: do we allow node boundary crossing output connections? this is useful 
 
 ## monadic bind connection
 
-see monadic context above
+mondaci bind is represented through a special connection type
+
+(`m a` value) --->>---> (`a -> m b` function node) --->>---> (`m b` value)
+
+this is represented with the `>>=` operator in code.
 
 ## recursion
 
