@@ -1,10 +1,85 @@
+:: TODO
+
+-NEXT STEPS
+    (support complete spec)
+    -language -> AST converter
+    -nodegraph UI rendering building blocks
+
+    (only support MVP)
+    -AST -> to nodegraph rendering
+    -language runtime
+
+
+- input connectors are called nubs
+    - and you can have input/output/loose nubs
+    - and then you have nubbed inputs which is an input that has been nubbed onto the nub :D
+- node position
+    - absolute: 
+    - relative(neighbor):
+    - priority(N)
+        DEFINITE: constraint can not be violtaed
+        RECOMMENDATION(n): constraint can be violetd in order of priority
+        CACHE: just cached values to save solving time and ensure coherency during rerenders, can be dropped, may not ever get serialized tbh
+
+
+
+MVP requirements
+-some potato node position solver probably
+-case nodes with pattern matching
+-captures
+-node id annotations
+
+
+MVP cannable language featuers
+-user extendable typeclasses
+-pullbacks
+-any other annotation not mentioned
+-record update syntax
+-require modules
+-extensible record types
+-type holes
+
+MVP cannable viewer features
+nodegraph -> code
+-node position annotations
+-slubs
+-nubbed inputs
+-ADT and record special node update syntax
+-auto let bound record/adt field splitting nodes
+-symbolicated nodes
+-expanding optional nodes in case expressions
+-mondaic connections and boxed contextet
+-daisy chaining
+-export binding connectors 
+
+
+
+
+
+:: archive
+
+:: 7/24 summary
+# the core products
 knot - the language
 tangle - the node graph editor for the language
-twine - a basic RTE using the language
-beaver - a 3d print slicer using the language to customize slicing
+twine - a interpertor for the language implementing lazy loading, pullbacks, partial reevals with caching, etc.
+
+# example apps to be built with knot
+beaver - a 3d print slicer using the language to customize slicing (or maybe knotty slice)
+knotty-wood - kumiki but using knot
+knotty-cad 
+knotty-cam
+etc
+
+
+Knot is a programming language designed for collaborative agentic driven "development" of programmatic designs. 
+It is a functional language with a bidirectional mapping so that high level flow and changes can be easily read and modified in a visual format. 
+It provides programmable interfaces that allow visually driven changes of the final design to modify constants in source code. 
+it provide lazy eval and caching to support partial rerenders
 
 
 
+:: old stuff
 
 # knot and tangle
 next steps:
