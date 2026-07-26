@@ -39,7 +39,7 @@ Knot represents a middle ground between Haskell and Elm, tailored specifically t
 * **Type Declarations**: ADTs are defined using the `type` keyword instead of `data`, and aliases use `type alias`.
 * **Module & Import System**: Every file is a module, imports are qualified by default, and namespace control is managed via the `exposing` keyword.
 * **No `where` clauses**: All local scope bindings must use `let...in` (matching Elm's let-only scoping).
-* **Pipe Operators**: Forward pipe (`|>`) and forward composition (`>>`) are preferred for chaining operations.
+* **Pipe Operators**: Forward pipe (`|>`) and forward composition (`>>`) replacee `.` and `$` operator.
 * **No `.` and `$` Operators**: replaced with pipe operators
 * **No Map Literals**: Maps are constructed using `Map.fromList` (matching Elm's `Dict.fromList`).
 * **Simplified Imports**: No `qualified` or `hiding` keywords (matching Elm's import design).
@@ -52,6 +52,7 @@ Knot represents a middle ground between Haskell and Elm, tailored specifically t
 * **No List Comprehensions**: Haskell's list comprehension syntax (`[x | x <- xs]`) is omitted in favor of standard map/filter functions.
 * **No Record Shorthand Destructuring**: Elm's shorthand record pattern matching (`{ x, y }`) is omitted.
 * **Right to Left functor operators `<|` `<<` `=<<`**: not supported
+* **No `.` function composition operator**
 
 ### 2.4 Different / Custom
 * **Closed Interface Instances**: Unlike Haskell, interface instances are pre-defined by the compiler for core primitive types.
@@ -71,7 +72,6 @@ Knot represents a middle ground between Haskell and Elm, tailored specifically t
 - Line comments: `--`
 - Block comments: `{- -}`
 - **Dot access**: `record.field` with no spaces = field access;
-  `f . g` with spaces = function composition operator (unchanged from Haskell)
 
 ---
 

@@ -1,5 +1,11 @@
 :: TODO
 
+-spec gaps
+    -finish pattern matching node stuff
+    -figure out how operator precedence is expressed in graph
+    
+
+
 -NEXT STEPS
     (support complete spec)
     -language -> AST converter
