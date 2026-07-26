@@ -30,7 +30,6 @@ Knot represents a middle ground between Haskell and Elm, tailored specifically t
 * **Lazy evaluation (call-by-need)**: Values are computed only when demanded (unlike Elm's strict evaluation). This allows for infinite structures and deferred graph computation.
 * **Built-in Interfaces**: Overloaded operations use a typeclass-like interface system (e.g., `Eq`, `Ord`, `Num`, `Integral`, `Fractional`).
 * **Type Signatures**: Standard `::` syntax.
-* **Spaced Dot Composition**: Spaced dot (`f . g`) denotes standard function composition.
 * **Monadic/List Operators**: Operators like bind (`>>=`) and list cons (`:`) are preserved.
 * **Holes**: `_` and `_somename` can be used in place of expressions as holes
 
@@ -39,8 +38,8 @@ Knot represents a middle ground between Haskell and Elm, tailored specifically t
 * **Type Declarations**: ADTs are defined using the `type` keyword instead of `data`, and aliases use `type alias`.
 * **Module & Import System**: Every file is a module, imports are qualified by default, and namespace control is managed via the `exposing` keyword.
 * **No `where` clauses**: All local scope bindings must use `let...in` (matching Elm's let-only scoping).
-* **Pipe Operators**: Forward pipe (`|>`) and forward composition (`>>`) replacee `.` and `$` operator.
-* **No `.` and `$` Operators**: replaced with pipe operators
+* **Pipe Operators**: Forward pipe (`|>`) and forward composition (`>>`) replace `.` and `$`.
+* **No `.` or `$` Operators**: Haskell's backward composition (`.`) and low-precedence right-associative application (`$`) are both omitted — `|>`/`>>` cover chaining and composition, and parentheses handle the rest.
 * **No Map Literals**: Maps are constructed using `Map.fromList` (matching Elm's `Dict.fromList`).
 * **Simplified Imports**: No `qualified` or `hiding` keywords (matching Elm's import design).
 * **Pattern Aliases (`as`)**: Pattern aliases use `as` instead of Haskell's `@` to prevent syntactic conflicts with layout annotations.
@@ -53,6 +52,8 @@ Knot represents a middle ground between Haskell and Elm, tailored specifically t
 * **No Record Shorthand Destructuring**: Elm's shorthand record pattern matching (`{ x, y }`) is omitted.
 * **Right to Left functor operators `<|` `<<` `=<<`**: not supported
 * **No `.` function composition operator**
+* **No multi-clause function definitions**: Unlike Haskell's `f 0 = ...` / `f n = ...` style, a function name may be bound by only one equation; branch on argument patterns using `case`, matching Elm.
+* **Basically anything else that's in Haskell but not Elm**
 
 ### 2.4 Different / Custom
 * **Closed Interface Instances**: Unlike Haskell, interface instances are pre-defined by the compiler for core primitive types.
@@ -167,6 +168,8 @@ case pair of
   (x, y) -> x
 ```
 
+Tuple arity is capped at 3 elements (pairs and triples only), matching Elm — larger fixed-size groupings should use a record instead.
+
 ---
 
 ## 5. Expressions
@@ -185,8 +188,8 @@ x |> f |> g
 f >> g       -- equivalent to \x -> g (f x)
 ```
 
-`|>` and `>>` are the preferred style for chaining. Haskell's `.` (backward composition)
-is still available but `>>` is preferred for readability.
+`|>` and `>>` are the preferred style for chaining. Unlike Haskell, `.` is not available
+as a composition operator in Knot (see §2.3) — use `>>` for left-to-right composition.
 
 ### 4.3 Let Bindings
 
@@ -266,21 +269,30 @@ To ensure unambiguous parsing and 1-to-1 visual node graph mapping, Knot defines
 
 | Precedence | Operators | Associativity | Description |
 |:---|:---|:---|:---|
-| 9 | `.` | Left | Function composition |
 | 8 | `^` | Right | Exponentiation |
 | 7 | `*`, `/`, `div`, `mod` | Left | Multiplication, division, modulo |
 | 6 | `+`, `-`, `<>` | Left | Addition, subtraction, semigroup append |
-| 5 | `::` | Right | List construction (cons) |
+| 5 | `:` | Right | List construction (cons) |
 | 4 | `==`, `/=`, `<`, `<=`, `>`, `>=` | None | Comparison |
 | 3 | `&&` | Right | Logical AND (lazy evaluation) |
 | 2 | `\|\|` | Right | Logical OR (lazy evaluation) |
 | 1 | `\|>`, `>>` | Left | Forward pipe, forward composition |
-| 0 | `$` | Right | Function application |
+
+*(Fixed contradictions from earlier drafts: cons was previously listed here as `::`, which collides with the type-signature operator defined in §3 — cons is `:`, matching §2.1 and §4.6. Neither `.` nor `$` exist in Knot — see §2.3 — so neither has a precedence slot; use `>>`/`|>` instead.)*
+
+Because Knot's operator set is closed (§2.3 — no user-defined operators), this table is exhaustive and fixed at parse time; unlike Elm, a parser never needs to consult import declarations to learn an operator's fixity.
 
 #### Boolean Operators
 - `(&&) :: Bool -> Bool -> Bool` — Logical AND. Short-circuits (lazy in its second argument).
 - `(||) :: Bool -> Bool -> Bool` — Logical OR. Short-circuits (lazy in its second argument).
 - `not  :: Bool -> Bool` — Logical negation (prefix function).
+
+### 4.9 Unary Negation
+
+`-` is overloaded between subtraction and negation; Knot resolves this exactly like Elm
+does — a `-` with whitespace before but none after is unary negation binding tighter than
+application (`f -1` is `f (-1)`, not `f - 1`); any other spacing is either ordinary
+subtraction or a parse error requiring parentheses.
 
 ---
 
@@ -421,6 +433,8 @@ Exposing everything in the module:
 module Geometry exposing (..)
 ```
 
+A module's declared name should match its file path, dot-separated (e.g. module `Geometry.Shapes` lives at `Geometry/Shapes.knot`), matching Elm's convention — this lets the parser/module-loader map an import to a file without a separate lookup table.
+
 ### 8.2 Imports
 
 Imports are **qualified by default** to prevent namespace pollution:
@@ -434,6 +448,7 @@ import String exposing (length, concat)
 - `import List` imports the module `List`. Functions must be qualified: `List.map`.
 - `import Map as M` imports the module `Map` with an alias. Functions are accessed via `M.lookup`.
 - `import String exposing (length, concat)` brings `length` and `concat` directly into the local scope, while keeping other functions qualified (e.g. `String.reverse`).
+- `import Foo exposing (..)` is also allowed — brings every name `Foo` exposes into unqualified scope, mirroring the module header's own `exposing (..)` wildcard.
 
 ---
 
@@ -470,6 +485,8 @@ in result
 ```
 
 Multiple `@` lines stack — all apply to the binding that follows.
+
+**Desugaring**: `@name(args)` desugars into a single key of the equivalent `@{ ... }` block — a single argument becomes a bare value (`@label("My Function")` ≡ `@{ label = "My Function" }`); multiple arguments become a tuple (`@position(100, 200)` ≡ `@{ position = (100, 200) }`).
 
 ### 8.2 Block form: `@{ ... }`
 
@@ -509,6 +526,8 @@ x = f @nodeId("n1") @position(100, 200)
   |> g @{ nodeId = "n2", position = (200.0, 200.0) }
   |> h
 ```
+
+**Binding rule**: a postfix `@annotation` attaches only to the single closest-preceding atom (literal, identifier, parenthesized expression, or record/list/tuple literal) — never to a wider application or operator expression. `f y @nodeId("n1")` annotates `y`, not `f y`; hence the need for parens below:
 
 For complex sub-expressions wrap in parens first:
 

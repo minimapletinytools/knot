@@ -3,7 +3,16 @@
 -spec gaps
     -finish pattern matching node stuff
     -figure out how operator precedence is expressed in graph
-    
+    -define all reserved keywords (sohuld eb same as elm plus a few extra?)
+    -change postfix annotation to prefix notation
+    -figure out how to do note stuff for let bindings on patterns, especially refutable ones
+    -figure out how to do node stuff for `as` bindings
+
+
+
+ok please udpate spec first. Keep the spec update minimal, TBH mostly we want to learn into the section that outlines how stuff is isimlar and different than helm/haskell. So the detailed notes that come aftewards are only needed if there is genuine ambiguity from wher ethe ydepart from elm/haskell 
+contradiction 1. haskell style, please updated, 2. no . And $ please update
+missing grammer: 5. follow elm, 7. @position(100, 200) is sugar for @{ position = (100, 200) } 8. reject tuples beyond 3 I guess, 10. multi clause functions not allowed (just update the omitted from haskell section) 11. matches elm
 
 
 -NEXT STEPS
