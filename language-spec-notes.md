@@ -63,19 +63,6 @@ Knot represents a middle ground between Haskell and Elm, tailored specifically t
 
 ---
 
-## 3. Syntax Conventions
-
-- Type signatures use `::` (Haskell style)
-- `type` keyword for ADTs (Elm style, not `data`)
-- `type alias` for type aliases
-- `let...in` for all local bindings — **no `where` clauses**
-- Lambdas: `\x -> expr`
-- Line comments: `--`
-- Block comments: `{- -}`
-- **Dot access**: `record.field` with no spaces = field access;
-
----
-
 ## 4. Type System
 
 ### 3.1 Primitive Types
@@ -91,25 +78,6 @@ Knot represents a middle ground between Haskell and Elm, tailored specifically t
 ### 3.2 Unit-Aware Numeric Types
 
 Deferred — not in v0. All physical quantities represented as `Float` for now.
-
-### 3.3 Records
-
-Elm-style record syntax throughout.
-
-```knot
--- type alias
-type alias Point = { x : Float, y : Float }
-
--- construction
-{ x = 1.0, y = 2.0 }
-
--- field access (dot notation, no spaces around dot)
-point.x
-
--- update (always produces a new record)
-{ point | x = 3.0 }
-{ point | x = 3.0, y = 4.0 }
-```
 
 ### 3.4 Extensible Record Types
 
@@ -147,13 +115,7 @@ type Result e a
 | `Option a`   | Nullable / missing value                  |
 | `Result e a` | Success or failure with a typed error     |
 
-### 3.7 Function Types
-
-`a -> b -> c` — standard curried function type. All functions are curried by default.
-
 ### 3.8 Tuple Types
-
-Fixed-size collections of values of potentially different types.
 
 ```knot
 -- construction
@@ -174,10 +136,6 @@ Tuple arity is capped at 3 elements (pairs and triples only), matching Elm — l
 
 ## 5. Expressions
 
-### 4.1 Function Application
-
-Standard prefix application: `f x y`. Left-associative.
-
 ### 4.2 Pipe Operators
 
 ```knot
@@ -187,9 +145,6 @@ x |> f |> g
 -- forward composition: produces a new function (f then g)
 f >> g       -- equivalent to \x -> g (f x)
 ```
-
-`|>` and `>>` are the preferred style for chaining. Unlike Haskell, `.` is not available
-as a composition operator in Knot (see §2.3) — use `>>` for left-to-right composition.
 
 ### 4.3 Let Bindings
 
@@ -201,23 +156,6 @@ in
   area
 ```
 
-All local bindings use `let...in`. No `where`.
-
-### 4.4 Lambdas
-
-```knot
-\x -> x + 1
-\x y -> x + y
-```
-
-### 4.5 Conditionals
-
-```knot
-if condition then valueA else valueB
-```
-
-Always an expression. Both branches must have the same type.
-
 ### 4.6 Pattern Matching
 
 ```knot
@@ -227,36 +165,27 @@ case shape of
   Triangle a b c -> ...
 ```
 
-Incomplete matches produce a compiler warning (not an error — partial functions allowed).
-
 #### Pattern Matching Rules:
-- **No guards**: Pattern guards (using `|` or `if`) are not supported. Use nested `if...then...else` expressions inside the match branches instead.
-- **List pattern matching**: Uses the `:` operator for cons (Haskell style):
+- **No guards** (see §2.2): use nested `if...then...else` inside match branches instead.
+- **List pattern matching** via `:` cons:
   ```knot
   case list of
     []     -> 0
     x : xs -> x + sum xs
   ```
-- **Pattern aliases**: Uses the `as` keyword (Elm style) to bind a sub-pattern to a name:
+- **Pattern aliases** (`as`, see §2.2):
   ```knot
   case list of
     (x : xs) as fullList -> fullList
   ```
-  *(Using the `as` keyword avoids syntactic collision with layout annotations, which use `@`)*.
-- **No Record shorthand desugaring**: Shorthand record pattern matching (such as `{ x, y }`) is not supported. Match on the record using an alias and access fields via dot notation (e.g. `r as point -> point.x`).
+- **No record shorthand** (see §2.3): match via alias + dot notation instead: `r as point -> point.x`.
 
 
 ### 4.7 List & Map Literals
 
-#### List Literals
 ```knot
 [1, 2, 3]
 ```
-
-**No List Comprehensions**: Haskell-style list comprehensions (e.g. `[x * 2 | x <- list]`) are not supported. Use standard library functions like `map`, `filter`, and `foldl` instead.
-
-#### Map Construction
-Following Elm, Knot does not define a custom map literal syntax. Instead, maps are constructed from a list of tuple key-value pairs using the built-in `Map.fromList` function:
 
 ```knot
 myMap :: Map String Int
@@ -278,14 +207,12 @@ To ensure unambiguous parsing and 1-to-1 visual node graph mapping, Knot defines
 | 2 | `\|\|` | Right | Logical OR (lazy evaluation) |
 | 1 | `\|>`, `>>` | Left | Forward pipe, forward composition |
 
-*(Fixed contradictions from earlier drafts: cons was previously listed here as `::`, which collides with the type-signature operator defined in §3 — cons is `:`, matching §2.1 and §4.6. Neither `.` nor `$` exist in Knot — see §2.3 — so neither has a precedence slot; use `>>`/`|>` instead.)*
+*(Fixed contradictions from earlier drafts: cons was previously listed here as `::`, which collides with the type-signature operator — cons is `:`, matching §2.1 and §4.6. Neither `.` nor `$` exist in Knot — see §2.3 — so neither has a precedence slot; use `>>`/`|>` instead.)*
 
 Because Knot's operator set is closed (§2.3 — no user-defined operators), this table is exhaustive and fixed at parse time; unlike Elm, a parser never needs to consult import declarations to learn an operator's fixity.
 
 #### Boolean Operators
-- `(&&) :: Bool -> Bool -> Bool` — Logical AND. Short-circuits (lazy in its second argument).
-- `(||) :: Bool -> Bool -> Bool` — Logical OR. Short-circuits (lazy in its second argument).
-- `not  :: Bool -> Bool` — Logical negation (prefix function).
+- `not :: Bool -> Bool` — logical negation (prefix function; `&&`/`||` are in the table above and short-circuit as usual).
 
 ### 4.9 Unary Negation
 
@@ -299,25 +226,15 @@ subtraction or a parse error requiring parentheses.
 ## 6. Definitions
 
 ```knot
--- type signature
 name :: Type
-
--- function definition
 name arg1 arg2 = expr
-
--- with let
-name arg1 =
-  let
-    helper = ...
-  in
-    helper arg1
 ```
 
 ---
 
 ## 7. Interfaces (Built-in, Closed in v0)
 
-The interface set is fixed — user-defined interfaces are not supported in v0 (see §13
+The interface set is fixed — user-defined interfaces are not supported in v0 (see §14
 for the v2 plan). Only built-in types have instances.
 
 ### 6.1 Core Interfaces
