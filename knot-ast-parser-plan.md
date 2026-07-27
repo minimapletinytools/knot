@@ -126,6 +126,7 @@ pub enum Pattern {
     Cons(Box<Spanned<Pattern>>, Box<Spanned<Pattern>>),  // x : xs
     Nil,                            // []
     As(Box<Spanned<Pattern>>, String),
+    Unit,                           // () -- own variant, same reason Expr/Type each have one
 }
 
 pub enum Type {

@@ -211,18 +211,6 @@ impl<'a> ParseState<'a> {
         let ty = self.type_arrow()?;
         Ok((name, ty))
     }
-
-    fn expect_byte(&mut self, byte: u8) -> Result<(), ParseError> {
-        self.skip_trivia()?;
-        if self.peek() != Some(byte) {
-            return Err(ParseError::new(
-                ErrorKind::Custom(format!("expected `{}`", byte as char)),
-                Span::new(self.pos.offset, self.pos.offset),
-            ));
-        }
-        self.bump();
-        Ok(())
-    }
 }
 
 #[cfg(test)]

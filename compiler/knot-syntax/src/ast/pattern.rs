@@ -16,6 +16,9 @@ pub enum Pattern {
     Cons(Box<Spanned<Pattern>>, Box<Spanned<Pattern>>),
     Nil,
     As(Box<Spanned<Pattern>>, String),
+    /// `()` — its own variant for the same reason `Expr`/`Type` each have one:
+    /// `()` isn't spelled with an identifier, so it can never arise via `Ctor`.
+    Unit,
 }
 
 /// `Int` and `String` literal patterns are both fine; no `Float` variant — Float

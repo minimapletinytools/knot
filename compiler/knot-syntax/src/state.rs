@@ -37,6 +37,21 @@ impl<'a> ParseState<'a> {
         self.src.get(self.pos.offset as usize + ahead).copied()
     }
 
+    /// Skips trivia, then requires and consumes a single-byte punctuation token
+    /// (`)`, `}`, `:`, ...). A shared primitive since every grammar layer needs
+    /// "expect this exact punctuation or error" constantly.
+    pub fn expect_byte(&mut self, byte: u8) -> Result<(), ParseError> {
+        self.skip_trivia()?;
+        if self.peek() != Some(byte) {
+            return Err(ParseError::new(
+                ErrorKind::Custom(format!("expected `{}`", byte as char)),
+                Span::new(self.pos.offset, self.pos.offset),
+            ));
+        }
+        self.bump();
+        Ok(())
+    }
+
     /// The source text between byte offset `start` and the current position.
     /// Returns a slice borrowed from the *original* source (lifetime `'a`),
     /// independent of this method's own short-lived `&self` borrow, so callers can

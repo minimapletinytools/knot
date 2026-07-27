@@ -158,6 +158,36 @@ impl<'a> ParseState<'a> {
         let name = self.ident_segment().map(|seg| seg.node);
         Ok(Spanned::new(Span::new(start.offset, self.pos.offset), name))
     }
+
+    /// True if `keyword` (e.g. `"as"`, `"let"`, `"then"`) appears at the current
+    /// position as a *complete* identifier, not a prefix of a longer one — so
+    /// `peek_keyword("as")` doesn't fire in the middle of `asymptote`. Doesn't skip
+    /// leading trivia or consume anything; callers that need either call
+    /// `skip_trivia`/`expect_keyword` themselves.
+    pub fn peek_keyword(&self, keyword: &str) -> bool {
+        let bytes = keyword.as_bytes();
+        let start = self.pos.offset as usize;
+        let end = start + bytes.len();
+        if end > self.src.len() || &self.src[start..end] != bytes {
+            return false;
+        }
+        !matches!(self.src.get(end), Some(&b) if is_ident_continue(b))
+    }
+
+    /// Skips trivia, then requires and consumes `keyword` per `peek_keyword`.
+    pub fn expect_keyword(&mut self, keyword: &'static str) -> Result<(), ParseError> {
+        self.skip_trivia()?;
+        if !self.peek_keyword(keyword) {
+            return Err(ParseError::new(
+                ErrorKind::Expected(keyword),
+                Span::new(self.pos.offset, self.pos.offset),
+            ));
+        }
+        for _ in 0..keyword.len() {
+            self.bump();
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
