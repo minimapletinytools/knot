@@ -1,0 +1,8 @@
+[package]
+name = "knot-syntax"
+version = "0.1.0"
+edition = "2021"
+description = "Parses Knot source text into an AST."
+license = "MPL-2.0"
+
+[dependencies]
