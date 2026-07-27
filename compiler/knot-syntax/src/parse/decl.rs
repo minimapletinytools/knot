@@ -42,14 +42,43 @@ impl<'a> ParseState<'a> {
         })
     }
 
+    /// A leading `@name(args)`/`@{...}` (spec §10.1) attaches to `FnDef`'s own
+    /// `annotations` field. `type`/`type alias`/`instance` declarations don't
+    /// carry annotations in v0 (a resolved open question — possible V2
+    /// feature), so one appearing there is a clear error rather than being
+    /// silently accepted and dropped.
     pub(crate) fn top_level_decl(&mut self, col: u32) -> Result<Spanned<Decl>, ParseError> {
         let start = self.pos;
+        self.skip_trivia()?;
+        let annotations = if self.peek() == Some(b'@') {
+            self.annotation_list()?
+        } else {
+            Vec::new()
+        };
+        self.skip_trivia()?;
         let decl = if self.peek_keyword("type") {
             self.type_or_alias_decl()?
         } else if self.peek_keyword("instance") {
             Decl::Instance(self.instance_decl()?)
         } else {
             Decl::Fn(self.fn_decl(col)?)
+        };
+        let decl = match decl {
+            Decl::Fn(mut f) => {
+                f.annotations = annotations;
+                Decl::Fn(f)
+            }
+            other if annotations.is_empty() => other,
+            _ => {
+                return Err(ParseError::new(
+                    ErrorKind::Custom(
+                        "annotations are not supported on type/instance declarations in v0"
+                            .to_string(),
+                    ),
+                    Span::new(start.offset, start.offset),
+                )
+                .fatal());
+            }
         };
         Ok(Spanned::new(Span::new(start.offset, self.pos.offset), decl))
     }
@@ -420,5 +449,57 @@ mod tests {
         };
         assert!(matches!(inst.methods[0].params[0].node, Pattern::Var(_)));
         assert!(matches!(inst.methods[0].body.node, Expr::Case(_, _)));
+    }
+
+    #[test]
+    fn stacked_annotations_attach_to_fn_def() {
+        let src = "@nodeId(\"f1\")\n@position(100, 200)\nmyFunc :: Int -> Int\nmyFunc x = x + 1";
+        let ds = decls(src);
+        let [Decl::Fn(f)] = ds.as_slice() else {
+            panic!("expected one Fn decl")
+        };
+        assert_eq!(f.name, "myFunc");
+        assert_eq!(f.annotations.len(), 2);
+        assert_eq!(f.annotations[0].key, "nodeId");
+        assert!(f.signature.is_some());
+    }
+
+    #[test]
+    fn block_annotation_attaches_to_fn_def_without_signature() {
+        let src = "@{ nodeId = \"f1\", color = \"blue\" }\nmyFunc x = x + 1";
+        let ds = decls(src);
+        let [Decl::Fn(f)] = ds.as_slice() else {
+            panic!("expected one Fn decl")
+        };
+        assert_eq!(f.annotations.len(), 2);
+    }
+
+    #[test]
+    fn annotation_on_type_alias_is_rejected() {
+        let src = "@doc(\"a point\")\ntype alias Point = { x : Float, y : Float }";
+        let mut s = ParseState::new(src);
+        assert!(s.parse_decls().is_err());
+    }
+
+    #[test]
+    fn annotation_on_instance_is_rejected() {
+        let src = "@doc(\"eq for shapes\")\ninstance Eq Shape where\n  (==) a b = True";
+        let mut s = ParseState::new(src);
+        assert!(s.parse_decls().is_err());
+    }
+
+    #[test]
+    fn multiple_annotated_declarations_in_sequence() {
+        // Regression guard: one declaration's annotation list must not bleed
+        // into the next sibling declaration's.
+        let src = "@nodeId(\"f1\")\nfirst x = x\n\n@nodeId(\"f2\")\nsecond y = y";
+        let ds = decls(src);
+        assert_eq!(ds.len(), 2);
+        let [Decl::Fn(a), Decl::Fn(b)] = ds.as_slice() else {
+            panic!("expected two Fn decls")
+        };
+        assert_eq!(a.annotations[0].key, "nodeId");
+        assert_eq!(b.annotations[0].key, "nodeId");
+        assert_ne!(a.annotations[0].value.node, b.annotations[0].value.node);
     }
 }

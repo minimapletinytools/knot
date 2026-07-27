@@ -213,7 +213,33 @@ impl<'a> ParseState<'a> {
     /// `List.map` is already fully consumed by the identifier lexer itself before
     /// this ever runs; this only handles chains on top of a *value*, e.g.
     /// `point.x.y` or `(getPoint x).x`.
+    ///
+    /// Also where prefix `@annotation`s attach (spec §10.3): a leading `@`
+    /// here binds only to the single atom this call recurses into next
+    /// (including its own field-access chain) — never to a wider application
+    /// or operator expression, which is exactly why annotating one of those
+    /// needs explicit parens (`@{...} (f a b)`, not `@{...} f a b`). Holes
+    /// can't carry annotations at all (spec §12.5).
     fn expr_atom(&mut self) -> Result<Spanned<Expr>, ParseError> {
+        self.skip_trivia()?;
+        if self.peek() == Some(b'@') {
+            let start = self.pos;
+            let annotations = self.annotation_list()?;
+            self.skip_trivia()?;
+            let target = self.expr_atom()?;
+            if target.node == Expr::Hole {
+                return Err(ParseError::new(
+                    ErrorKind::Custom("holes cannot carry annotations".to_string()),
+                    Span::new(start.offset, target.span.end),
+                )
+                .fatal());
+            }
+            let span = Span::new(start.offset, target.span.end);
+            return Ok(Spanned::new(
+                span,
+                Expr::Annotated(annotations, Box::new(target)),
+            ));
+        }
         let mut current = self.expr_atom_base()?;
         loop {
             if self.peek() == Some(b'.')
@@ -416,7 +442,12 @@ impl<'a> ParseState<'a> {
         }
     }
 
-    fn expr_record_field_list(&mut self) -> Result<Vec<(String, Spanned<Expr>)>, ParseError> {
+    /// `pub(crate)`: M6's `@{ key = value, ... }` annotation block is
+    /// identical grammar to a record's field list, so `annotation.rs` reuses
+    /// this directly rather than duplicating it.
+    pub(crate) fn expr_record_field_list(
+        &mut self,
+    ) -> Result<Vec<(String, Spanned<Expr>)>, ParseError> {
         let mut fields = vec![self.expr_record_field()?];
         self.skip_trivia()?;
         while self.peek() == Some(b',') {
@@ -483,14 +514,34 @@ impl<'a> ParseState<'a> {
         Ok(Spanned::new(span, Expr::Let(bindings, Box::new(body))))
     }
 
+    /// A `let`-bound value has no dedicated declaration struct to hold
+    /// annotations the way `FnDef` does, so a leading `@` here (spec §10.1's
+    /// stacked/block forms, above the binding just like a top-level
+    /// signature) wraps the *value* in `Expr::Annotated` instead — the same
+    /// representation prefix inline annotations already use, rather than
+    /// inventing a second one.
     fn let_binding(
         &mut self,
     ) -> Result<(Spanned<crate::ast::pattern::Pattern>, Spanned<Expr>), ParseError> {
+        self.skip_trivia()?;
+        let start = self.pos;
+        let annotations = if self.peek() == Some(b'@') {
+            self.annotation_list()?
+        } else {
+            Vec::new()
+        };
+        self.skip_trivia()?;
         let pat = self.pattern()?;
         self.skip_trivia()?;
         self.expect_byte(b'=')?;
         self.skip_trivia()?;
         let value = self.expr()?;
+        let value = if annotations.is_empty() {
+            value
+        } else {
+            let span = Span::new(start.offset, value.span.end);
+            Spanned::new(span, Expr::Annotated(annotations, Box::new(value)))
+        };
         Ok((pat, value))
     }
 
@@ -1030,5 +1081,90 @@ mod tests {
         let mut s = ParseState::new("-1");
         let p = s.pattern().unwrap();
         assert_eq!(p.node, Pattern::Literal(PatternLiteral::Int(-1)));
+    }
+
+    #[test]
+    fn prefix_annotation_binds_to_the_immediately_following_atom() {
+        // "@nodeId("n1") f y" -- the annotation attaches to `f`, the closest
+        // *following* atom, not to the whole `f y` application.
+        let Expr::App(annotated_f, y) = ex(r#"@nodeId("n1") f y"#) else {
+            panic!("expected App")
+        };
+        assert_eq!(y.node, Expr::Var("y".to_string()));
+        let Expr::Annotated(anns, target) = &annotated_f.node else {
+            panic!("expected Annotated")
+        };
+        assert_eq!(anns.len(), 1);
+        assert_eq!(anns[0].key, "nodeId");
+        assert_eq!(target.node, Expr::Var("f".to_string()));
+    }
+
+    #[test]
+    fn prefix_annotation_on_an_argument() {
+        // "f @nodeId("n1") y" -- annotates `y`, not the whole `f y`.
+        let Expr::App(f, annotated_y) = ex(r#"f @nodeId("n1") y"#) else {
+            panic!("expected App")
+        };
+        assert_eq!(f.node, Expr::Var("f".to_string()));
+        let Expr::Annotated(_, target) = &annotated_y.node else {
+            panic!("expected Annotated")
+        };
+        assert_eq!(target.node, Expr::Var("y".to_string()));
+    }
+
+    #[test]
+    fn parens_widen_annotation_scope_to_a_whole_application() {
+        let Expr::Annotated(_, target) = ex(r#"@{ nodeId = "n1" } (f a b)"#) else {
+            panic!("expected Annotated")
+        };
+        assert!(matches!(target.node, Expr::App(_, _)));
+    }
+
+    #[test]
+    fn annotation_desugars_single_and_multi_arg_the_same_as_block_form() {
+        let single = ex(r#"@label("My Function") f"#);
+        let Expr::Annotated(anns, _) = &single else {
+            panic!("expected Annotated")
+        };
+        assert_eq!(
+            anns[0].value.node,
+            Expr::StringLit("My Function".to_string())
+        );
+
+        let multi = ex("@position(100, 200) f");
+        let Expr::Annotated(anns, _) = &multi else {
+            panic!("expected Annotated")
+        };
+        assert!(matches!(anns[0].value.node, Expr::Tuple(_)));
+    }
+
+    #[test]
+    fn hole_cannot_carry_an_annotation() {
+        let mut s = ParseState::new(r#"@nodeId("x") _"#);
+        let e = s.expr().unwrap_err();
+        assert!(e.fatal);
+    }
+
+    #[test]
+    fn let_binding_annotation_wraps_the_value_in_annotated() {
+        let src = "let\n  @nodeId(\"n1\")\n  @position(150, 300)\n  result = myFunc 42\nin result";
+        let Expr::Let(bindings, _) = ex(src) else {
+            panic!("expected Let")
+        };
+        assert_eq!(bindings.len(), 1);
+        let Expr::Annotated(anns, target) = &bindings[0].1.node else {
+            panic!("expected Annotated value")
+        };
+        assert_eq!(anns.len(), 2);
+        assert!(matches!(target.node, Expr::App(_, _)));
+    }
+
+    #[test]
+    fn let_binding_without_annotation_is_unaffected() {
+        let src = "let\n  radius = 5.0\nin radius";
+        let Expr::Let(bindings, _) = ex(src) else {
+            panic!("expected Let")
+        };
+        assert_eq!(bindings[0].1.node, Expr::FloatLit(5.0));
     }
 }

@@ -48,16 +48,6 @@ fn is_module_fixture(path: &Path) -> bool {
     path.components().any(|c| c.as_os_str() == "modules")
 }
 
-/// Annotation grammar is M6, not yet implemented (see `knot-ast-parser-plan.md`
-/// §5) — its fixtures are expected to fail for now. Excluding a whole category
-/// like this is meant to be a visible, temporary carve-out, not a quiet one:
-/// remove it the moment M6 lands, and if any *other* category starts needing
-/// this treatment that's a real regression, not something to paper over the
-/// same way.
-fn not_yet_implemented(path: &Path) -> bool {
-    path.components().any(|c| c.as_os_str() == "annotations")
-}
-
 /// True if `source` parses successfully, the parser fully consumed it (leftover
 /// input -- e.g. from a token the grammar simply doesn't recognize, like the
 /// removed `.` composition operator or `$` -- counts as failure too, same as
@@ -90,9 +80,6 @@ fn valid_fixtures_parse_completely() {
     assert!(dir.is_dir(), "corpus/valid not found at {}", dir.display());
     let mut failures = Vec::new();
     for path in knot_files(&dir) {
-        if not_yet_implemented(&path) {
-            continue;
-        }
         let source = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         if !parses_completely(&source, &path) {
@@ -116,9 +103,6 @@ fn invalid_fixtures_are_rejected() {
     );
     let mut failures = Vec::new();
     for path in knot_files(&dir) {
-        if not_yet_implemented(&path) {
-            continue;
-        }
         let source = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         if parses_completely(&source, &path) {
