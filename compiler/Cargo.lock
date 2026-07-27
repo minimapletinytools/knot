@@ -3,5 +3,12 @@
 version = 4
 
 [[package]]
+name = "knot-canonical"
+version = "0.1.0"
+dependencies = [
+ "knot-syntax",
+]
+
+[[package]]
 name = "knot-syntax"
 version = "0.1.0"

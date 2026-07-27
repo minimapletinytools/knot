@@ -1,0 +1,9 @@
+[package]
+name = "knot-canonical"
+version = "0.1.0"
+edition = "2021"
+description = "Resolves a knot-syntax AST's names (variables, constructors, types, imports) into a Canonical AST."
+license = "MPL-2.0"
+
+[dependencies]
+knot-syntax = { path = "../knot-syntax" }
