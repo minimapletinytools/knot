@@ -18,7 +18,11 @@ pub struct ParseState<'a> {
 
 impl<'a> ParseState<'a> {
     pub fn new(src: &'a str) -> Self {
-        ParseState { src: src.as_bytes(), pos: Cursor::start(), indent: None }
+        ParseState {
+            src: src.as_bytes(),
+            pos: Cursor::start(),
+            indent: None,
+        }
     }
 
     pub fn is_eof(&self) -> bool {
@@ -31,6 +35,20 @@ impl<'a> ParseState<'a> {
 
     pub fn peek_at(&self, ahead: usize) -> Option<u8> {
         self.src.get(self.pos.offset as usize + ahead).copied()
+    }
+
+    /// The source text between byte offset `start` and the current position.
+    /// Returns a slice borrowed from the *original* source (lifetime `'a`),
+    /// independent of this method's own short-lived `&self` borrow, so callers can
+    /// keep using it after continuing to mutate `self`. Only valid to call when both
+    /// ends fall on UTF-8 char boundaries, which every lexer in this crate
+    /// guarantees by construction (each one only ever stops mid-scan on a full
+    /// UTF-8 char boundary, whether that's an ASCII byte or the end of a
+    /// multi-byte sequence it copied in one step).
+    pub fn text_since(&self, start: u32) -> &'a str {
+        let src: &'a [u8] = self.src;
+        std::str::from_utf8(&src[start as usize..self.pos.offset as usize])
+            .expect("lexer only stops on UTF-8 char boundaries, so this range is always valid")
     }
 
     /// Consume one byte unconditionally, advancing the cursor.
@@ -108,7 +126,10 @@ impl<'a> ParseState<'a> {
             Ok(())
         } else {
             Err(ParseError::new(
-                ErrorKind::IndentViolation { expected_col: col + 1, found_col: self.pos.col },
+                ErrorKind::IndentViolation {
+                    expected_col: col + 1,
+                    found_col: self.pos.col,
+                },
                 Span::new(self.pos.offset, self.pos.offset),
             ))
         }
@@ -122,7 +143,10 @@ impl<'a> ParseState<'a> {
             Ok(())
         } else {
             Err(ParseError::new(
-                ErrorKind::IndentViolation { expected_col: col, found_col: self.pos.col },
+                ErrorKind::IndentViolation {
+                    expected_col: col,
+                    found_col: self.pos.col,
+                },
                 Span::new(self.pos.offset, self.pos.offset),
             ))
         }

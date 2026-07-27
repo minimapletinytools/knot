@@ -97,10 +97,9 @@ pub enum Expr {
     IntLit(i64),
     FloatLit(f64),
     StringLit(String),
-    BoolLit(bool),
     Unit,
     Var(Name),                     // lower, possibly qualified: Foo.bar
-    Ctor(Name),                    // upper, possibly qualified: Foo.Bar
+    Ctor(Name),                    // upper, possibly qualified: Foo.Bar; also True/False (0-arity ctors, no separate BoolLit)
     Hole,                          // _ only — named holes (_name) are pattern/binding-only, not expression placeholders
     Lambda(Vec<Spanned<Pattern>>, Box<Spanned<Expr>>),
     App(Box<Spanned<Expr>>, Box<Spanned<Expr>>),

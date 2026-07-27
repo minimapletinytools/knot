@@ -13,7 +13,10 @@ pub enum ErrorKind {
     UnclosedBlockComment,
     /// Raised by `ParseState::check_indent` / `check_aligned` when a token appears at
     /// the wrong column for its layout context.
-    IndentViolation { expected_col: u32, found_col: u32 },
+    IndentViolation {
+        expected_col: u32,
+        found_col: u32,
+    },
     Custom(String),
 }
 
@@ -28,7 +31,11 @@ pub struct ParseError {
 
 impl ParseError {
     pub fn new(kind: ErrorKind, span: Span) -> Self {
-        ParseError { kind, span, context: Vec::new() }
+        ParseError {
+            kind,
+            span,
+            context: Vec::new(),
+        }
     }
 
     pub fn with_context(mut self, rule: &'static str) -> Self {

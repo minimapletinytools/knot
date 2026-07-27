@@ -7,11 +7,12 @@ pub enum Expr {
     IntLit(i64),
     FloatLit(f64),
     StringLit(String),
-    BoolLit(bool),
     Unit,
     /// Lowercase, possibly qualified: `x`, `List.map`.
     Var(Name),
-    /// Uppercase, possibly qualified: `Circle`, `Shape.Circle`.
+    /// Uppercase, possibly qualified: `Circle`, `Shape.Circle` — also covers
+    /// `True`/`False`, which are just 0-arity constructors (no separate `BoolLit`,
+    /// consistent with how `Pattern::Ctor` already treats them).
     Ctor(Name),
     /// `_` only — named holes (`_name`) are pattern/binding-only, never an
     /// expression placeholder (`f a _b c` is invalid; see language-spec-notes.md §12).

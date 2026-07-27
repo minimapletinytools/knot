@@ -41,7 +41,11 @@ pub struct Cursor {
 
 impl Cursor {
     pub fn start() -> Self {
-        Cursor { offset: 0, line: 1, col: 1 }
+        Cursor {
+            offset: 0,
+            line: 1,
+            col: 1,
+        }
     }
 
     /// Advance past a single byte, updating line/col bookkeeping. Only valid to call
