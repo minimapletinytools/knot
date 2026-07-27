@@ -46,7 +46,7 @@ Knot represents a middle ground between Haskell and Elm, tailored specifically t
 * **No Guards**: Pattern matching does not support guards, matching Elm's simpler `case` expressions.
 
 ### 2.3 Omitted from Haskell/Elm
-* **No user-defined interfaces/instances**: Unlike Haskell's typeclasses (or Elm's extensible record polymorphism), the interface set in v0 is closed to keep compile-time dictionary passing and type checking simple.
+* **No user-defined interfaces**: Unlike Haskell's typeclasses (or Elm's extensible record polymorphism), the *set* of interfaces in v0 is closed (fixed at `Eq`, `Ord`, `Show`, `Semigroup`, `Monoid`, `Num`, `Fractional`, `Integral`) to keep compile-time dictionary passing and type checking simple — users cannot declare a brand-new interface. Instances of these existing interfaces are open, though — see §2.4.
 * **No custom symbolic operators**: Unlike both Haskell and Elm, users cannot define new operators (e.g., `+++`), ensuring 1-to-1 parsing and node-graph mapping remain clean.
 * **No List Comprehensions**: Haskell's list comprehension syntax (`[x | x <- xs]`) is omitted in favor of standard map/filter functions.
 * **No Record Shorthand Destructuring**: Elm's shorthand record pattern matching (`{ x, y }`) is omitted.
@@ -56,7 +56,7 @@ Knot represents a middle ground between Haskell and Elm, tailored specifically t
 * **Basically anything else that's in Haskell but not Elm**
 
 ### 2.4 Different / Custom
-* **Closed Interface Instances**: Unlike Haskell, interface instances are pre-defined by the compiler for core primitive types.
+* **Open Instances, Closed Interfaces**: The *set* of interfaces is closed (no new ones), but instances of the existing interfaces are open — users may implement `Eq`/`Ord`/`Show`/etc. for their own types, not just built-in primitives.
 * **Metadata & Annotations (`@name(...)` / `@{...}`)**: A compiler-checked layout and tool annotation system designed for graph coordinates, documentation, and metadata.
 * **Unravel System (Reverse Execution)**: Backwards execution solving rule annotations (`unravel`), allowing changes to flow in reverse through the graph.
 * **Holes in LHS of let bindings**: `let _ = expression` is allowed and dropped by the compiler.
@@ -179,6 +179,7 @@ case shape of
     (x : xs) as fullList -> fullList
   ```
 - **No record shorthand** (see §2.3): match via alias + dot notation instead: `r as point -> point.x`.
+- **No Float literal patterns** (matches Elm — float equality is unsound): compare explicitly with `if` inside the match arm instead. `Int` and `String` literal patterns are both fine (also matching Elm).
 
 
 ### 4.7 List & Map Literals
@@ -235,7 +236,10 @@ name arg1 arg2 = expr
 ## 7. Interfaces (Built-in, Closed in v0)
 
 The interface set is fixed — user-defined interfaces are not supported in v0 (see §14
-for the v2 plan). Only built-in types have instances.
+for the v2 plan). Instances of these interfaces, however, are open: both built-in and
+user-defined types may implement them (concrete instance-declaration syntax is TBD — see
+§13). Users may also write their own function signatures constrained by these interfaces,
+e.g. `myMax :: Ord a => a -> a -> a`, usable with any type that has an `Ord` instance.
 
 ### 6.1 Core Interfaces
 
@@ -548,14 +552,18 @@ output = domainSpecificOp input
 
 ## 12. Typed Holes
 
-Knot uses `_` (and named variants `_name`) as **typed holes** — placeholders for
-expressions that have not yet been supplied. Holes are intentionally invalid: programs
-containing holes do not compile, but the compiler reports the expected type at each hole
-site, making incomplete programs informative rather than silent.
+Knot uses `_` as a **typed hole** in expression position — a placeholder for an expression
+that has not yet been supplied. Holes are intentionally invalid there: programs containing
+an expression-position hole do not compile, but the compiler reports the expected type at
+each hole site, making incomplete programs informative rather than silent. Named holes
+(`_name`) are a separate, narrower feature restricted to pattern/binding discard position
+(§12.3) — they are **not** valid as expression placeholders.
 
 ### 12.2 Expression holes
 
-`_` is valid in any expression position. The compiler reports what type is required:
+`_` is valid in any expression position, in its bare unnamed form only — `_name` is not
+supported here (`f a _b c` is invalid; use `f a _ c`). The compiler reports what type is
+required:
 
 ```knot
 -- disconnected middle argument
@@ -568,19 +576,12 @@ identity = \x -> _        -- error: _ :: a (the return type of the lambda)
 config = { host = "localhost", port = _ }   -- error: _ :: Int
 ```
 
-Named holes disambiguate when multiple holes appear in one expression:
-
-```knot
-result = zipWith _f _xs _ys
--- error: _f  :: a -> b -> c
---        _xs :: List a
---        _ys :: List b
-```
-
 ### 12.3 Pattern match and Binding holes (`let _ = ...`)
 
-`_` in a pattern match discards the value — this is valid, not an
-error. 
+`_` in a pattern or `let`-binding LHS discards the value — this is valid, not an error
+(`let _ = expression` drops the result). A named variant is allowed here specifically:
+`let _debugValue = expression in ...` is also valid, purely as a self-documenting mnemonic
+for the reader — the name carries no compiler-checked meaning.
 
 
 ### 12.5 Annotation compatibility
@@ -595,6 +596,10 @@ the enclosing expression or the binding instead.
 1. **Metadata/annotation syntax** — TBD.
 2. **Logging / observable side effects** — what's the story for debug output or
    structured logging within `IO`? Needs user stories before designing.
+3. **Instance-declaration syntax** — user-defined instances of existing interfaces are
+   confirmed allowed (§2.4, §7), but the actual declaration syntax isn't designed yet
+   (Haskell-style `instance Eq Shape where (==) a b = ...`? something else?). Needed
+   before the parser can support it.
 
 ---
 

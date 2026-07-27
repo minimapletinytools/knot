@@ -119,6 +119,13 @@ nodes can be boxed to produce a scope. The boxed contents must have exactly one 
 see connection section as well
 
 
+#### pattern matching
+
+TODO IMPORTANT FIGURE THIS OUT
+
+need interface for adding new expressions (could be a V2 feature)
+
+
 #### function definition nodes 
 
 function definition nodes represent lambdas in code, or named functions if let bound to a varibale
@@ -164,9 +171,6 @@ if the input field is one lineable, then it can be nubbed, otherwise nubbing is 
 V2 we can support nubbed output connectors inside boxed nodes. This is not really useful except for doing undefined in an unfinished function.
 
 
-
-
-
 ### operator nodes
 
 have a drop down to chooes its type
@@ -187,22 +191,20 @@ record create nodes are just funciton nodes but contain a drop down that lets yo
 ### record update nodes
 record update nodes are special, they have no ereuired input of the record being updated and then have several opitonal connectors. This maps to the `{ record | field = value, ... }` elm record update syntax. you can still do regular haskell style updateing by creating new record nodes but that sucks in both UI and in code so that's why we have specila record update syntax
 
-### let bound record nodes
 
-let bound record nodes are special! They have mulitple optional output connectors for each of their fields as well as an output connector for the entire record! `record.field` in code is alwasy represented in this way. I guess if you do `.field record` we could have this show up as a regular `.filed` function with `record` as its input? or we could just lint this case away, probbaly better that way.
 
 ### if else nodes
 
 looks like a funciton node of type `a -> bool -> a -> a` but maybe different graphic/color cuz its special
 
-
 ### case nodes
 
-this noe is special, starts by showing a value, a pattern match, and a output value, once connected, 2 more optional things pop up for another match and output value (if either is connected, the other ones becomes non optional and 2 more optional ones pop up)
+case nodes look just like a boxed pattern matched lamda function node.
 
-actually, after a value is connected, another optional value filed pops up allowing you to do multi case nodes :O
+they are flagged to be case nodes rather than calling a lambda, perhaps there is some UI indaction
 
-a case node that appears on a function input in a definition node has a UI to tag it as pattern match which converts it into a sugared pattern match syntax on the function. This can only be done for one such case node!
+`(\x -> case x of ...) y` would show up as a case node inside a lambda function call node
+
 
 ### let bindings (value nodes)
 
@@ -221,6 +223,16 @@ value nodes may also be symbolicated (pick better term) via `@symbolicate(symbol
 ```
 
 TODO consider having a special let bound literal node, if not, it's just a regular let bound node with a nubbed literal input which is fine too I guess.
+
+#### let bound record nodes
+
+let bound record nodes are special! They have mulitple optional output connectors for each of their fields as well as an output connector for the entire record! `record.field` in code is alwasy represented in this way. I guess if you do `.field record` we could have this show up as a regular `.filed` function with `record` as its input? or we could just lint this case away, probbaly better that way. 
+
+This special UI case does NOT apply to record types nested underneath other types. We can support this as a V2 feature maybe.
+
+#### irrefutable pattens in let bindings
+
+these are allowed, there should maybe be a visual indication that the pattern is irrefutable (or mperhaps a little warning icon that shows up if warnings are neabled)
 
 ### bulit in, imported, and symoblicated nodes
 
@@ -288,10 +300,19 @@ boxed nodes have connectors on teh inside which wire its inputs/outputs to the i
 when zoomed into a boxed node, teh internal input/output connectors go on the left/right edge of the screen 
 
 
+### `as` binding connectors
+
+these get a special UI where it's like a big connector box with several smaller connector boxes within it. the big box has an internal out connector, and the boxes within it alos have them for each of the bindings
+
+Alternatively, we could just have this implicitly be represented as a let binding node that has a "as" binding flag on it. that miht be simpler
+
+
 ### pattern match connectors
 
 VERY SPECIAL TODO  one big connector that has several inputs in it and several outputs on the other side (and inside the box)
 TODO figure out how this works
+
+pattern match stuff are acutalyl output connectors :O
 
 ### disconnected internal connectors
 
