@@ -435,21 +435,21 @@ myFunc x = x + 1
 
 ### 8.3 Inline sub-expression annotations
 
-For annotating individual stages of a pipeline, `@annotation` is written **postfix**,
-immediately after the expression atom it targets. Both forms work inline:
+For annotating individual stages of a pipeline, `@annotation` is written **prefix**,
+immediately before the expression atom it targets. Both forms work inline:
 
 ```knot
-x = f @nodeId("n1") @position(100, 200)
-  |> g @{ nodeId = "n2", position = (200.0, 200.0) }
+x = @nodeId("n1") @position(100, 200) f
+  |> @{ nodeId = "n2", position = (200.0, 200.0) } g
   |> h
 ```
 
-**Binding rule**: a postfix `@annotation` attaches only to the single closest-preceding atom (literal, identifier, parenthesized expression, or record/list/tuple literal) — never to a wider application or operator expression. `f y @nodeId("n1")` annotates `y`, not `f y`; hence the need for parens below:
+**Binding rule**: a prefix `@annotation` attaches only to the single closest-following atom (literal, identifier, parenthesized expression, or record/list/tuple literal) — never to a wider application or operator expression. `f @nodeId("n1") y` annotates `y`, not `f y`; hence the need for parens below:
 
 For complex sub-expressions wrap in parens first:
 
 ```knot
-x = (f a b) @{ nodeId = "n1", position = (100.0, 200.0) }
+x = @{ nodeId = "n1", position = (100.0, 200.0) } (f a b)
   |> g
 ```
 
