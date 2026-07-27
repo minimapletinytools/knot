@@ -27,6 +27,15 @@ pub struct ParseError {
     /// Enclosing rule names, outermost first, e.g. `["module", "declaration", "expression"]` —
     /// pushed on by `with_context` as the error unwinds back through the call stack.
     pub context: Vec<&'static str>,
+    /// Marks a genuine syntax error that must always propagate, as opposed to the
+    /// ordinary "this alternative didn't match" failures that drive the crate's
+    /// many "try X, fall back to Y on error" spots (application arguments,
+    /// optional trailing forms, etc.). Every such fallback loop checks this flag
+    /// before deciding to swallow an error and try something else — e.g. `f a _b c`
+    /// (a named hole isn't a valid expression placeholder) or `f- 1` (ambiguously
+    /// spaced `-`) must hard-fail rather than be silently reinterpreted as "`a` was
+    /// the last argument after all."
+    pub fatal: bool,
 }
 
 impl ParseError {
@@ -35,11 +44,17 @@ impl ParseError {
             kind,
             span,
             context: Vec::new(),
+            fatal: false,
         }
     }
 
     pub fn with_context(mut self, rule: &'static str) -> Self {
         self.context.push(rule);
+        self
+    }
+
+    pub fn fatal(mut self) -> Self {
+        self.fatal = true;
         self
     }
 }

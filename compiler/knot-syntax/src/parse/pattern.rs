@@ -73,6 +73,7 @@ impl<'a> ParseState<'a> {
             let checkpoint = self.clone();
             match self.pattern_atom() {
                 Ok(arg) => args.push(arg),
+                Err(err) if err.fatal => return Err(err),
                 Err(_) => {
                     *self = checkpoint;
                     break;
@@ -90,7 +91,11 @@ impl<'a> ParseState<'a> {
         }
     }
 
-    fn pattern_atom(&mut self) -> Result<Spanned<Pattern>, ParseError> {
+    /// `pub` because M4's lambda/function-parameter parsing reuses this directly:
+    /// a lambda parameter must be a single atom (`\x -> ...`, `\(Just x) -> ...`)
+    /// so that multiple params separated by spaces aren't ambiguous with a
+    /// constructor pattern's own arguments.
+    pub fn pattern_atom(&mut self) -> Result<Spanned<Pattern>, ParseError> {
         self.skip_trivia()?;
         let start = self.pos;
         match self.peek() {

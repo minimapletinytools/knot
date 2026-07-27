@@ -52,6 +52,23 @@ impl<'a> ParseState<'a> {
         Ok(())
     }
 
+    /// Skips trivia, then requires and consumes `->` as one atomic two-byte token
+    /// — deliberately *not* two separate `expect_byte` calls, since those would
+    /// each skip trivia independently and wrongly accept a stray space between
+    /// `-` and `>` as if it were still a single arrow.
+    pub fn expect_arrow(&mut self) -> Result<(), ParseError> {
+        self.skip_trivia()?;
+        if !(self.peek() == Some(b'-') && self.peek_at(1) == Some(b'>')) {
+            return Err(ParseError::new(
+                ErrorKind::Expected("`->`"),
+                Span::new(self.pos.offset, self.pos.offset),
+            ));
+        }
+        self.bump();
+        self.bump();
+        Ok(())
+    }
+
     /// The source text between byte offset `start` and the current position.
     /// Returns a slice borrowed from the *original* source (lifetime `'a`),
     /// independent of this method's own short-lived `&self` borrow, so callers can

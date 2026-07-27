@@ -72,8 +72,7 @@ impl<'a> ParseState<'a> {
         let left = self.type_app()?;
         self.skip_trivia()?;
         if self.peek() == Some(b'-') && self.peek_at(1) == Some(b'>') {
-            self.bump();
-            self.bump();
+            self.expect_arrow()?;
             let right = self.type_arrow()?;
             Ok(Type::Fn(Box::new(left), Box::new(right)))
         } else {
@@ -95,6 +94,7 @@ impl<'a> ParseState<'a> {
             let checkpoint = self.clone();
             match self.type_atom() {
                 Ok(arg) => args.push(arg),
+                Err(err) if err.fatal => return Err(err),
                 Err(_) => {
                     *self = checkpoint;
                     break;
