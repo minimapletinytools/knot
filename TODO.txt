@@ -1,11 +1,15 @@
 :: NEXT STEPS
     (support complete spec)
-    -language -> AST converter
+    -language -> source AST converter
+    -source AST -> canonical AST converter
+    -type analysis + dictionary passing stuff
+    -expression id generation (distinguish between stuff taht got stitched and stuff thats' original matching, cuz stitched stuff can't help with partial evals)
     -nodegraph UI rendering building blocks
 
     (only support MVP)
     -AST -> to nodegraph rendering
     -language runtime
+        -make sure to do expression identity stuff
 
     -linter
     -node graph -> AST mapping
@@ -57,6 +61,36 @@ nodegraph -> code
 -export binding connectors 
 
 
+:: 7/26/2026 expression marking notes
+
+We have 2 important features
+
+- debugging and errors with line numbers (obviously)
+- mapping from AST to the node graph UI layout should do "best effort" reconstruction to preserve the exiting layout 
+- the runtime needs to support partial revals both through input changes an through code changes
+
+in order to do this, we need to be able to give a semi-stale id to each expression allowing it to be mapped back to the UI nodes and the expression thunks in the runtime
+
+hashes can be evaluated for expressions allowing them to be uniquely matched to each other.
+
+note that some annotations affect the hash and some don't. technicalyl the runtime and ui could use different hashes but lets not do this for simplicity
+
+suggest doing this in 2 when running the AST thingy
+
+store the original AST
+first pass reconstrucst the AST, expressions that evaluate the same are of coures the same, for expressions that evaluate different, mark them in the original AST as dropped, and mark them in the new ast as new
+now do a comparison pass between the old and new, attempting to stitch stuff together where it makes sense according to the set of rules
+- new/old matching expressions within the same scopes are stiched together first
+- expand the scope by 1 and rerun the stitching algorithm
+- contiue, we may have some setof conditions on the scope after which we stop attempting to stitch
+
+note that the UI willalso store these hashse as semi stable ids that do presist betwene open/close. the UI is allowed to store session state but it seems like it's not needed for node stitching.
+
+
+some additional notes, the UI also serializes an ephemeral state file that prsecribes annotations to expressions via their expression hashes (this is useful for stuff like positions, we don't want to store every position into the file cuz it would bloat it so better to store it as a sidecar file, esp since we don't worry about losing stuff here)
+alternatively, the UI can serialize the state directly into the file with special annotations that get dropped in the editor when displaying to the user, but this kind asucks cuz agent has extra shit to parse so no
+
+
 
 
 
@@ -68,7 +102,8 @@ nodegraph -> code
     -figure out how to do note stuff for let bindings on patterns, especially irrefutable patterns/incomplete pattern
     -figure out how to do node stuff for `as` bindings
     -define all reserved keywords (sohuld eb same as elm plus a few extra?)
-    -consider getting rid of `let {f1 f2 f3} = someRecrod` pattern matching syntax, or allwo it and use it to enable the special record let binding syntax (actually that's probably better than implicit field access for special let bound record node)
+    -consider getting rid of `let {f1 f2 f3} = someRecrod` pattern matching syntax, or allwo it and use it to enable the special record let binding syntax (actually that's probably better than implicit field access for special let bound record node) 
+    -annotations not allowed on expression holes, we could techinacly allow this maybe?
     DONE-change postfix annotation to prefix notation
 
 
