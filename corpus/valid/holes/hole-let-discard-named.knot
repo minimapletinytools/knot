@@ -1,0 +1,5 @@
+result =
+  let
+    _debugValue = expensiveDebugCheck x
+  in
+    x

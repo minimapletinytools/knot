@@ -1,0 +1,2 @@
+-- expect: (a && b) || c -- && (prec 3) binds tighter than || (prec 2)
+x = a && b || c

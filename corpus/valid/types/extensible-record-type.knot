@@ -1,0 +1,2 @@
+distance :: { r | x : Float, y : Float } -> Float
+distance p = sqrt (p.x * p.x + p.y * p.y)

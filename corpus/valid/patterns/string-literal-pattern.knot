@@ -1,0 +1,4 @@
+greet name =
+  case name of
+    "admin" -> "Welcome, admin"
+    _       -> "Welcome, guest"

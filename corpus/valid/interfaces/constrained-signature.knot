@@ -1,0 +1,2 @@
+myMax :: Ord a => a -> a -> a
+myMax x y = if x > y then x else y

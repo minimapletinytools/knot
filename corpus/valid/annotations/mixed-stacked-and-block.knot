@@ -1,0 +1,5 @@
+@nodeId("f1")
+@position(100, 200)
+@{ color = "#a0c4ff", unravel = myCustomUnraveler }
+myFunc :: Int -> Int
+myFunc x = x + 1

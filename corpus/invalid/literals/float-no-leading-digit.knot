@@ -1,0 +1,2 @@
+-- expect: parse error — Float literals require a digit before the decimal point
+x = .5

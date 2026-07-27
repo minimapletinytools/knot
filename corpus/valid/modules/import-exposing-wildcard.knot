@@ -1,0 +1,5 @@
+module Example exposing (..)
+
+import String exposing (..)
+
+shout s = length (reverse s)

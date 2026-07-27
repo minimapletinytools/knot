@@ -1,0 +1,2 @@
+-- expect: parse error — `::` is the type-signature operator, not cons; use `:`
+xs = 1 :: []

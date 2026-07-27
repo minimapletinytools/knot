@@ -1,0 +1,2 @@
+-- expect: desugars to @{ label = "My Function" } -- single argument becomes a bare value
+x = @label("My Function") f

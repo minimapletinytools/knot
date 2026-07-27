@@ -1,0 +1,2 @@
+-- expect: annotation attaches to `y`, not to the whole `f y` application
+x = f @nodeId("n1") y

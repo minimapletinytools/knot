@@ -1,0 +1,5 @@
+module Example exposing (..)
+
+import List
+
+double xs = List.map (\x -> x * 2) xs

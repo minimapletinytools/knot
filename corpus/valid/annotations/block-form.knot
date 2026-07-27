@@ -1,0 +1,8 @@
+@{
+  nodeId   = "f1",
+  position = (100.0, 200.0),
+  label    = "My Function",
+  color    = "#a0c4ff"
+}
+myFunc :: Int -> Int
+myFunc x = x + 1

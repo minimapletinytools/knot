@@ -1,0 +1,9 @@
+compute =
+  let
+    outer =
+      let
+        inner = 10
+      in
+        inner + 1
+  in
+    outer * 2

@@ -1,0 +1,5 @@
+-- expect: parse error — pattern guards are not supported; use nested if/then/else instead
+classify n =
+  case n of
+    x | x > 0 -> "positive"
+    _         -> "non-positive"

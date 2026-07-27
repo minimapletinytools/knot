@@ -1,0 +1,2 @@
+-- expect: desugars to @{ position = (100, 200) } -- multiple arguments become a tuple
+x = @position(100, 200) f

@@ -1,0 +1,6 @@
+instance Eq Shape where
+  (==) a b =
+    case (a, b) of
+      (Circle r1, Circle r2)             -> r1 == r2
+      (Rectangle w1 h1, Rectangle w2 h2) -> w1 == w2 && h1 == h2
+      _                                  -> False

@@ -1,0 +1,5 @@
+-- expect: parse error — Float literal patterns are forbidden (unsound equality, matches Elm)
+isPi x =
+  case x of
+    3.14159 -> True
+    _       -> False

@@ -1,0 +1,2 @@
+counts :: Map String Int
+counts = Map.fromList [ ("apple", 1), ("banana", 2) ]

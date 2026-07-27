@@ -1,0 +1,5 @@
+combined =
+  do
+    x <- someOption
+    y <- anotherOption
+    pure (x + y)

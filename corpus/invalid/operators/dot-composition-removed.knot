@@ -1,0 +1,2 @@
+-- expect: parse error — `.` is not a composition operator in Knot (field access only)
+h = f . g

@@ -1,0 +1,5 @@
+-- expect: parse error — record shorthand destructuring `{ x, y }` is not supported;
+-- bind with `as` and use dot notation instead
+getX point =
+  case point of
+    { x, y } -> x

@@ -1,0 +1,2 @@
+-- expect: f (-1) -- whitespace before `-`, none after, binds tighter than application
+x = f -1

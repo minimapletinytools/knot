@@ -1,0 +1,2 @@
+-- expect: _ :: a (the return type of the lambda)
+identity = \x -> _

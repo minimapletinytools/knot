@@ -1,0 +1,2 @@
+-- expect: annotation attaches to `f`, the closest following atom
+x = @nodeId("n1") f y

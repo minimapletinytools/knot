@@ -1,0 +1,6 @@
+area =
+  let
+    radius = 5.0
+    pi     = 3.14159
+  in
+    pi * radius * radius

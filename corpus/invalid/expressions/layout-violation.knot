@@ -1,0 +1,7 @@
+-- expect: parse error — the second let-binding is not aligned with the first
+badLayout =
+  let
+    a = 1
+      b = 2
+  in
+    a + b

@@ -1,0 +1,3 @@
+-- expect: parse error — named holes (_name) are not valid expression placeholders;
+-- only bare `_` is allowed there (e.g. `f a _ c`, not `f a _b c`)
+result = zipWith _f _xs _ys

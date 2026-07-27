@@ -1,0 +1,2 @@
+-- expect: 1 : (2 : []), cons is right-associative
+xs = 1 : 2 : []

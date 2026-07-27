@@ -1,0 +1,4 @@
+negate b =
+  case b of
+    True  -> False
+    False -> True

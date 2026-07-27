@@ -1,0 +1,2 @@
+-- expect: parse error — comparison operators (==, /=, <, <=, >, >=) are non-associative
+x = a == b == c

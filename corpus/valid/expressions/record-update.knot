@@ -1,0 +1,1 @@
+movedRight point = { point | x = point.x + 1.0 }

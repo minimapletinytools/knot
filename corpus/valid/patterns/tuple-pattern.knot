@@ -1,0 +1,3 @@
+fst pair =
+  case pair of
+    (x, y) -> x

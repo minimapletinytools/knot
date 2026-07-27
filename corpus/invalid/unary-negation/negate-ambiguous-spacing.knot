@@ -1,0 +1,4 @@
+-- expect: parse error — `-` has no space before (right after `f`) but a space after;
+-- this asymmetric spacing is ambiguous between subtraction and negation and requires
+-- explicit parentheses or consistent spacing to disambiguate
+x = f- 1

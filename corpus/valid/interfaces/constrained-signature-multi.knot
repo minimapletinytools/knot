@@ -1,0 +1,2 @@
+convert :: (Integral a, Num b) => a -> b
+convert x = fromIntegral x

@@ -1,0 +1,2 @@
+-- expect: a - 1 (binary subtraction)
+x = a - 1

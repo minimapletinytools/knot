@@ -1,0 +1,5 @@
+volume shape =
+  case shape of
+    Sphere r     -> (4.0 / 3.0) * 3.14159 * r * r * r
+    Cube s       -> s * s * s
+    Cylinder r h -> 3.14159 * r * r * h

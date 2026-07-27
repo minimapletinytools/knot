@@ -1,0 +1,3 @@
+module Geometry exposing (..)
+
+type alias Point = { x : Float, y : Float }

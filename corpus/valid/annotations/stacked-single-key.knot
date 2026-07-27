@@ -1,0 +1,5 @@
+@nodeId("f1")
+@position(100, 200)
+@label("My Function")
+myFunc :: Int -> Int
+myFunc x = x + 1

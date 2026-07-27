@@ -1,0 +1,2 @@
+pair :: (Int, String)
+pair = (42, "hello")

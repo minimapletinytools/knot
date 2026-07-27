@@ -1,0 +1,4 @@
+-- expect: parse error (post-parse: duplicate top-level binding) — multi-clause function
+-- definitions are not supported; use `case` instead
+f 0 = 1
+f n = n

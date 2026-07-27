@@ -1,0 +1,3 @@
+-- expect: parse error (post-parse: tuple arity > 3) — tuples are capped at 3 elements
+quad :: (Int, Int, Int, Int)
+quad = (1, 2, 3, 4)

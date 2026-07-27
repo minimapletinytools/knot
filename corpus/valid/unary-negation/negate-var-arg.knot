@@ -1,0 +1,2 @@
+-- expect: f (-y)
+x = f -y

@@ -1,0 +1,2 @@
+-- expect: _ :: SomeType (compiler reports expected type at this position)
+result = f a _ c

@@ -1,0 +1,4 @@
+area shape =
+  case shape of
+    Circle r      -> 3.14159 * r * r
+    Rectangle w h -> w * h

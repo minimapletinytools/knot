@@ -1,0 +1,5 @@
+result =
+  let
+    _ = expensiveDebugCheck x
+  in
+    x

@@ -1,0 +1,2 @@
+-- expect: parse error — holes cannot carry annotations
+x = @nodeId("x") _

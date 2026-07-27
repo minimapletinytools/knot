@@ -1,0 +1,2 @@
+-- expect: parse error — `$` does not exist in Knot; use parens or |> instead
+x = f $ y
