@@ -71,6 +71,11 @@ impl<'a> ParseState<'a> {
         let mut args = Vec::new();
         loop {
             let checkpoint = self.clone();
+            self.skip_trivia()?;
+            if !self.continues_layout() {
+                *self = checkpoint;
+                break;
+            }
             match self.pattern_atom() {
                 Ok(arg) => args.push(arg),
                 Err(err) if err.fatal => return Err(err),

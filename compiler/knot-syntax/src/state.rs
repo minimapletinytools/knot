@@ -69,6 +69,35 @@ impl<'a> ParseState<'a> {
         Ok(())
     }
 
+    /// Skips trivia, then requires and consumes `..` atomically (same rationale
+    /// as `expect_arrow`) — used by `exposing (..)` and `Type(..)`.
+    pub fn expect_dotdot(&mut self) -> Result<(), ParseError> {
+        self.skip_trivia()?;
+        if !(self.peek() == Some(b'.') && self.peek_at(1) == Some(b'.')) {
+            return Err(ParseError::new(
+                ErrorKind::Expected("`..`"),
+                Span::new(self.pos.offset, self.pos.offset),
+            ));
+        }
+        self.bump();
+        self.bump();
+        Ok(())
+    }
+
+    /// True unless a reference indent is active and the cursor hasn't reached
+    /// strictly past it — i.e. "is the current position still a valid
+    /// continuation of whatever's being parsed inside the current layout block."
+    /// Checked before trying to consume one more application argument, one more
+    /// binop, or one more declaration parameter, so a sibling block item (which
+    /// sits *at* the reference column, not past it) is never misread as part of
+    /// the previous item.
+    pub fn continues_layout(&self) -> bool {
+        match self.indent {
+            None => true,
+            Some(col) => self.pos.col > col,
+        }
+    }
+
     /// The source text between byte offset `start` and the current position.
     /// Returns a slice borrowed from the *original* source (lifetime `'a`),
     /// independent of this method's own short-lived `&self` borrow, so callers can

@@ -26,7 +26,9 @@ impl<'a> ParseState<'a> {
         Ok(TypeSignature { constraints, ty })
     }
 
-    fn constraint_list_arrow(&mut self) -> Result<Vec<Constraint>, ParseError> {
+    /// `pub` because M5's `instance` declarations reuse it directly for their
+    /// own optional constraint list (`instance Eq a => Eq (Maybe a) where ...`).
+    pub fn constraint_list_arrow(&mut self) -> Result<Vec<Constraint>, ParseError> {
         self.skip_trivia()?;
         let constraints = if self.peek() == Some(b'(') {
             self.bump(); // '('
@@ -53,6 +55,7 @@ impl<'a> ParseState<'a> {
         }
         self.bump(); // '='
         self.bump(); // '>'
+        self.skip_trivia()?;
         Ok(constraints)
     }
 
@@ -92,6 +95,11 @@ impl<'a> ParseState<'a> {
         let mut args = Vec::new();
         loop {
             let checkpoint = self.clone();
+            self.skip_trivia()?;
+            if !self.continues_layout() {
+                *self = checkpoint;
+                break;
+            }
             match self.type_atom() {
                 Ok(arg) => args.push(arg),
                 Err(err) if err.fatal => return Err(err),
@@ -104,7 +112,11 @@ impl<'a> ParseState<'a> {
         Ok(Type::Named(name, args))
     }
 
-    fn type_atom(&mut self) -> Result<Type, ParseError> {
+    /// `pub` because M5's `instance` declarations reuse it directly for the
+    /// target type (`instance Eq Shape where` / `instance Eq (Maybe a) where`) --
+    /// a single atom, same reasoning as constructor/lambda arguments elsewhere:
+    /// anything with its own type arguments must be parenthesized there.
+    pub fn type_atom(&mut self) -> Result<Type, ParseError> {
         self.skip_trivia()?;
         match self.peek() {
             Some(b'(') => self.type_paren_or_tuple(),

@@ -65,13 +65,6 @@ impl<'a> ParseState<'a> {
         }
     }
 
-    fn continues_layout(&self) -> bool {
-        match self.indent {
-            None => true,
-            Some(col) => self.pos.col > col,
-        }
-    }
-
     /// Precedence-climbing over the fixed §4.8 table, producing a properly
     /// nested `BinOp` tree directly (never a flat chain to resolve later, unlike
     /// Elm — see `knot-ast-parser-plan.md` §2).
