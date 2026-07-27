@@ -1,7 +1,7 @@
 :: NEXT STEPS
     (support complete spec)
-    -language -> source AST converter
-    -source AST -> canonical AST converter
+    DONE-language -> source AST converter
+    DONE-source AST -> canonical AST converter
     -type analysis + dictionary passing stuff
     -expression id generation (distinguish between stuff taht got stitched and stuff thats' original matching, cuz stitched stuff can't help with partial evals)
     -nodegraph UI rendering building blocks
