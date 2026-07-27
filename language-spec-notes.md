@@ -219,8 +219,10 @@ Because Knot's operator set is closed (§2.3 — no user-defined operators), thi
 
 `-` is overloaded between subtraction and negation; Knot resolves this exactly like Elm
 does — a `-` with whitespace before but none after is unary negation binding tighter than
-application (`f -1` is `f (-1)`, not `f - 1`); any other spacing is either ordinary
-subtraction or a parse error requiring parentheses.
+application (`f -1` is `f (-1)`, not `f - 1`). Symmetric spacing (`a - 1` or `a-1`) is
+ordinary subtraction. The remaining case — whitespace *after* `-` but not before it
+(`f- 1`) — is a parse error: it's ambiguous between the two and must be disambiguated
+with parentheses or by fixing the spacing.
 
 ---
 

@@ -15,6 +15,7 @@ bottom - Möbius? lol
 bundle? - boxing nodes
 value - ?
 primitive value - ?
+ - pattern match node (like some kind astacked knot?)
 
 load, strand, bead, weave, filament? - value? maybe just use value, or how about bead? maybe strand could be used for promitives and bulit ins?
 
@@ -123,7 +124,19 @@ see connection section as well
 
 TODO IMPORTANT FIGURE THIS OUT
 
-need interface for adding new expressions (could be a V2 feature)
+pattern matched functions have a different visual appearance, very unique.
+
+there are actually sorta a stack of boxes within the box. there is one set of inputs and an outputs for each box
+
+the main box still has one set of input and an output connector from the side
+
+each box then has a set of pattern matched blocks in the same order as the main box. These look like mini let bindings that have internal connectors
+
+so then each box can do its thing 
+
+there is a + button for adding new expressions (could be a V2 feature)
+
+there is a warning for redunndant or missing matches
 
 
 #### function definition nodes 
@@ -208,11 +221,17 @@ they are flagged to be case nodes rather than calling a lambda, perhaps there is
 
 ### let bindings (value nodes)
 
-a let binding binds a value type to a node, it is directly connected to a connection (not via an input connector on the node, the node itself is connected to the connection)
+a let binding binds a value type to a node, it is directly connected to a connection (not via an input connector on the node, the node itself is connected to the connection, well I guess you could do the regular input connector style to make it consistent with pattern matchin function nodes)
 
-let binding nodes contain the name of the variable that the value is bound to
+let binding nodes contain the name of the variables that the values are bound to, and then contain a pattern match block
 
-let bindings have a singel "named" output node, these output nodes are specila as they can be multiplexed (multiple conectors coming out of it)
+let bindings have several output nodes for each value bound in its pattern.
+
+these output nodes are special as they can be multiplexed (multiple conectors coming out of it)
+
+#### symoblicated let binds
+
+TODO figure out how this works with multiple var pattern matches
 
 value nodes may also be symbolicated (pick better term) via `@symbolicate(symbol)` in the scope, allowing it to be created from the aether
 
@@ -328,7 +347,13 @@ modules with no entry points can export stuff. To export you drag a value to an 
 
 
 
+# pattern match block
 
+pattern match blocks are like sorta half connector half nodes
+
+they may come in stacks, and each stack take inputs in order, and then contain a series of pattern matches on the inputs in order, and then each pattern match block produces a box with internal connectors corresponding to the matches
+
+there is a special UI for showing and changing the patterns 
 
 # connection
 
