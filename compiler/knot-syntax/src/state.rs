@@ -165,6 +165,27 @@ impl<'a> ParseState<'a> {
         self.indent = saved;
         result
     }
+
+    /// Attempts `f`; if it fails, restores the position from before the attempt
+    /// (leaving the error itself untouched). This is the crate's one deliberate,
+    /// narrow use of backtracking — for the handful of spots where a short prefix
+    /// can't be told apart from its alternative without just trying it (e.g. is
+    /// `(Integral a, Num b)` the start of a constraint list, or an ordinary tuple
+    /// type?). Not a general "try anything, backtrack on any error" combinator —
+    /// callers should keep its scope as narrow as the ambiguity requires.
+    pub fn try_parse<T>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> Result<T, ParseError>,
+    ) -> Result<T, ParseError> {
+        let checkpoint = self.clone();
+        match f(self) {
+            Ok(value) => Ok(value),
+            Err(err) => {
+                *self = checkpoint;
+                Err(err)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
