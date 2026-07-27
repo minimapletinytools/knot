@@ -52,14 +52,17 @@ impl<'a> ParseState<'a> {
         let key = self.lower_ident()?.node;
         self.expect_byte(b'(')?;
         self.skip_trivia()?;
-        let mut args = vec![self.expr()?];
-        self.skip_trivia()?;
-        while self.peek() == Some(b',') {
-            self.bump();
-            self.skip_trivia()?;
-            args.push(self.expr()?);
-            self.skip_trivia()?;
-        }
+        let args = self.with_no_nested_annotations(|state| {
+            let mut args = vec![state.expr()?];
+            state.skip_trivia()?;
+            while state.peek() == Some(b',') {
+                state.bump();
+                state.skip_trivia()?;
+                args.push(state.expr()?);
+                state.skip_trivia()?;
+            }
+            Ok(args)
+        })?;
         self.expect_byte(b')')?;
         let value = if args.len() == 1 {
             args.into_iter().next().expect("checked len == 1 above")
@@ -89,7 +92,7 @@ impl<'a> ParseState<'a> {
             self.bump();
             return Ok(Vec::new());
         }
-        let fields = self.expr_record_field_list()?;
+        let fields = self.with_no_nested_annotations(|state| state.expr_record_field_list())?;
         self.expect_byte(b'}')?;
         Ok(fields)
     }
@@ -182,6 +185,42 @@ mod tests {
         let color = list.iter().find(|a| a.key == "color").unwrap();
         assert_eq!(color.value.node, Expr::StringLit("#a0c4ff".to_string()));
         assert_eq!(list.len(), 2); // color (block-won) + unravel
+    }
+
+    #[test]
+    fn annotation_value_supports_full_expression_grammar() {
+        // Pullback/unravel functions are full Knot lambdas, including nested
+        // `if`/application -- both annotation forms must accept the complete
+        // expression grammar as their value, not some restricted subset.
+        let src = r#"@{ unravel = \inputs sensitivity -> if isLinear inputs then leastNorm inputs sensitivity else iterative inputs sensitivity }"#;
+        let mut s = ParseState::new(src);
+        let list = s.annotation_list().unwrap();
+        assert_eq!(list[0].key, "unravel");
+        assert!(matches!(list[0].value.node, Expr::Lambda(_, _)));
+    }
+
+    #[test]
+    fn annotation_single_value_rejects_nested_annotation() {
+        let mut s = ParseState::new(r#"@foo(@bar("x") 1)"#);
+        let e = s.annotation_list().unwrap_err();
+        assert!(e.fatal);
+    }
+
+    #[test]
+    fn annotation_block_value_rejects_nested_annotation() {
+        let mut s = ParseState::new(r#"@{ unravel = @bar("x") someFunc }"#);
+        let e = s.annotation_list().unwrap_err();
+        assert!(e.fatal);
+    }
+
+    #[test]
+    fn nested_annotation_rejected_even_deep_inside_a_lambda_body() {
+        // The restriction applies recursively through the whole value
+        // expression, not just its outermost node.
+        let src = r#"@{ unravel = \x -> f @bar("x") x }"#;
+        let mut s = ParseState::new(src);
+        let e = s.annotation_list().unwrap_err();
+        assert!(e.fatal);
     }
 
     #[test]

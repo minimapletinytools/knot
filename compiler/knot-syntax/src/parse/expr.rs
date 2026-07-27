@@ -223,6 +223,15 @@ impl<'a> ParseState<'a> {
     fn expr_atom(&mut self) -> Result<Spanned<Expr>, ParseError> {
         self.skip_trivia()?;
         if self.peek() == Some(b'@') {
+            if self.in_annotation_value {
+                return Err(ParseError::new(
+                    ErrorKind::Custom(
+                        "annotation values cannot themselves carry annotations".to_string(),
+                    ),
+                    Span::new(self.pos.offset, self.pos.offset),
+                )
+                .fatal());
+            }
             let start = self.pos;
             let annotations = self.annotation_list()?;
             self.skip_trivia()?;

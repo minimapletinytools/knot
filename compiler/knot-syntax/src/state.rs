@@ -14,6 +14,15 @@ pub struct ParseState<'a> {
     /// Reference column for the innermost open layout block. `None` means no layout
     /// constraint is active yet (e.g. before the first top-level declaration).
     pub indent: Option<u32>,
+    /// True while parsing the value expression of an annotation (`@name(...)` or
+    /// `@{...}`), at any depth — set only around those two call sites in
+    /// `annotation.rs`, never inside the shared `expr_record_field`/
+    /// `expr_record_field_list` helpers those reuse (which must stay unrestricted
+    /// for plain record construction). `expr_atom` consults this to reject a
+    /// nested `@` anywhere inside an annotation's own value, since an unravel
+    /// function (or any other annotation value) has no node-graph representation
+    /// of its own for a nested annotation to attach to.
+    pub in_annotation_value: bool,
 }
 
 impl<'a> ParseState<'a> {
@@ -22,6 +31,7 @@ impl<'a> ParseState<'a> {
             src: src.as_bytes(),
             pos: Cursor::start(),
             indent: None,
+            in_annotation_value: false,
         }
     }
 
@@ -224,6 +234,22 @@ impl<'a> ParseState<'a> {
         self.indent = Some(self.pos.col);
         let result = f(self);
         self.indent = saved;
+        result
+    }
+
+    /// Run `f` with `in_annotation_value` set, restoring the previous value
+    /// afterward. Used only around the two spots in `annotation.rs` that parse
+    /// an annotation's own value expression, so `expr_atom` can reject a nested
+    /// `@` anywhere within it (spec: annotation values, including pullback/
+    /// unravel functions, cannot themselves carry annotations).
+    pub fn with_no_nested_annotations<T>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> Result<T, ParseError>,
+    ) -> Result<T, ParseError> {
+        let saved = self.in_annotation_value;
+        self.in_annotation_value = true;
+        let result = f(self);
+        self.in_annotation_value = saved;
         result
     }
 
