@@ -1,10 +1,13 @@
-# Unravel Design Discussion — 2026-07-29
+# Unravel Design Discussion — 2026-07-29 (continued 2026-07-30)
 
 A forked side-conversation working through `unravel` (reverse execution / pullback)
 design, starting from research into Sketch-n-Sketch (the closest real academic prior
-art) and ending at a fairly concrete signature proposal plus a live open question
-(push-forward / constraint propagation). Nothing here is committed to the spec yet —
-this is a discussion log to work from, not a decision record.
+art), through a concrete signature proposal and push-forward / constraint propagation,
+and continuing into a second day covering materialization (§11) and list diffing
+(§12) — cases that turned out not to be `unravel` proper, but sit close enough to it
+that they needed working out in the same pass. Nothing here is committed to the spec
+yet — this is a discussion log to work from, not a decision record. See also
+`unravel-examples.md` for the same material in reference-card form.
 
 ---
 
@@ -373,17 +376,167 @@ reasoning trail, including corrections.
 
 ---
 
-## 11. Open threads / not yet resolved
+## 11. Materialization: making it a framework feature
+
+Motivating case: a UI lets a user add a new object to a scene graph directly (e.g.
+dropping a new Cube onto the canvas), which is a `List SceneObject` in source, built by
+collecting individually-named object bindings. This turned out *not* to be `unravel` —
+the new object's value is fully known to the UI the instant it's created, so there's no
+unknown to solve for and `Sensitivity`/`UnravelInput` never enter the picture. What's
+actually needed is a different operation:
+
+1. **Serialize** the known value into Knot source via a canonical, always-reparseable
+   structural walk — related to, but distinct from, an overridable `Show` instance
+   (a user's hand-customized `show` might not round-trip; this needs the derivation-
+   based version specifically).
+2. **Mint identity**: a fresh, non-colliding top-level binding name, plus
+   `@nodeId`/`@position` annotations synthesized from data the UI already has (a
+   freshly-minted id, the canvas drop location) — giving the new object the same
+   shape as any hand-authored one, individually annotatable/unravelable from here on.
+3. **Locate** the target list via the node-identity/span tracking already required for
+   UI-layout preservation and partial re-eval (no new discovery mechanism).
+4. **Splice**: insert the new binding, append a reference to it.
+
+Deletion is the natural mirror, same non-`unravel` mechanism.
+
+**Revised: no interface needed at all — default-on, opt-out instead of opt-in.**
+The first pass here proposed a `Growable` interface (`insert`/`remove` dispatched per
+container type). That was solving a problem that doesn't exist: insert/remove on a
+literal `[e1, e2, ...]` node are pure AST rewrites (permute/extend the `Vec`, reprint)
+that need zero knowledge of the element type, so there's nothing to abstract over
+per-type — the operation is uniform across *any* element type by construction, not
+because a dictionary made it so. Given that, gating it behind an opt-in annotation adds
+friction without buying anything: *any* literal list, anywhere in a program, is
+materializable by default, no annotation needed to turn it on. The real gatekeeping was
+never a language-level concern anyway — a UI only ever offers a materialize gesture for
+things it actually renders as editable, so an always-on capability at the language
+level is harmless; nothing invokes it unless the UI specifically decides to.
+
+The annotation that's actually useful is the opposite — an explicit **opt-out**, for
+the (rare) case where the default convenience behavior would be semantically wrong:
+```knot
+@nomaterial(())
+sceneObjects :: List SceneObject
+sceneObjects = [cube1, sphere1]
+```
+`@nomaterial` makes an *attempted* materialize/remove against that binding fail
+cleanly rather than silently falling back to the default — consistent with
+exact-or-fail everywhere else in this design. (`@nomaterial(())`, not a bare
+`@nomaterial` — `knot-syntax`'s annotation grammar currently requires a parenthesized
+argument after every key; a bare-flag form is a real, small, not-yet-made parser
+change, not something to assume already works. `()` rather than `True`/`False` since
+only presence is ever meaningful.)
+
+Two genuinely separate reasons materialize can be unavailable, worth keeping distinct:
+`@nomaterial` is "mechanically possible, author doesn't want it here"; a **type
+constraint** — the element type needs a *derived* (not overridden) `Show` instance,
+plain data, no embedded functions — is "mechanically impossible regardless of what the
+author wants," checked automatically, a compile-time error instead of a runtime
+surprise for something like a `List (Int -> Int)`, and makes the "no new code
+synthesis" boundary (established repeatedly throughout this whole discussion) visible
+as a type check rather than an algorithmic limitation nobody notices until they hit it.
+
+**`Map` needs no separate treatment**: Knot has no `Map` literal syntax at all (spec
+§2.2 — `Map.fromList [...]` is the only constructor), so a `Map` in source is always,
+syntactically, a function call wrapping an ordinary `List (k, v)` literal.
+Materializing "into the Map" is really materializing a new `(key, value)` tuple into
+*that* underlying list literal — same mechanism, nothing Map-specific needed, no
+interface required to make this generalize. **Tuples don't apply**: fixed arity means
+"growing" one would change its type, not just its value — out of scope by construction,
+different from what materialization is for; per-position value change within an
+existing tuple is already ordinary unravel (nested `Sensitivity` recursion, §6),
+nothing new needed there either.
+
+See `unravel-examples.md`'s "Scene graph list append" entry for the full worked
+example.
+
+---
+
+## 12. List diffing: identity vs. position
+
+Once materialization existed for pure add/remove, the natural next question: what
+about a list-shaped output whose elements *change value* in place, or get *reordered*,
+with the length unchanged either way?
+
+**Value change, same length**: already fully handled, no new mechanism. A list
+literal's slots are ordinary expression positions — `Sensitivity (List b) =
+List (Sensitivity b)` (§6) already routes a per-slot target backward through whatever
+occupies that slot (a bare `Var` reference is trivially invertible), recursing into
+that binding's own unravel. Nothing about being inside a list changes anything here.
+
+**Reordering — where positional correspondence actually breaks**: `[cube1, sphere1]`
+→ `[sphere1, cube1]`, same elements, same length, just swapped. Applying the *same*
+positional logic here is wrong despite the length being unchanged: slot 0 (currently
+`cube1`) would be told "become `sphere1`'s current value" and vice versa — that tries
+to swap *identities*, not swap *positions*, semantically backwards and potentially a
+spurious type error or a coincidentally-typechecking but meaningless result. Length
+being unchanged is not, by itself, sufficient grounds for positional correspondence.
+
+**The fix**: match old-list to new-list elements by *identity* (`nodeId`), not index —
+the same "keyed diffing" approach React's virtual-DOM list reconciliation (and similar
+UI frameworks) uses list keys for, for exactly this reason. Given key-based matching:
+- new key, no old match → **materialize** (insert)
+- old key, no new match → **remove**
+- key in both, different index → **reorder**: pure source-text rearrangement of the
+  list literal's existing element references, no solving — same "already fully known,
+  nothing to solve for" character as materialization itself
+- key in both, same/moved index, different value → **ordinary unravel**
+
+These four classifications are independent, so mixed edits (add + reorder + one
+value-change, all at once) decompose cleanly per-key rather than needing one uniform
+diff strategy.
+
+**Same revision as §11: no interface, default-on, opt-out.** Reorder needs *even less*
+machinery than materialize — it never touches element values or types at all, purely
+rearranging which existing sub-expression sits where in a literal `Expr::List` node, so
+there was never anything to abstract over per-type in the first place. Default-on for
+any recognized list literal; opt out explicitly:
+```knot
+@noreorder(())
+```
+same shape and same clean-failure guarantee as `@nomaterial` — an attempted reorder
+against a `@noreorder`-marked list fails rather than silently proceeding. Kept as an
+*independent* annotation from `@nomaterial` rather than combined: a fixed-size top-3
+leaderboard might be reorderable but not growable; a tag bag might be growable with no
+meaningful order at all; a list can disable neither, either, or both.
+
+**Open, not resolved**: lists whose elements carry no identity at all have nothing to
+match on — a value-based fallback (Myers/LCS-style, treating value-equality as the
+match key) is strictly less precise (can't tell "coincidentally equal" from "same
+thing"), so requiring `nodeId` for anything living in a list where reorder/materialize
+might apply is probably better than maintaining two diffing strategies, but this hasn't
+been decided.
+
+See `unravel-examples.md`'s "List element value change" and "List reordering" entries.
+
+---
+
+## 13. Open threads / not yet resolved
 
 - Push-forward's "pin part of a hand-authored unravel's interior" mechanism — needs
   its own opt-in shape, not designed yet (§9).
-- `List T`'s `Sensitivity` doesn't cleanly handle length changes (§6) — genuinely out
-  of scope, or needs its own mechanism later.
 - Whether `solver` gets formally upgraded to many-unravel's joint-solving shape (§8) —
   proposed, not written into spec.
 - `unravel`'s interaction with the type checker (dictionary-passing, per
-  `knot-type-checker-plan.md`) hasn't been discussed at all yet — `Sensitivity T`
-  as a type-level transform presumably needs to exist inside that system somehow.
+  `knot-type-checker-plan.md`) — partially addressed: the plan now has a §3.5 covering
+  the general mechanism (annotation-key → expected-type derivation table) with
+  `unravel` as the worked case, but `@nomaterial`/`@noreorder` and the "element type
+  needs a derived `Show` instance" constraint haven't been folded into that plan yet
+  (no interface to add now that `Growable` was dropped — just two annotation-key
+  entries and one type constraint).
+- List-length changes are no longer a flat "out of scope" for `Sensitivity T` (§6) —
+  split into materialize/remove and reorder (§§11–12) for the case where the UI
+  already knows the concrete new/rearranged state, both resolved to default-on,
+  opt-out (`@nomaterial`/`@noreorder`), no interface needed. Still genuinely open: a
+  new element's parameters needing to be *derived* from existing scene state (not just
+  a literal drop) would reintroduce real unravel-style solving on top of the
+  materialization mechanism — not designed.
+- `@noreorder`'s (and `@nomaterial`'s) fallback for elements with no identity to key on
+  (§12) — flagged, not decided.
+- `@nomaterial(())`/`@noreorder(())` needing an explicit `()` argument, rather than a
+  bare `@nomaterial`, is a real current constraint of `knot-syntax`'s annotation
+  grammar (`expect_byte(b'(')` is unconditional after every key) — a bare-flag parser
+  addition would be a small, easy ergonomic win but hasn't been scoped or built.
 - None of this has been reconciled with spec §11's own acknowledged incompleteness
   ("TODO review this section... needs more work") — this document is input to that
   future pass, not a replacement for it.

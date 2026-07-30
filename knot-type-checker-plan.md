@@ -1,7 +1,5 @@
 # Knot Type Checker — Implementation Plan
 
-call it knot-checker
-
 Covers the crate that turns a `knot-canonical` `CModule` into a fully type-checked,
 dictionary-elaborated AST — "type analysis + dictionary passing stuff" from `TODO.txt`,
 the step after `knot-canonical`. This is a **plan only**, not yet implemented — see §8 for
@@ -27,12 +25,14 @@ built-ins + `instance` declarations, superclass-existence checking, and a dictio
 elaboration pass that produces a fully-typed AST with every interface method call resolved to
 an explicit dictionary argument.
 
-**Out**: the `unravel`/`solver` annotation keys' own type-checking rules (spec §11 is
-explicitly unreviewed — "TODO review this section, you never reviewed this lol" — designing
-their expected-type rule now would be building on sand; see §7's extension point instead),
-user-defined interfaces (v2, spec §14), evaluation/execution (Twine's job), and node-identity
-hashing (the earlier hashing discussion's own conclusion was that it needs *this* stage's
-output first — see §6's closing note).
+**Out**: `unravel`'s/`solver`'s own runtime semantics and the push-forward/constraint-
+propagation solving algorithm (Twine's job, not a type-checking concern) — but *not* their
+type-checking rule anymore. A full design pass on `unravel` happened since this plan was
+first written (`7-29-2026_unravel_discussion.md`), settling on a concrete signature shape;
+see §3.5 for what that means for this crate. Still out: user-defined interfaces (v2, spec
+§14), evaluation/execution (Twine's job), and node-identity hashing (the earlier hashing
+discussion's own conclusion was that it needs *this* stage's output first — see §6's
+closing note).
 
 ---
 
@@ -162,6 +162,66 @@ checking, so it belongs with the runtime/partial-reevaluation design, not decide
 
 ---
 
+## 3.5 Annotation type-checking (`unravel` and friends)
+
+Not identified as a gap until the `unravel` design pass (`7-29-2026_unravel_discussion.md`)
+worked through a concrete signature — worth folding in now while it's fresh, even though
+full implementation still waits on spec §11 stabilizing further.
+
+**The general gap this surfaces**: nothing in §§1–3 covers type-checking an *annotation's*
+value against an expected type. `knot-canonical` deliberately resolves annotation values as
+ordinary expressions regardless of key (name resolution doesn't need to know a key's
+expected type) — but *this* crate does, once it's checking rather than just resolving.
+Most standard keys (spec §10.4 — `nodeId :: String`, `position :: (Float, Float)`, `label
+:: String`, `collapsed :: Bool`, ...) have a fixed expected type, trivial to check. `unravel`
+is the hard case: its expected type isn't fixed, it's *derived* from the annotated binding's
+own signature.
+
+**The derivation rule**, given the settled signature shape: for
+`f :: A -> B -> C -> Out`, the `unravel` key's value must have type
+
+```
+Sensitivity Out -> UnravelInput A -> UnravelInput B -> UnravelInput C -> Option (A, B, C)
+```
+
+mechanically substituting `f`'s own param/return types into a fixed template. This needs a
+small, closed table — structurally the same shape as §3's interface-method table, just
+keyed by annotation name instead of interface name — mapping a handful of special keys to
+"how to derive this key's expected type from context" (a constant for most keys; a
+signature-parameterized template for `unravel`, and presumably `solver` once its own shape
+gets pinned down per the discussion doc's §8 proposal). Once the expected type is known,
+checking the annotation's value against it is ordinary type-checking — no new inference
+technique, just a new place that needs to *produce* an expected type before checking can
+start.
+
+**The reassuring part**: `Sensitivity`/`UnravelInput` were deliberately settled on as
+ordinary, hand-written ADTs/records (`type Sensitivity a = Exact a | Range a a | Tolerance
+a a | Free`; `type alias UnravelInput a = { orig : a, hints : List a }`) rather than an
+auto-derived "deep partial" transform — see the discussion doc §6 for why a real generic/
+type-family feature was rejected. That means this crate needs *zero* new type-system
+machinery for it: no type-level functions that recurse over a type's own field structure,
+nothing beyond the HM + closed-interface architecture already planned. The only genuinely
+new piece is the small annotation-key → expected-type table itself.
+
+**Concrete, not-yet-done follow-ups, deliberately not done as part of this edit**:
+- `Sensitivity`, `UnravelInput`, and `Exact`/`Range`/`Tolerance`/`Free` need to be added to
+  `knot-canonical::prelude`'s `BUILTIN_TYPES`/`BUILTIN_CONSTRUCTORS` once this is actually
+  implemented — premature before this crate (and the annotation-key table) exist to consume
+  them, and while spec §11 is still marked as needing more work.
+- Tuple-arity-≤3 interacts with multi-argument `unravel`: `Option (a, b, c)` is fine, but a
+  4+-parameter function's unravel needs `Option {a: A, b: B, c: C, d: D}` (a record) instead
+  of a bare tuple — the same existing rule (`knot-syntax::validate`) already applies
+  uniformly here, not a new restriction, just worth knowing as an authoring convention.
+- Annotation *values* elaborating correctly (dictionary-insertion reaching into an
+  `unravel`'s own body if it uses interface methods) needs no special-casing — the Elaborated
+  AST already mirrors `CAnnotation`'s `value: Spanned<CExpr>` shape, so it falls out for free
+  from elaborating the whole tree uniformly (§6/§7).
+
+No new milestone yet — folding this into TM6 once `interface/table.rs` exists, as a sibling
+`annotation/table.rs` with the same shape, is the likely spot (see §7).
+
+---
+
 ## 4. Core data design
 
 ```rust
@@ -264,8 +324,8 @@ the other side's row turns out to also have."
   check (they can unify with themselves but not silently specialize to a concrete type),
   the same guarantee Elm's `nameToRigid`/`RigidVar` provides and genuine let-polymorphism
   requires; without it, a signature would be a lie the checker doesn't actually enforce.
-- **Crate name: `knot-types`**, continuing the naming pattern (`knot-syntax` parses text
-  into syntax; `knot-canonical` resolves names into the canonical form; `knot-types` checks
+- **Crate name: `knot-checker`**, continuing the naming pattern (`knot-syntax` parses text
+  into syntax; `knot-canonical` resolves names into the canonical form; `knot-checker` checks
   and elaborates types). Workspace member alongside the other two, depending on
   `knot-canonical`.
 
@@ -274,7 +334,7 @@ the other side's row turns out to also have."
 ## 6. Crate & module layout
 
 ```
-compiler/knot-types/
+compiler/knot-checker/
   Cargo.toml                    (depends on knot-canonical)
   src/
     lib.rs                      -- check_module entry point
@@ -324,7 +384,9 @@ compiler/knot-types/
   stance, for the same reason).
 - **TM6** — `interface/table.rs`: the closed interface/method/superclass table (hardcoded,
   small). `interface/instance.rs`: table construction from built-ins + `knot-canonical`'s
-  already-validated `CInstanceDecl`s, coherence + superclass-existence checks.
+  already-validated `CInstanceDecl`s, coherence + superclass-existence checks. Likely spot
+  for a sibling `annotation/table.rs` (§3.5) once `unravel`'s design is stable enough to
+  implement, not blocking the rest of this milestone.
 - **TM7** — `elaborate.rs` + `ast.rs`: the post-solve dictionary-insertion pass producing
   the Elaborated AST — the crate's actual deliverable.
 - **TM8** — Built-in instance wiring (`Num Int`, `Num Float`, `Integral Int`,
@@ -366,5 +428,10 @@ dictionary actually gets threaded).
    written with a qualifier, or a distinct concrete function belonging to a real `List`
    stdlib module?). Doesn't block TM0–TM8, but does block designing the built-in
    `List`/`Map`/`String` module *interfaces* properly rather than ad hoc.
-4. **Confirm the crate name** (`knot-types`) and this plan's scope split before I start
+4. **Confirm the crate name** (`knot-checker`) and this plan's scope split before I start
    TM0 — same checkpoint pattern as the parser plan.
+5. **When does `annotation/table.rs` (§3.5) actually get implemented?** — the mechanism is
+   now clear enough to build, but it depends on spec §11 (unravel/solver) settling further
+   first, per the discussion doc's own "open threads." Gate it on that, or start it alongside
+   TM6 with just the fixed-expected-type keys (`nodeId`, `position`, ...) and leave `unravel`
+   itself stubbed until its design is less in flux?
