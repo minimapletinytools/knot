@@ -28,22 +28,44 @@
         RECOMMENDATION(n): constraint can be violetd in order of priority
         CACHE: just cached values to save solving time and ensure coherency during rerenders, can be dropped, may not ever get serialized tbh
 
-::  7/27 unravel
-
-basic version (no higher order functions)
-
-unravel 
-
-f_normal :: a -> b -> c -> out
-
-@unravel(funravel)
-
-f_normal_unravel: out -> out -> a -> b -> c -> (a, b, c)
-f_normal_unravel: out_desired out_orig a_orig b_orig c_orig = (a_new, b_new, c_new)
 
 
-needs more work
+::  7/29 unravel notes
 
+
+more unravelling notes
+
+unravels are slipknots if no unravel path within the knot diverges then converges
+
+simple unravel means 1 output creates 1 set of inputs
+
+more complicated means multiple sets of inputs
+
+allow type signatures to be postfix annotated (maybe @@) with runtime checked constraints? or maybe unverified complie time constraints 
+
+UI for an unravel should indicate how many other "bojects" potentioally get affected by tuning it
+
+big issue is that unravels outputs need to be flaggable at a more granular level e.g. 
+
+    fductions returns some struct a b c d e
+    you want to change b and you don't care about what happens a c d e
+
+    this is basically the configuration wen eed to be able to propogate down through teh chain, I don't think there's a nice way around it, the unravel inputs need to be able to indicate which parts of the desired output at the promitive level can be chnaged and ich can't. 
+
+
+considre trace based (sketch n sketch) unravelling as afallabck 
+trace = realized dependecy graph
+
+we can searc hthe realized depndency graph to prove if its a slipknot, except we can't because laziness hides some of the branches. you could always force those branches when attempting to unravel but you could also just attempt to unravel
+
+final output can have a specila unravel that allow syou to add new stuff to it (so you can create new obejcts or features in UI)
+
+Two failure modes — yes, and I'd keep them named as distinct because they need different UX/tooling: (1) is a local failure (this one function's own logic says "no"), (2) is a structural failure (the graph shape created a conflict this particular unravel never even gets a chance to reason about, since it only sees its own inputs/outputs). Case 2 is really a property of the composition, not of any single unravel — worth keeping that framing, because it's exactly what makes it analyzable independently of what any individual unravel's body does (more below).
+
+
+THE UNRAVLE FUNCTION
+
+f :: a -> b
 
 
 :: 7/26/2026 MVP REQS
