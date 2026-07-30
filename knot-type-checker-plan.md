@@ -1,5 +1,7 @@
 # Knot Type Checker — Implementation Plan
 
+call it knot-checker
+
 Covers the crate that turns a `knot-canonical` `CModule` into a fully type-checked,
 dictionary-elaborated AST — "type analysis + dictionary passing stuff" from `TODO.txt`,
 the step after `knot-canonical`. This is a **plan only**, not yet implemented — see §8 for

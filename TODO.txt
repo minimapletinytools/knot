@@ -28,6 +28,23 @@
         RECOMMENDATION(n): constraint can be violetd in order of priority
         CACHE: just cached values to save solving time and ensure coherency during rerenders, can be dropped, may not ever get serialized tbh
 
+::  7/27 unravel
+
+basic version (no higher order functions)
+
+unravel 
+
+f_normal :: a -> b -> c -> out
+
+@unravel(funravel)
+
+f_normal_unravel: out -> out -> a -> b -> c -> (a, b, c)
+f_normal_unravel: out_desired out_orig a_orig b_orig c_orig = (a_new, b_new, c_new)
+
+
+needs more work
+
+
 
 :: 7/26/2026 MVP REQS
 
