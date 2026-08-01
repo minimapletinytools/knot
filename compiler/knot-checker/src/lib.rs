@@ -8,12 +8,15 @@
 //! and `ty.rs` (the `Structure`/`Scheme` shapes) are TM0; `unify.rs` — full
 //! structural unification over `App`/`Fn`/`Tuple`/`Unit`/`Record` (the last
 //! via field-gathering), the occurs check, and rigid-variable handling — is
-//! TM1+TM2. Constraint generation over `CExpr`/`CPattern`/`CDecl` (TM3/TM4),
-//! `solve.rs` (TM5), the interface/instance and annotation tables (TM6), and
-//! dictionary elaboration (TM7) don't exist yet — there is no public
-//! `check_module` entry point until enough of those exist to make one
-//! meaningful.
+//! TM1+TM2. `constrain::{expr, pattern}` (TM3) generate `Constraint`s over
+//! everything but `BinOp`/`Negate` (need an interface table, not built yet),
+//! `Let` (needs TM4's SCC splitting), and `Do` (needs the Context interface).
+//! `constrain::decl` (TM4), `solve.rs` (TM5), the interface/instance and
+//! annotation tables (TM6), and dictionary elaboration (TM7) don't exist yet
+//! — there is no public `check_module` entry point until enough of those
+//! exist to make one meaningful.
 
+pub mod constrain;
 pub mod error;
 pub mod ty;
 pub mod unify;
