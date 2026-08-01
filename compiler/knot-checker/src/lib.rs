@@ -24,8 +24,13 @@
 //! `ast.rs`/`elaborate.rs` (TM7) give the target Elaborated-AST shape and a
 //! fully-working dictionary-*resolution* primitive, but not yet a complete
 //! `CExpr` -> `TExpr` tree walk — see `ast.rs`'s own doc comment for
-//! exactly what that still needs. There is no public `check_module` entry
-//! point until that walk exists.
+//! exactly what that still needs. `prelude.rs` (TM8) seeds real
+//! `SchemeEnv`/`InstanceTable` entries for every built-in value/instance
+//! this crate can currently give a correct signature to — see its own doc
+//! comment for the one real gap (`map`/`foldl`/... need higher-kinded
+//! polymorphism `Structure` doesn't represent yet). There is still no
+//! public `check_module` entry point — that needs the `ast.rs` tree-walk
+//! gap closed first.
 
 pub mod annotation;
 pub mod ast;
@@ -33,6 +38,7 @@ pub mod constrain;
 pub mod elaborate;
 pub mod error;
 pub mod interface;
+pub mod prelude;
 pub mod solve;
 pub mod ty;
 pub mod unify;
