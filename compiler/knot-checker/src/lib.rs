@@ -15,15 +15,19 @@
 //! `Constraint::Let` tree, and wires real rigid variables up for signed
 //! bindings. `solve.rs` (TM5) walks a `Constraint` tree, actually calling
 //! `unify`, generalizing top-level bindings into the `SchemeEnv`, and
-//! instantiating fresh copies at each `Lookup`. The interface/instance and
-//! annotation tables (TM6) and dictionary elaboration (TM7) don't exist yet
-//! — there is no public `check_module` entry point until enough of those
-//! exist to make one meaningful (`solve::PendingInstance`s a full checker
-//! would resolve against the real instance table are, for now, just
-//! returned to the caller unresolved).
+//! instantiating fresh copies at each `Lookup`. `interface::table`/
+//! `interface::instance` (TM6) hold the closed interface set and the
+//! per-module instance table `solve::PendingInstance`s get checked
+//! against; `annotation::table`/`annotation::sensitivity` derive an
+//! annotation key's expected type (though nothing yet checks a real
+//! annotation *value* against it — see `annotation::table`'s own docs).
+//! Dictionary elaboration (TM7) doesn't exist yet — there is no public
+//! `check_module` entry point until it does.
 
+pub mod annotation;
 pub mod constrain;
 pub mod error;
+pub mod interface;
 pub mod solve;
 pub mod ty;
 pub mod unify;

@@ -156,6 +156,16 @@ mod tests {
     }
 
     #[test]
+    fn unravel_input_resolves_as_an_opaque_builtin_stub() {
+        let env = Env::for_decls();
+        let mut errors = Vec::new();
+        let ty = Type::Named("UnravelInput".to_string(), vec![Type::Var("a".to_string())]);
+        let cty = resolve_type(&env, &ty, s(), &mut errors);
+        assert!(errors.is_empty());
+        assert!(matches!(cty, CType::Named(crate::ast::Ref::Builtin(_), _)));
+    }
+
+    #[test]
     fn unknown_type_is_an_error() {
         let env = Env::for_decls();
         let mut errors = Vec::new();

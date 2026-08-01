@@ -15,7 +15,7 @@ use knot_syntax::span::Spanned;
 /// is to confirm every name resolves somewhere and record which case it was,
 /// not to rename anything (a future stage can add uniquification if a specific
 /// later need, e.g. the node-identity hash, ever requires it).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Ref {
     /// Bound by an enclosing lambda param, `let`, `case` pattern, or do-bind.
     Local(String),

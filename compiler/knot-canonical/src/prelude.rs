@@ -22,12 +22,20 @@
 /// record/tuple shape rather than a normal nominal type. None of that
 /// expansion is implemented yet: for now `knot-checker` treats it exactly
 /// like `Option` or any other one-argument built-in — two `Sensitivity a`
-/// unify iff their `a`s do, with no introspection into `a`'s own shape. It
-/// has no data constructors of its own (nothing added to
-/// `BUILTIN_CONSTRUCTORS` below), matching how the eventual leaf constraint
-/// vocabulary (`Exact`/`Range`/`Tolerance`/`Free`, spec §13, still TBD) and
-/// `UnravelInput` are deliberately *not* added here yet either — premature
-/// before `knot-checker`'s annotation-checking layer exists to consume them.
+/// unify iff their `a`s do, with no introspection into `a`'s own shape.
+///
+/// `UnravelInput` is here for the same reason `knot-checker`'s
+/// `annotation/table.rs` (TM6) now needs it: deriving `unravel`'s expected
+/// type (plan §3.5/spec §9.1) builds `UnravelInput A -> UnravelInput B ->
+/// ...` from the annotated binding's own signature, so the name needs to
+/// resolve. Like `Sensitivity`, it's an opaque arity-1 head only — its
+/// actual shape (`type alias UnravelInput a = { orig : a, hints : List a }`)
+/// is never unified against here, only referenced by name. Neither type has
+/// data constructors of its own (nothing added to `BUILTIN_CONSTRUCTORS`
+/// below) — the eventual leaf constraint vocabulary
+/// (`Exact`/`Range`/`Tolerance`/`Free`, spec §13) is still TBD and
+/// deliberately not added yet, since nothing in `Sensitivity`'s current stub
+/// treatment or `unravel`'s derived template needs to look inside it.
 pub const BUILTIN_TYPES: &[&str] = &[
     "Bool",
     "Int",
@@ -41,6 +49,7 @@ pub const BUILTIN_TYPES: &[&str] = &[
     "IO",
     "Ordering",
     "Sensitivity",
+    "UnravelInput",
 ];
 
 /// `(constructor name, arity, owning type name)`.

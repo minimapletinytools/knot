@@ -49,10 +49,29 @@ pub enum TypeErrorKind {
     /// A rigid (signature-bound) type variable was asked to satisfy an
     /// interface its own signature never granted — checkable without any
     /// instance table at all, unlike an ordinary `HasInstance` obligation on
-    /// a concrete type (that needs `interface/table.rs`, TM6, and isn't
-    /// reported as a `TypeError` by this crate yet — see
-    /// `solve::PendingInstance`).
+    /// a concrete type (that one needs `interface::instance`'s table, right
+    /// below).
     NoInstanceForRigid {
         interface: String,
+    },
+    /// A concrete type's `HasInstance` obligation, checked against
+    /// `interface::instance::InstanceTable` (TM6) once solving resolves it —
+    /// no built-in or user `instance` declaration provides `interface` for
+    /// this type's own head.
+    NoInstance {
+        interface: String,
+    },
+    /// Two `instance` declarations for the same `(interface, head type)`
+    /// pair — coherence (plan §3): at most one instance per pair, matching
+    /// Haskell without extensions.
+    DuplicateInstance {
+        interface: String,
+    },
+    /// `instance Ord Shape` declared without an `Eq Shape` instance already
+    /// existing — a superclass obligation the closed interface table
+    /// (`interface::table`) says this interface requires.
+    MissingSuperclassInstance {
+        interface: String,
+        superclass: String,
     },
 }
