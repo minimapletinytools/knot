@@ -21,11 +21,16 @@
 //! against; `annotation::table`/`annotation::sensitivity` derive an
 //! annotation key's expected type (though nothing yet checks a real
 //! annotation *value* against it — see `annotation::table`'s own docs).
-//! Dictionary elaboration (TM7) doesn't exist yet — there is no public
-//! `check_module` entry point until it does.
+//! `ast.rs`/`elaborate.rs` (TM7) give the target Elaborated-AST shape and a
+//! fully-working dictionary-*resolution* primitive, but not yet a complete
+//! `CExpr` -> `TExpr` tree walk — see `ast.rs`'s own doc comment for
+//! exactly what that still needs. There is no public `check_module` entry
+//! point until that walk exists.
 
 pub mod annotation;
+pub mod ast;
 pub mod constrain;
+pub mod elaborate;
 pub mod error;
 pub mod interface;
 pub mod solve;
