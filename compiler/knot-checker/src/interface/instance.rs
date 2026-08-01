@@ -10,15 +10,17 @@
 //! unconditionally (`insert_builtin` never checks either): they're
 //! hand-written by this compiler, not user input to validate.
 //!
-//! **Not yet handled**: only `Structure::App`-headed obligations (an
-//! ordinary named type, built-in or user-defined) can be checked against
-//! this table at all — see `check_pending`. Extending `Eq`/`Ord`/`Show` to
-//! structural types (`Tuple`, `Record`) needs matching on the *shape* of a
-//! `Structure`, not a `Ref`, which is a different (and, notably, a
-//! genuinely *recursive* — a tuple's own `Eq`-ness depends on each
-//! element's) kind of lookup than this table does. A `Tuple`/`Record`/`Fn`/
-//! `Unit`-headed (or still-unresolved) obligation is left unresolved rather
-//! than either wrongly confirmed or wrongly rejected.
+//! **Not yet handled**: only `Structure::App`- or `Structure::Ctor`-headed
+//! obligations (an ordinary named type or a resolved constructor variable,
+//! built-in or user-defined either way) can be checked against this table
+//! at all — see `check_pending`. Extending `Eq`/`Ord`/`Show` to structural
+//! types (`Tuple`, `Record`) needs matching on the *shape* of a `Structure`,
+//! not a `Ref`, which is a different (and, notably, a genuinely *recursive*
+//! — a tuple's own `Eq`-ness depends on each element's) kind of lookup than
+//! this table does. A `Tuple`/`Record`/`Fn`/`Unit`-headed (or still-
+//! unresolved, including an unresolved `VarApp` head — a genuine kind
+//! error, spec §6.3/§6.4) obligation is left unresolved rather than either
+//! wrongly confirmed or wrongly rejected.
 //!
 //! Also not yet handled: a *parametric* instance's own constraints (e.g.
 //! `instance Eq a => Eq (List a)`'s `Eq a` requirement) aren't checked
@@ -132,8 +134,13 @@ pub fn build_instance_table(decls: &[Spanned<CDecl>]) -> (InstanceTable, Vec<Typ
 /// Checks every still-unresolved (concrete-typed) obligation `solve::solve`
 /// returned against `table`, appending a `TypeErrorKind::NoInstance` for
 /// each one with no matching entry. Anything not headed by a plain
-/// `Structure::App` (see module docs) is silently left unchecked, not
-/// flagged either way.
+/// `Structure::App` or a resolved `Structure::Ctor` (see module docs) is
+/// silently left unchecked, not flagged either way -- a `Collection`/
+/// `Context` obligation on a still-*unresolved* constructor variable lands
+/// here too (`sub.resolve_structure` returns `None` for it, same as any
+/// other unbound variable), which is correct: that's a kind error, not a
+/// missing-instance one, and this crate doesn't report kind errors yet
+/// (see `ty::Structure::VarApp`'s own doc comment).
 pub fn check_pending(
     sub: &mut Substitution,
     table: &InstanceTable,
@@ -141,7 +148,12 @@ pub fn check_pending(
     errors: &mut Vec<TypeError>,
 ) {
     for p in pending {
-        if let Some(Structure::App(head, _)) = sub.resolve_structure(p.ty) {
+        let head = match sub.resolve_structure(p.ty) {
+            Some(Structure::App(head, _)) => Some(head),
+            Some(Structure::Ctor(head)) => Some(head),
+            _ => None,
+        };
+        if let Some(head) = head {
             if !table.has_instance(&p.interface, &head) {
                 errors.push(TypeError {
                     span: p.span,
@@ -241,6 +253,57 @@ mod tests {
         let mut errors = Vec::new();
         check_pending(&mut sub, &table, pending, &mut errors);
         assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn check_pending_resolves_a_ctor_headed_obligation_against_the_table() {
+        let mut sub = Substitution::new();
+        let mut table = InstanceTable::new();
+        table.insert_builtin("Collection", Ref::Builtin("List".to_string()));
+        let ty = sub.fresh_bound(Structure::Ctor(Ref::Builtin("List".to_string())));
+        let pending = vec![PendingInstance {
+            span: knot_syntax::span::Span::new(0, 0),
+            interface: "Collection".to_string(),
+            ty,
+        }];
+        let mut errors = Vec::new();
+        check_pending(&mut sub, &table, pending, &mut errors);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn check_pending_flags_a_ctor_headed_obligation_with_no_instance() {
+        let mut sub = Substitution::new();
+        let table = InstanceTable::new();
+        let ty = sub.fresh_bound(Structure::Ctor(Ref::Builtin("IO".to_string())));
+        let pending = vec![PendingInstance {
+            span: knot_syntax::span::Span::new(0, 0),
+            interface: "Collection".to_string(),
+            ty,
+        }];
+        let mut errors = Vec::new();
+        check_pending(&mut sub, &table, pending, &mut errors);
+        assert!(errors.iter().any(
+            |e| matches!(&e.kind, TypeErrorKind::NoInstance { interface } if interface == "Collection")
+        ));
+    }
+
+    #[test]
+    fn check_pending_leaves_an_unresolved_ctor_var_unflagged() {
+        // A still-unbound constructor variable (never pinned to a concrete
+        // head) is a kind error, not a missing-instance one -- left alone
+        // here, same as any other still-unresolved obligation.
+        let mut sub = Substitution::new();
+        let table = InstanceTable::new();
+        let ty = sub.fresh_ctor_unbound();
+        let pending = vec![PendingInstance {
+            span: knot_syntax::span::Span::new(0, 0),
+            interface: "Collection".to_string(),
+            ty,
+        }];
+        let mut errors = Vec::new();
+        check_pending(&mut sub, &table, pending, &mut errors);
+        assert!(errors.is_empty());
     }
 
     #[test]

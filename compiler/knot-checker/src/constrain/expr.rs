@@ -15,14 +15,21 @@
 //! `Let` delegates to `constrain::decl::constrain_let_bindings` (TM4) for
 //! its SCC-based dependency splitting.
 //!
-//! **Not yet handled**: `Do` needs the Context interface's `pure`/`bind`
-//! dictionary story (spec §6.4). `Annotated`, by contrast, *is* handled —
-//! deliberately shallow: its annotation values aren't constrained here at
-//! all (that's TM6's annotation-checking layer, plan §3.5), so this pass
-//! only ever looks straight through to the target
-//! expression.
+//! `Do` (spec §6.4/§8) desugars straight to `bind`/`pure` calls
+//! (`desugar_do`) before ever reaching `constrain_expr` proper -- `do { x <-
+//! e1; rest }` becomes `bind e1 (\x -> rest)`, `do { e1; rest }` (a bare
+//! statement, its result discarded) becomes `bind e1 (\_ -> rest)`, exactly
+//! as spec §8 already documents. Reusing `App`/`Lambda`'s own constraint
+//! generation this way, rather than writing bespoke logic for `Do`, is what
+//! `bind`'s real `Context f => f a -> (a -> f b) -> f b` scheme (`prelude.
+//! rs`, Fix #2) is *for* -- the ordinary `Lookup`+instantiate path already
+//! handles everything a hand-rolled version would have to duplicate.
+//!
+//! **Not yet handled**: `Annotated`'s annotation values aren't constrained
+//! here at all (that's TM6's annotation-checking layer, plan §3.5), so this
+//! pass only ever looks straight through to the target expression.
 
-use knot_canonical::ast::{CExpr, Ref};
+use knot_canonical::ast::{CDoStmt, CExpr, CPattern, Ref};
 use knot_syntax::ast::expr::BinOp;
 use knot_syntax::span::{Span, Spanned};
 
@@ -394,10 +401,34 @@ pub fn constrain_expr(
             constraints.push(let_con);
             result_ty
         }
-        CExpr::Do(..) => {
-            todo!("Do needs the Context interface's pure/bind dictionary story (spec §6.4)")
+        CExpr::Do(stmts, final_expr) => {
+            let desugared = desugar_do(stmts, final_expr);
+            constrain_expr(sub, scope, &desugared, constraints)
         }
     }
+}
+
+/// `do { stmts...; final_expr }` -> nested `bind`/lambda calls, right-
+/// associatively -- see this module's own doc comment. `final_expr` is the
+/// base case, passed through completely unchanged (spec §8's own example
+/// ends in an explicit `pure (x + y)`; nothing here adds an implicit one).
+fn desugar_do(stmts: &[CDoStmt], final_expr: &Spanned<CExpr>) -> Spanned<CExpr> {
+    let Some((stmt, rest)) = stmts.split_first() else {
+        return final_expr.clone();
+    };
+    let (pattern, action) = match stmt {
+        CDoStmt::Bind(p, e) => (p.clone(), e.clone()),
+        CDoStmt::Expr(e) => (Spanned::new(e.span, CPattern::Wildcard(None)), e.clone()),
+    };
+    let span = action.span;
+    let rest_expr = desugar_do(rest, final_expr);
+    let continuation = Spanned::new(span, CExpr::Lambda(vec![pattern], Box::new(rest_expr)));
+    let bind_ref = Spanned::new(span, CExpr::Var(Ref::Builtin("bind".to_string())));
+    let bind_applied = Spanned::new(span, CExpr::App(Box::new(bind_ref), Box::new(action)));
+    Spanned::new(
+        span,
+        CExpr::App(Box::new(bind_applied), Box::new(continuation)),
+    )
 }
 
 #[cfg(test)]

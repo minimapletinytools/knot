@@ -9,8 +9,8 @@
 //! structural unification over `App`/`Fn`/`Tuple`/`Unit`/`Record` (the last
 //! via field-gathering), the occurs check, and rigid-variable handling — is
 //! TM1+TM2. `constrain::{expr, pattern}` (TM3) generate `Constraint`s over
-//! everything but `Do` (needs the Context interface's `pure`/`bind`, spec
-//! §6.4). `constrain::decl` (TM4) does SCC dependency splitting for
+//! every `CExpr`/`CPattern` shape, `Do` included (desugared to `bind`/`pure`
+//! calls, Fix #2). `constrain::decl` (TM4) does SCC dependency splitting for
 //! `let`/top-level binding groups, builds the resulting nested
 //! `Constraint::Let` tree, and wires real rigid variables up for signed
 //! bindings. `solve.rs` (TM5) walks a `Constraint` tree, actually calling
@@ -25,24 +25,33 @@
 //! fully-working dictionary-*resolution* primitive, but not yet a complete
 //! `CExpr` -> `TExpr` tree walk — see `ast.rs`'s own doc comment for
 //! exactly what that still needs. `prelude.rs` (TM8) seeds real
-//! `SchemeEnv`/`InstanceTable` entries for every built-in value/instance
-//! this crate can currently give a correct signature to — see its own doc
-//! comment for the one real gap (`map`/`foldl`/... need higher-kinded
-//! polymorphism `Structure` doesn't represent yet). There is still no
-//! public `check_module` entry point — that needs the `ast.rs` tree-walk
-//! gap closed first. `exhaustiveness.rs` (TM9, a stretch goal per the plan)
-//! is a fully self-contained pattern-match usefulness checker (Maranget's
-//! algorithm) — a warning-only pass, never wired into `check_module` at
-//! all since it doesn't need to be.
+//! `SchemeEnv`/`InstanceTable` entries for every built-in value/instance in
+//! the spec, `map`/`foldl`/`foldr`/`filter`/`length`/`pure`/`bind` included
+//! (Fix #2). There is still no public `check_module` entry point — that
+//! needs the `ast.rs` tree-walk gap closed first. `exhaustiveness.rs` (TM9,
+//! a stretch goal per the plan) is a fully self-contained pattern-match
+//! usefulness checker (Maranget's algorithm) — a warning-only pass, never
+//! wired into `check_module` at all since it doesn't need to be.
 //!
 //! **Post-TM9**: see `knot-checker-gaps-plan.md` at the repo root for a
 //! full audit of what TM0-TM9 left unsound (beyond the two already-known
-//! deferrals above) and the fix plan being worked through. Fix #1 is done:
-//! `let`-bound names now get real let-polymorphism too, not just top-level
-//! ones — `constrain::LocalBinding`/`Constraint::LookupLocal`/`solve.rs`'s
-//! `local_env` mirror the `Ref::TopLevel`/`Lookup`/`SchemeEnv` machinery
-//! for names `Ref::Local` can't otherwise tell apart from an ordinary
-//! monomorphic param.
+//! deferrals above) and the fix plan being worked through.
+//!
+//! - **Fix #1** (done): `let`-bound names now get real let-polymorphism too,
+//!   not just top-level ones — `constrain::LocalBinding`/`Constraint::
+//!   LookupLocal`/`solve.rs`'s `local_env` mirror the `Ref::TopLevel`/
+//!   `Lookup`/`SchemeEnv` machinery for names `Ref::Local` can't otherwise
+//!   tell apart from an ordinary monomorphic param.
+//! - **Fix #2** (done): `map`/`foldl`/`foldr`/`filter`/`length`/`pure`/
+//!   `bind` (spec §6.3/§6.4) now have real, polymorphic-over-a-type-
+//!   constructor signatures — `ty::Structure::Ctor`/`VarApp`,
+//!   `Substitution::fresh_ctor_unbound`, and two new `Collection`/`Context`
+//!   interfaces (`interface::table`, seeded in `prelude.rs` for `List`/
+//!   `Map`/`Option`/`Result`/`IO`) are the whole of it — deliberately *not*
+//!   general kind polymorphism, just enough closed-set machinery for these
+//!   seven built-ins (see `ty::Structure::VarApp`'s own doc comment). `Do`
+//!   (`constrain::expr::desugar_do`) is real now too, since it falls
+//!   straight out of `bind`/`pure` having real schemes.
 
 pub mod annotation;
 pub mod ast;

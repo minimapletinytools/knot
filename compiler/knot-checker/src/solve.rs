@@ -470,9 +470,29 @@ fn copy_structure(
             sub.fresh_bound(Structure::Record(new_fields, new_ext))
         }
         Some(Structure::Unit) => sub.fresh_bound(Structure::Unit),
+        Some(Structure::Ctor(r)) => sub.fresh_bound(Structure::Ctor(r)),
+        // The constructor-variable head goes through `copy_structure` too,
+        // exactly like any other child -- if it's one of `scheme.vars`
+        // (the common case: `map`'s own `f`), the `mapping` check at the
+        // top of this function catches it and returns the fresh copy
+        // already reserved for it; if it's some outer, non-generalized
+        // constructor variable, it falls through to the `None` arm below
+        // and is correctly shared as-is instead.
+        Some(Structure::VarApp(f, args)) => {
+            let nf = copy_structure(sub, f, mapping);
+            let new_args = args
+                .iter()
+                .map(|a| copy_structure(sub, *a, mapping))
+                .collect();
+            sub.fresh_bound(Structure::VarApp(nf, new_args))
+        }
         // Unbound (free in the ambient environment, not one of `scheme.vars`)
         // or Rigid (belongs to some enclosing signature) -- neither gets
-        // copied; both are shared as-is with the original.
+        // copied; both are shared as-is with the original. An unresolved
+        // constructor variable (`fresh_ctor_unbound`, never bound to a
+        // `Ctor`) also lands here, for the same reason -- see `ty::
+        // Structure::VarApp`'s own doc comment on why it needs no separate
+        // case.
         None => root,
     }
 }

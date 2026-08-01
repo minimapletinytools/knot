@@ -112,6 +112,16 @@ pub(crate) fn structure_children(structure: &Structure) -> Vec<TypeVarId> {
             children
         }
         Structure::Unit => Vec::new(),
+        Structure::Ctor(_) => Vec::new(),
+        // The constructor-variable head counts as a child too, exactly
+        // like an ordinary type argument -- that's what lets both the
+        // occurs check and `solve::free_vars` see it (see
+        // `ty::Structure::VarApp`'s own doc comment).
+        Structure::VarApp(f, args) => {
+            let mut children = vec![*f];
+            children.extend(args.iter().copied());
+            children
+        }
     }
 }
 
@@ -144,6 +154,37 @@ fn unify_structure(
         }
         (Structure::Record(fields1, ext1), Structure::Record(fields2, ext2)) => {
             unify_record(sub, a, b, fields1, ext1, fields2, ext2)
+        }
+        (Structure::Ctor(ra), Structure::Ctor(rb)) if ra == rb => Ok(()),
+        // Two constructor-variable-headed applications: the heads unify
+        // like any other pair of type variables (through the ordinary
+        // top-level `unify`, which naturally lands back on the `Ctor`-vs-
+        // `Ctor` case above once both resolve), then each argument
+        // pairwise -- exactly `App`'s own same-head rule, just with a
+        // variable in the head position instead of a fixed `Ref`.
+        (Structure::VarApp(fa, args_a), Structure::VarApp(fb, args_b))
+            if args_a.len() == args_b.len() =>
+        {
+            unify(sub, fa, fb)?;
+            for (x, y) in args_a.into_iter().zip(args_b) {
+                unify(sub, x, y)?;
+            }
+            Ok(())
+        }
+        // A constructor variable meeting a concrete application: pin the
+        // variable to that head (via the ordinary `unify` -- correctly
+        // erroring if it was already resolved to some *other* head), then
+        // unify arguments pairwise.
+        (Structure::VarApp(f, args_a), Structure::App(r, args_b))
+        | (Structure::App(r, args_b), Structure::VarApp(f, args_a))
+            if args_a.len() == args_b.len() =>
+        {
+            let ctor = sub.fresh_bound(Structure::Ctor(r));
+            unify(sub, f, ctor)?;
+            for (x, y) in args_a.into_iter().zip(args_b) {
+                unify(sub, x, y)?;
+            }
+            Ok(())
         }
         _ => Err(UnifyError::Mismatch {
             expected: a,
@@ -404,6 +445,80 @@ mod tests {
         let triple = sub.fresh_bound(Structure::Tuple(vec![int_ty, bool_ty, int_ty]));
         assert!(matches!(
             unify(&mut sub, pair, triple),
+            Err(UnifyError::Mismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn ctor_var_pins_to_a_concrete_head_it_meets_and_unifies_arguments() {
+        // f a ~ List Int should bind f := List and a := Int, mirroring an
+        // ordinary generic App's own argument-unification rule, just with
+        // a variable in the head position (spec §6.3's Collection, e.g.
+        // `map`'s `f`).
+        let mut sub = Substitution::new();
+        let f = sub.fresh_ctor_unbound();
+        let a = sub.fresh_unbound();
+        let fa = sub.fresh_bound(Structure::VarApp(f, vec![a]));
+        let int_ty = app0(&mut sub, "Int");
+        let list_int = app1(&mut sub, "List", int_ty);
+        assert!(unify(&mut sub, fa, list_int).is_ok());
+        assert_eq!(
+            sub.resolve_structure(f),
+            Some(Structure::Ctor(Ref::Builtin("List".to_string())))
+        );
+        assert_eq!(sub.resolve_structure(a), Some(builtin_app(&mut sub, "Int")));
+    }
+
+    fn builtin_app(sub: &mut Substitution, name: &str) -> Structure {
+        let id = app0(sub, name);
+        sub.resolve_structure(id).unwrap()
+    }
+
+    #[test]
+    fn two_ctor_vars_unify_their_heads_and_arguments() {
+        let mut sub = Substitution::new();
+        let f = sub.fresh_ctor_unbound();
+        let g = sub.fresh_ctor_unbound();
+        let a = sub.fresh_unbound();
+        let b = sub.fresh_unbound();
+        let fa = sub.fresh_bound(Structure::VarApp(f, vec![a]));
+        let gb = sub.fresh_bound(Structure::VarApp(g, vec![b]));
+        assert!(unify(&mut sub, fa, gb).is_ok());
+        assert_eq!(sub.find(f), sub.find(g));
+        assert_eq!(sub.find(a), sub.find(b));
+    }
+
+    #[test]
+    fn ctor_var_already_pinned_to_one_head_rejects_a_different_one() {
+        let mut sub = Substitution::new();
+        let f = sub.fresh_ctor_unbound();
+        let a = sub.fresh_unbound();
+        let fa = sub.fresh_bound(Structure::VarApp(f, vec![a]));
+        let int_ty = app0(&mut sub, "Int");
+        let list_int = app1(&mut sub, "List", int_ty);
+        unify(&mut sub, fa, list_int).unwrap();
+
+        let b = sub.fresh_unbound();
+        let fb = sub.fresh_bound(Structure::VarApp(f, vec![b]));
+        let bool_ty = app0(&mut sub, "Bool");
+        let option_bool = app1(&mut sub, "Option", bool_ty);
+        assert!(matches!(
+            unify(&mut sub, fb, option_bool),
+            Err(UnifyError::Mismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn mismatched_ctor_app_arity_fails() {
+        let mut sub = Substitution::new();
+        let f = sub.fresh_ctor_unbound();
+        let a = sub.fresh_unbound();
+        let b = sub.fresh_unbound();
+        let fab = sub.fresh_bound(Structure::VarApp(f, vec![a, b]));
+        let int_ty = app0(&mut sub, "Int");
+        let list_int = app1(&mut sub, "List", int_ty);
+        assert!(matches!(
+            unify(&mut sub, fab, list_int),
             Err(UnifyError::Mismatch { .. })
         ));
     }

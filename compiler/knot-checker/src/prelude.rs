@@ -4,18 +4,14 @@
 //! `knot-canonical::prelude` — that crate answers "is this name real,"
 //! this one answers "what type does it have."
 //!
-//! **Not seeded, and not able to be yet: the Collection/Context interface
-//! values** (spec §6.3/§6.4) — `map`, `foldl`, `foldr`, `filter`, `length`,
-//! `pure`, `bind`. Their signatures (`map :: (a -> b) -> f a -> f b`) are
-//! polymorphic over `f` itself, a type *constructor* (`List`, `Map`,
-//! `Option`, ...), not an ordinary type — `Structure::App(Ref, Vec
-//! <TypeVarId>)` has no way to represent "some type constructor, not yet
-//! known" as a `TypeVarId`, only a concrete `Ref` head. Giving these a
-//! signature at all needs a real design decision (a new `Structure` variant
-//! for a higher-kinded variable, plus everywhere that pattern-matches
-//! `Structure` learning what it means) that's genuinely out of scope to
-//! invent as a byproduct of seeding the prelude — flagged here rather than
-//! worked around with an incorrect concrete-`f` signature.
+//! **`Collection`/`Context`** (spec §6.3/§6.4) — `map`, `foldl`, `foldr`,
+//! `filter`, `length`, `pure`, `bind` — are seeded with real, higher-kinded
+//! signatures now (`knot-checker-gaps-plan.md`'s Fix #2): each one's `f` is
+//! a `Substitution::fresh_ctor_unbound` variable threaded through a
+//! `Structure::VarApp`, exactly like an ordinary type variable elsewhere in
+//! this file, just constrained by `Collection`/`Context` instead of e.g.
+//! `Num`. See `ty::Structure::VarApp`'s own doc comment for why that needs
+//! no new machinery beyond the two `Structure` variants themselves.
 //!
 //! Also not seeded: `Eq`/`Ord`/`Show` for `List`/`Option`/`Result` are
 //! registered as head-level instances (so `List Int == List Int`-shaped
@@ -35,6 +31,33 @@ use crate::var::Substitution;
 
 fn app0(sub: &mut Substitution, name: &str) -> crate::var::TypeVarId {
     sub.fresh_bound(Structure::App(Ref::Builtin(name.to_string()), vec![]))
+}
+
+/// `f arg` for a constructor-*variable*-headed application (spec §6.3/§6.4)
+/// -- the higher-kinded counterpart of `app0`/`app1` above, which only ever
+/// build a fixed, concrete head.
+fn var_app(
+    sub: &mut Substitution,
+    f: crate::var::TypeVarId,
+    arg: crate::var::TypeVarId,
+) -> crate::var::TypeVarId {
+    sub.fresh_bound(Structure::VarApp(f, vec![arg]))
+}
+
+/// Builds the curried function type `args[0] -> args[1] -> ... -> ret`,
+/// folding from the right exactly like every hand-curried signature
+/// elsewhere in this file (and `constrain::expr`'s `Lambda` case) already
+/// does -- factored out here since `Collection`/`Context`'s signatures are
+/// long enough that repeating the fold inline at each one would obscure the
+/// actual shape being built.
+fn curried(
+    sub: &mut Substitution,
+    args: &[crate::var::TypeVarId],
+    ret: crate::var::TypeVarId,
+) -> crate::var::TypeVarId {
+    args.iter()
+        .rev()
+        .fold(ret, |acc, &a| sub.fresh_bound(Structure::Fn(a, acc)))
 }
 
 /// Populates a fresh `SchemeEnv`/`InstanceTable` pair with every built-in
@@ -71,12 +94,24 @@ fn seed_instances(table: &mut InstanceTable) {
         table.insert_builtin("Ord", Ref::Builtin(container.to_string()));
         table.insert_builtin("Show", Ref::Builtin(container.to_string()));
     }
+
+    // spec §6.3/§6.4: Collection (List, Map), Context (Option, Result, IO,
+    // List) -- keyed by the constructor's own `Ref`, exactly like every
+    // other instance here; `interface::instance::check_pending`'s new
+    // `Structure::Ctor` branch is what actually resolves a `map`/`bind`
+    // caller's obligation against these.
+    table.insert_builtin("Collection", Ref::Builtin("List".to_string()));
+    table.insert_builtin("Collection", Ref::Builtin("Map".to_string()));
+    for context in ["Option", "Result", "IO", "List"] {
+        table.insert_builtin("Context", Ref::Builtin(context.to_string()));
+    }
 }
 
 fn seed_values(sub: &mut Substitution, env: &mut SchemeEnv) {
     let bool_ty = app0(sub, "Bool");
     let string_ty = app0(sub, "String");
     let ordering_ty = app0(sub, "Ordering");
+    let int_ty = app0(sub, "Int");
 
     // not :: Bool -> Bool (spec §4.8's "Boolean Operators" note)
     let not_ty = sub.fresh_bound(Structure::Fn(bool_ty, bool_ty));
@@ -187,7 +222,143 @@ fn seed_values(sub: &mut Substitution, env: &mut SchemeEnv) {
         );
     }
 
+    seed_collection_and_context(sub, env, bool_ty, int_ty);
     seed_constructors(sub, env, bool_ty, ordering_ty);
+}
+
+/// Real, higher-kinded signatures for spec §6.3's `Collection` (`map`,
+/// `foldl`, `foldr`, `filter`, `length`) and §6.4's `Context` (`pure`,
+/// `bind`) -- each one's `f` is a `Substitution::fresh_ctor_unbound`
+/// variable, constrained by the relevant interface exactly like an ordinary
+/// type variable elsewhere in this file is constrained by e.g. `Num`.
+fn seed_collection_and_context(
+    sub: &mut Substitution,
+    env: &mut SchemeEnv,
+    bool_ty: crate::var::TypeVarId,
+    int_ty: crate::var::TypeVarId,
+) {
+    // map :: Collection f => (a -> b) -> f a -> f b
+    {
+        let f = sub.fresh_ctor_unbound();
+        let a = sub.fresh_unbound();
+        let b = sub.fresh_unbound();
+        let a_to_b = sub.fresh_bound(Structure::Fn(a, b));
+        let fa = var_app(sub, f, a);
+        let fb = var_app(sub, f, b);
+        let ty = curried(sub, &[a_to_b, fa], fb);
+        env.insert(
+            SchemeKey::Builtin("map".to_string()),
+            Scheme {
+                vars: vec![f, a, b],
+                constraints: vec![(f, "Collection".to_string())],
+                ty,
+            },
+        );
+    }
+
+    // foldl :: Collection f => (b -> a -> b) -> b -> f a -> b
+    {
+        let f = sub.fresh_ctor_unbound();
+        let a = sub.fresh_unbound();
+        let b = sub.fresh_unbound();
+        let combine = curried(sub, &[b, a], b);
+        let fa = var_app(sub, f, a);
+        let ty = curried(sub, &[combine, b, fa], b);
+        env.insert(
+            SchemeKey::Builtin("foldl".to_string()),
+            Scheme {
+                vars: vec![f, a, b],
+                constraints: vec![(f, "Collection".to_string())],
+                ty,
+            },
+        );
+    }
+
+    // foldr :: Collection f => (a -> b -> b) -> b -> f a -> b
+    {
+        let f = sub.fresh_ctor_unbound();
+        let a = sub.fresh_unbound();
+        let b = sub.fresh_unbound();
+        let combine = curried(sub, &[a, b], b);
+        let fa = var_app(sub, f, a);
+        let ty = curried(sub, &[combine, b, fa], b);
+        env.insert(
+            SchemeKey::Builtin("foldr".to_string()),
+            Scheme {
+                vars: vec![f, a, b],
+                constraints: vec![(f, "Collection".to_string())],
+                ty,
+            },
+        );
+    }
+
+    // filter :: Collection f => (a -> Bool) -> f a -> f a
+    {
+        let f = sub.fresh_ctor_unbound();
+        let a = sub.fresh_unbound();
+        let pred = curried(sub, &[a], bool_ty);
+        let fa = var_app(sub, f, a);
+        let ty = curried(sub, &[pred, fa], fa);
+        env.insert(
+            SchemeKey::Builtin("filter".to_string()),
+            Scheme {
+                vars: vec![f, a],
+                constraints: vec![(f, "Collection".to_string())],
+                ty,
+            },
+        );
+    }
+
+    // length :: Collection f => f a -> Int
+    {
+        let f = sub.fresh_ctor_unbound();
+        let a = sub.fresh_unbound();
+        let fa = var_app(sub, f, a);
+        let ty = curried(sub, &[fa], int_ty);
+        env.insert(
+            SchemeKey::Builtin("length".to_string()),
+            Scheme {
+                vars: vec![f, a],
+                constraints: vec![(f, "Collection".to_string())],
+                ty,
+            },
+        );
+    }
+
+    // pure :: Context f => a -> f a
+    {
+        let f = sub.fresh_ctor_unbound();
+        let a = sub.fresh_unbound();
+        let fa = var_app(sub, f, a);
+        let ty = curried(sub, &[a], fa);
+        env.insert(
+            SchemeKey::Builtin("pure".to_string()),
+            Scheme {
+                vars: vec![f, a],
+                constraints: vec![(f, "Context".to_string())],
+                ty,
+            },
+        );
+    }
+
+    // bind :: Context f => f a -> (a -> f b) -> f b (also exposed as (>>=), spec §6.4)
+    {
+        let f = sub.fresh_ctor_unbound();
+        let a = sub.fresh_unbound();
+        let b = sub.fresh_unbound();
+        let fa = var_app(sub, f, a);
+        let fb = var_app(sub, f, b);
+        let a_to_fb = curried(sub, &[a], fb);
+        let ty = curried(sub, &[fa, a_to_fb], fb);
+        env.insert(
+            SchemeKey::Builtin("bind".to_string()),
+            Scheme {
+                vars: vec![f, a, b],
+                constraints: vec![(f, "Context".to_string())],
+                ty,
+            },
+        );
+    }
 }
 
 fn seed_constructors(
@@ -353,6 +524,183 @@ mod tests {
                 assert_eq!(sub.resolve_structure(ret), sub.resolve_structure(float_ty));
             }
             other => panic!("expected a -> Float, got {other:?}"),
+        }
+    }
+
+    /// Normalizes either an ordinary `App` or a *resolved* `VarApp` (head
+    /// pinned to a concrete `Ctor`) into `(head, args)` -- `resolve_structure`
+    /// deliberately doesn't do this rewriting itself (a `VarApp` node's own
+    /// stored structure never changes just because its head variable later
+    /// gets resolved elsewhere; see `ty::Structure::VarApp`'s own doc
+    /// comment), so these tests need to peek one level further for anything
+    /// built through `map`/`filter`/etc.
+    fn resolved_head(
+        sub: &mut Substitution,
+        ty: crate::var::TypeVarId,
+    ) -> Option<(Ref, Vec<crate::var::TypeVarId>)> {
+        match sub.resolve_structure(ty)? {
+            Structure::App(r, args) => Some((r, args)),
+            Structure::VarApp(f, args) => match sub.resolve_structure(f)? {
+                Structure::Ctor(r) => Some((r, args)),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn map_over_a_list_literal_infers_list_of_the_result_type() {
+        let mut sub = Substitution::new();
+        let (mut env, table) = seed(&mut sub);
+        let cs = decls("result = map (\\x -> x + 1) [1, 2, 3]\n");
+        let tree = constrain_module(&mut sub, &cs);
+        let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        assert!(errors.is_empty(), "{errors:?}");
+        check_pending(&mut sub, &table, pending, &mut errors);
+        assert!(errors.is_empty(), "{errors:?}");
+
+        let scheme = env
+            .get(&SchemeKey::TopLevel("result".to_string()))
+            .expect("result should have a scheme")
+            .clone();
+        assert!(scheme.vars.is_empty(), "result should be fully concrete");
+        match resolved_head(&mut sub, scheme.ty) {
+            Some((r, args)) if r == Ref::Builtin("List".to_string()) => {
+                let int_ty = app0(&mut sub, "Int");
+                assert_eq!(
+                    sub.resolve_structure(args[0]),
+                    sub.resolve_structure(int_ty)
+                );
+            }
+            other => panic!("expected List Int, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn length_and_filter_type_check_against_a_list() {
+        let mut sub = Substitution::new();
+        let (mut env, table) = seed(&mut sub);
+        let cs = decls(
+            "n = length [1, 2, 3]\n\
+             kept = filter (\\x -> x == 0) [1, 2, 3]\n",
+        );
+        let tree = constrain_module(&mut sub, &cs);
+        let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        assert!(errors.is_empty(), "{errors:?}");
+        check_pending(&mut sub, &table, pending, &mut errors);
+        assert!(errors.is_empty(), "{errors:?}");
+
+        let n_scheme = env
+            .get(&SchemeKey::TopLevel("n".to_string()))
+            .unwrap()
+            .clone();
+        let int_ty = app0(&mut sub, "Int");
+        assert_eq!(
+            sub.resolve_structure(n_scheme.ty),
+            sub.resolve_structure(int_ty)
+        );
+
+        let kept_scheme = env
+            .get(&SchemeKey::TopLevel("kept".to_string()))
+            .unwrap()
+            .clone();
+        match resolved_head(&mut sub, kept_scheme.ty) {
+            Some((r, args)) if r == Ref::Builtin("List".to_string()) => {
+                assert_eq!(
+                    sub.resolve_structure(args[0]),
+                    sub.resolve_structure(int_ty)
+                );
+            }
+            other => panic!("expected List Int, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn map_over_a_non_collection_constructor_is_a_no_instance_error() {
+        // Option is a Context, not a Collection (spec §6.3/§6.4) -- map's f
+        // still happily unifies structurally with Option (unify doesn't
+        // check instances), but check_pending must reject it.
+        let mut sub = Substitution::new();
+        let (mut env, table) = seed(&mut sub);
+        let cs = decls("bad = map (\\x -> x) (Some 1)\n");
+        let tree = constrain_module(&mut sub, &cs);
+        let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        assert!(errors.is_empty(), "{errors:?}");
+        check_pending(&mut sub, &table, pending, &mut errors);
+        assert!(errors.iter().any(|e| matches!(
+            &e.kind,
+            crate::error::TypeErrorKind::NoInstance { interface } if interface == "Collection"
+        )));
+    }
+
+    #[test]
+    fn map_is_polymorphic_over_which_collection_constructor_it_targets() {
+        // Same top-level `map` used at `List` in one binding and left
+        // abstract (still a bare, uninstantiated ctor var) in another --
+        // two independent instantiations of the same scheme must not leak
+        // into each other (mirrors the `identity`-at-two-types flagship
+        // test in solve.rs, but for a constructor-sorted variable).
+        let mut sub = Substitution::new();
+        let (mut env, table) = seed(&mut sub);
+        let cs = decls(
+            "overList = map (\\x -> x + 1) [1, 2, 3]\n\
+             overListAgain = map (\\x -> x) [True]\n",
+        );
+        let tree = constrain_module(&mut sub, &cs);
+        let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        assert!(errors.is_empty(), "{errors:?}");
+        check_pending(&mut sub, &table, pending, &mut errors);
+        assert!(errors.is_empty(), "{errors:?}");
+
+        let int_ty = app0(&mut sub, "Int");
+        let bool_ty = app0(&mut sub, "Bool");
+        let over_list = env
+            .get(&SchemeKey::TopLevel("overList".to_string()))
+            .unwrap()
+            .clone();
+        let over_list_again = env
+            .get(&SchemeKey::TopLevel("overListAgain".to_string()))
+            .unwrap()
+            .clone();
+        match (
+            resolved_head(&mut sub, over_list.ty),
+            resolved_head(&mut sub, over_list_again.ty),
+        ) {
+            (Some((r1, a1)), Some((r2, a2)))
+                if r1 == Ref::Builtin("List".to_string())
+                    && r2 == Ref::Builtin("List".to_string()) =>
+            {
+                assert_eq!(sub.resolve_structure(a1[0]), sub.resolve_structure(int_ty));
+                assert_eq!(sub.resolve_structure(a2[0]), sub.resolve_structure(bool_ty));
+            }
+            other => panic!("expected two independent List results, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn do_notation_desugars_to_bind_and_pure_and_type_checks() {
+        let mut sub = Substitution::new();
+        let (mut env, table) = seed(&mut sub);
+        let cs = decls("result = do\n  x <- Some 1\n  y <- Some 2\n  pure (x + y)\n");
+        let tree = constrain_module(&mut sub, &cs);
+        let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        assert!(errors.is_empty(), "{errors:?}");
+        check_pending(&mut sub, &table, pending, &mut errors);
+        assert!(errors.is_empty(), "{errors:?}");
+
+        let scheme = env
+            .get(&SchemeKey::TopLevel("result".to_string()))
+            .unwrap()
+            .clone();
+        match resolved_head(&mut sub, scheme.ty) {
+            Some((r, args)) if r == Ref::Builtin("Option".to_string()) => {
+                let int_ty = app0(&mut sub, "Int");
+                assert_eq!(
+                    sub.resolve_structure(args[0]),
+                    sub.resolve_structure(int_ty)
+                );
+            }
+            other => panic!("expected Option Int, got {other:?}"),
         }
     }
 

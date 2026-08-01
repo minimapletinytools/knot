@@ -39,6 +39,19 @@ impl Substitution {
         id
     }
 
+    /// A constructor-sorted variable — `f` in `map :: (a -> b) -> f a -> f
+    /// b` (spec §6.3/§6.4). Mechanically identical to `fresh_unbound`
+    /// (same `Slot::Unbound` representation, same union-find plumbing): the
+    /// "sort" isn't tracked on the slot at all, only by convention of where
+    /// the resulting `TypeVarId` gets placed (a `Structure::VarApp` head,
+    /// never an ordinary type position) — see `ty::Structure::VarApp`'s own
+    /// doc comment for why a dedicated `Slot` variant isn't needed. This
+    /// method exists purely so call sites read as "here's a constructor
+    /// variable," not because the `Substitution` itself distinguishes one.
+    pub fn fresh_ctor_unbound(&mut self) -> TypeVarId {
+        self.fresh_unbound()
+    }
+
     /// A signature's own type variable, opaque to unification against any
     /// concrete type or any *other* rigid variable — see `unify.rs`.
     pub fn fresh_rigid(&mut self, name: String) -> TypeVarId {

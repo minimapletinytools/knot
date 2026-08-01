@@ -27,6 +27,30 @@ pub enum Structure {
     /// unification (field-gathering) is TM2, not this milestone.
     Record(BTreeMap<String, TypeVarId>, Option<TypeVarId>),
     Unit,
+    /// A *resolved* type constructor, standing for the constructor itself
+    /// (`List`, `Map`, ...) rather than any particular application of it —
+    /// what a constructor-sorted variable (see `VarApp`) gets bound to once
+    /// unification pins it down. Never appears anywhere a `map`/`foldl`/...
+    /// caller's own code can see directly; only ever the target of a
+    /// `VarApp` head.
+    Ctor(Ref),
+    /// A type application headed by a constructor *variable* rather than a
+    /// fixed `Ref` — `f a`, `f b`, ... in `map :: (a -> b) -> f a -> f b`
+    /// (spec §6.3/§6.4's `Collection`/`Context` interfaces). The head is an
+    /// ordinary `TypeVarId`, deliberately reusing the exact same
+    /// `Unbound`/`Bound` machinery every other type variable already uses
+    /// rather than introducing a separate "constructor slot" sort in
+    /// `var.rs`: unbound until unification with a concrete `App` pins it to
+    /// a `Ctor(Ref)`, from then on behaving exactly like any other resolved
+    /// variable (see `unify.rs`'s `VarApp` cases and `crate::var::
+    /// Substitution::fresh_ctor_unbound`'s own doc comment for why no
+    /// dedicated `Slot` variant is needed). Deliberately *not* full kind
+    /// polymorphism — only ever produced by this crate's own hand-built
+    /// `Collection`/`Context` prelude schemes (`prelude.rs`), never by
+    /// anything a user's own Knot source can write, matching Knot's closed-
+    /// interface philosophy (no user-defined higher-kinded signatures to
+    /// support).
+    VarApp(TypeVarId, Vec<TypeVarId>),
 }
 
 /// A quantified type: `∀vars. constraints => ty`. `vars` are the
