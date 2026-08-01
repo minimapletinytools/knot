@@ -5,13 +5,14 @@
 //! milestone by milestone (plan §7), rather than in one pass.
 //!
 //! **Current state**: `var.rs` (the arena-indexed union-find substitution)
-//! and `ty.rs` (the `Structure`/`Scheme` shapes) are TM0; `unify.rs`
-//! (structural unification over `App`/`Fn`/`Tuple`/`Unit`, the occurs check,
-//! and rigid-variable handling) is TM1. Record unification (TM2), constraint
-//! generation over `CExpr`/`CPattern`/`CDecl` (TM3/TM4), `solve.rs` (TM5),
-//! the interface/instance and annotation tables (TM6), and dictionary
-//! elaboration (TM7) don't exist yet — there is no public `check_module`
-//! entry point until enough of those exist to make one meaningful.
+//! and `ty.rs` (the `Structure`/`Scheme` shapes) are TM0; `unify.rs` — full
+//! structural unification over `App`/`Fn`/`Tuple`/`Unit`/`Record` (the last
+//! via field-gathering), the occurs check, and rigid-variable handling — is
+//! TM1+TM2. Constraint generation over `CExpr`/`CPattern`/`CDecl` (TM3/TM4),
+//! `solve.rs` (TM5), the interface/instance and annotation tables (TM6), and
+//! dictionary elaboration (TM7) don't exist yet — there is no public
+//! `check_module` entry point until enough of those exist to make one
+//! meaningful.
 
 pub mod error;
 pub mod ty;
