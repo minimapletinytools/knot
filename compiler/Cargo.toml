@@ -1,3 +1,3 @@
 [workspace]
 resolver = "2"
-members = ["knot-syntax", "knot-canonical"]
+members = ["knot-syntax", "knot-canonical", "knot-checker"]

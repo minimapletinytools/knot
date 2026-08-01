@@ -10,5 +10,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "knot-checker"
+version = "0.1.0"
+dependencies = [
+ "knot-canonical",
+ "knot-syntax",
+]
+
+[[package]]
 name = "knot-syntax"
 version = "0.1.0"

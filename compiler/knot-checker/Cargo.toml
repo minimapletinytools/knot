@@ -1,0 +1,10 @@
+[package]
+name = "knot-checker"
+version = "0.1.0"
+edition = "2021"
+description = "Type-checks and dictionary-elaborates a knot-canonical Canonical AST."
+license = "MPL-2.0"
+
+[dependencies]
+knot-syntax = { path = "../knot-syntax" }
+knot-canonical = { path = "../knot-canonical" }

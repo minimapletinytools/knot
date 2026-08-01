@@ -15,8 +15,32 @@
 //! prelude, so the ambiguity simply doesn't arise here.
 
 /// Built-in types usable with no import, per spec §3.1/§3.6/§6.1/§8.
+///
+/// `Sensitivity` is here as a stub, arity-1 opaque head only — per
+/// `knot-type-checker-plan.md` §3.5/§4 (2026-08-01), it's eventually a
+/// recursive type-level function (spec §9.6) that expands into a matching
+/// record/tuple shape rather than a normal nominal type. None of that
+/// expansion is implemented yet: for now `knot-checker` treats it exactly
+/// like `Option` or any other one-argument built-in — two `Sensitivity a`
+/// unify iff their `a`s do, with no introspection into `a`'s own shape. It
+/// has no data constructors of its own (nothing added to
+/// `BUILTIN_CONSTRUCTORS` below), matching how the eventual leaf constraint
+/// vocabulary (`Exact`/`Range`/`Tolerance`/`Free`, spec §13, still TBD) and
+/// `UnravelInput` are deliberately *not* added here yet either — premature
+/// before `knot-checker`'s annotation-checking layer exists to consume them.
 pub const BUILTIN_TYPES: &[&str] = &[
-    "Bool", "Int", "Float", "String", "Unit", "List", "Map", "Option", "Result", "IO", "Ordering",
+    "Bool",
+    "Int",
+    "Float",
+    "String",
+    "Unit",
+    "List",
+    "Map",
+    "Option",
+    "Result",
+    "IO",
+    "Ordering",
+    "Sensitivity",
 ];
 
 /// `(constructor name, arity, owning type name)`.
