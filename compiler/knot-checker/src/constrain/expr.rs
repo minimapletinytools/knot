@@ -5,19 +5,24 @@
 //! `constrain/mod.rs`'s module docs on why generation and solving stay
 //! separate passes.
 //!
-//! **Not yet handled** (each `todo!()`s with a reason): `BinOp`/`Negate`
-//! need an operator → interface-and-shape table (`Num`/`Ord`/`Eq`/... —
-//! spec §6) that doesn't exist yet; `Let` needs TM4's SCC dependency
-//! splitting to build a real `Constraint::Let`; `Do` needs the Context
-//! interface's `pure`/`bind` dictionary story (spec §6.4), which is
-//! entangled with the same interface table `BinOp` needs. `Annotated`,
-//! by contrast, *is* handled — deliberately shallow: its annotation values
-//! aren't constrained here at all (that's TM6's annotation-checking layer,
-//! plan §3.5), so this pass only ever looks straight through to the target
+//! `BinOp`/`Negate` are handled via a small, closed operator → interface
+//! table (`constrain_binop`/spec §4.8, §6.2): what interface (if any) the
+//! operator needs, and how its operand/result types relate. This only
+//! emits `HasInstance` obligations — it doesn't check whether a resolvable
+//! instance actually exists (that's `interface/table.rs`'s job, TM6);
+//! generation only ever records *what* must hold, never checks it.
+//!
+//! **Not yet handled**: `Let` needs TM4's SCC dependency splitting to build
+//! a real `Constraint::Let`; `Do` needs the Context interface's
+//! `pure`/`bind` dictionary story (spec §6.4). `Annotated`, by contrast,
+//! *is* handled — deliberately shallow: its annotation values aren't
+//! constrained here at all (that's TM6's annotation-checking layer, plan
+//! §3.5), so this pass only ever looks straight through to the target
 //! expression.
 
 use knot_canonical::ast::{CExpr, Ref};
-use knot_syntax::span::Spanned;
+use knot_syntax::ast::expr::BinOp;
+use knot_syntax::span::{Span, Spanned};
 
 use crate::constrain::pattern::constrain_pattern;
 use crate::constrain::{Constraint, LocalScope};
@@ -30,6 +35,140 @@ fn app0(sub: &mut Substitution, name: &str) -> TypeVarId {
 
 fn app1(sub: &mut Substitution, name: &str, arg: TypeVarId) -> TypeVarId {
     sub.fresh_bound(Structure::App(Ref::Builtin(name.to_string()), vec![arg]))
+}
+
+/// `left`/`right` must be the same type, and that type needs `interface`.
+/// Covers every operator whose signature is `Interface a => a -> a -> a`
+/// (`Num`'s `+`/`-`/`*`, `Fractional`'s `/`, `Integral`'s `div`/`mod`,
+/// `Semigroup`'s `<>`) as well as the comparison operators, whose only
+/// difference is a `Bool` result instead of `a` — see call sites.
+fn same_type_with_instance(
+    constraints: &mut Vec<Constraint>,
+    span: Span,
+    interface: &str,
+    left: TypeVarId,
+    right: TypeVarId,
+) {
+    constraints.push(Constraint::Equal {
+        span,
+        expected: left,
+        actual: right,
+    });
+    constraints.push(Constraint::HasInstance {
+        span,
+        interface: interface.to_string(),
+        ty: left,
+    });
+}
+
+fn constrain_binop(
+    sub: &mut Substitution,
+    op: BinOp,
+    span: Span,
+    left: TypeVarId,
+    right: TypeVarId,
+    constraints: &mut Vec<Constraint>,
+) -> TypeVarId {
+    match op {
+        BinOp::Add | BinOp::Sub | BinOp::Mul => {
+            same_type_with_instance(constraints, span, "Num", left, right);
+            left
+        }
+        BinOp::Div => {
+            same_type_with_instance(constraints, span, "Fractional", left, right);
+            left
+        }
+        BinOp::IntDiv | BinOp::Mod => {
+            same_type_with_instance(constraints, span, "Integral", left, right);
+            left
+        }
+        BinOp::Append => {
+            same_type_with_instance(constraints, span, "Semigroup", left, right);
+            left
+        }
+        BinOp::Eq | BinOp::Neq => {
+            same_type_with_instance(constraints, span, "Eq", left, right);
+            app0(sub, "Bool")
+        }
+        BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+            same_type_with_instance(constraints, span, "Ord", left, right);
+            app0(sub, "Bool")
+        }
+        // `a -> List a -> List a` -- no interface, an ordinary built-in.
+        BinOp::Cons => {
+            let list_ty = app1(sub, "List", left);
+            constraints.push(Constraint::Equal {
+                span,
+                expected: right,
+                actual: list_ty,
+            });
+            list_ty
+        }
+        // `Bool -> Bool -> Bool` -- concrete, no interface (spec §4.8's
+        // "Boolean Operators" note: only `not` is a named function; `&&`/`||`
+        // are built-in operators over the one concrete type).
+        BinOp::And | BinOp::Or => {
+            let bool_ty = app0(sub, "Bool");
+            constraints.push(Constraint::Equal {
+                span,
+                expected: left,
+                actual: bool_ty,
+            });
+            constraints.push(Constraint::Equal {
+                span,
+                expected: right,
+                actual: bool_ty,
+            });
+            bool_ty
+        }
+        // `(Num a, Integral b) => a -> b -> a` (spec §6.2's "Exponentiation")
+        // -- the one operator whose two operands are constrained by two
+        // *different* interfaces on two different type variables, rather
+        // than needing to be the same type at all.
+        BinOp::Pow => {
+            constraints.push(Constraint::HasInstance {
+                span,
+                interface: "Num".to_string(),
+                ty: left,
+            });
+            constraints.push(Constraint::HasInstance {
+                span,
+                interface: "Integral".to_string(),
+                ty: right,
+            });
+            left
+        }
+        // `a |> f` === `f a`.
+        BinOp::Pipe => {
+            let result = sub.fresh_unbound();
+            let expected_fn_ty = sub.fresh_bound(Structure::Fn(left, result));
+            constraints.push(Constraint::Equal {
+                span,
+                expected: right,
+                actual: expected_fn_ty,
+            });
+            result
+        }
+        // `f >> g :: a -> c` where `f :: a -> b`, `g :: b -> c`.
+        BinOp::Compose => {
+            let a = sub.fresh_unbound();
+            let b = sub.fresh_unbound();
+            let c = sub.fresh_unbound();
+            let f_ty = sub.fresh_bound(Structure::Fn(a, b));
+            let g_ty = sub.fresh_bound(Structure::Fn(b, c));
+            constraints.push(Constraint::Equal {
+                span,
+                expected: left,
+                actual: f_ty,
+            });
+            constraints.push(Constraint::Equal {
+                span,
+                expected: right,
+                actual: g_ty,
+            });
+            sub.fresh_bound(Structure::Fn(a, c))
+        }
+    }
 }
 
 /// Resolves a `Var`/`Ctor` reference: immediate for `Ref::Local` (never
@@ -87,12 +226,9 @@ pub fn constrain_expr(
                 .collect();
             let body_ty = constrain_expr(sub, scope, body, constraints);
             scope.pop();
-            param_tys
-                .into_iter()
-                .rev()
-                .fold(body_ty, |acc, param_ty| {
-                    sub.fresh_bound(Structure::Fn(param_ty, acc))
-                })
+            param_tys.into_iter().rev().fold(body_ty, |acc, param_ty| {
+                sub.fresh_bound(Structure::Fn(param_ty, acc))
+            })
         }
         CExpr::App(f, arg) => {
             let f_ty = constrain_expr(sub, scope, f, constraints);
@@ -213,12 +349,26 @@ pub fn constrain_expr(
         // Annotation *values* aren't constrained here at all -- see this
         // module's doc comment. Just look straight through to the target.
         CExpr::Annotated(_annotations, target) => constrain_expr(sub, scope, target, constraints),
-        CExpr::BinOp(..) => todo!(
-            "BinOp needs the operator -> interface/shape table (Num/Ord/Eq/Semigroup/...) -- not built yet"
-        ),
-        CExpr::Negate(_) => todo!("Negate needs the same Num-interface table BinOp does"),
-        CExpr::Let(..) => todo!("Let needs TM4's SCC dependency splitting to build a real Constraint::Let"),
-        CExpr::Do(..) => todo!("Do needs the Context interface's pure/bind dictionary story (spec §6.4)"),
+        CExpr::BinOp(op, l, r) => {
+            let left = constrain_expr(sub, scope, l, constraints);
+            let right = constrain_expr(sub, scope, r, constraints);
+            constrain_binop(sub, *op, span, left, right, constraints)
+        }
+        CExpr::Negate(e) => {
+            let e_ty = constrain_expr(sub, scope, e, constraints);
+            constraints.push(Constraint::HasInstance {
+                span,
+                interface: "Num".to_string(),
+                ty: e_ty,
+            });
+            e_ty
+        }
+        CExpr::Let(..) => {
+            todo!("Let needs TM4's SCC dependency splitting to build a real Constraint::Let")
+        }
+        CExpr::Do(..) => {
+            todo!("Do needs the Context interface's pure/bind dictionary story (spec §6.4)")
+        }
     }
 }
 
@@ -637,6 +787,323 @@ mod tests {
             &e(CExpr::Annotated(vec![], Box::new(e(CExpr::IntLit(1))))),
             &mut cs,
         );
+        assert_eq!(sub.resolve_structure(ty), Some(builtin(&mut sub, "Int")));
+    }
+
+    fn has_instance(cs: &[Constraint], interface: &str) -> Option<TypeVarId> {
+        cs.iter().find_map(|c| match c {
+            Constraint::HasInstance {
+                interface: i, ty, ..
+            } if i == interface => Some(*ty),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn add_unifies_operands_and_requires_num() {
+        let mut sub = Substitution::new();
+        let mut scope = LocalScope::new();
+        let mut cs = Vec::new();
+        let ty = constrain_expr(
+            &mut sub,
+            &mut scope,
+            &e(CExpr::BinOp(
+                BinOp::Add,
+                Box::new(e(CExpr::IntLit(1))),
+                Box::new(e(CExpr::IntLit(2))),
+            )),
+            &mut cs,
+        );
+        let num_ty = has_instance(&cs, "Num").expect("Add should require Num");
+        solve_equalities(&mut sub, cs);
+        assert_eq!(sub.resolve_structure(ty), Some(builtin(&mut sub, "Int")));
+        assert_eq!(
+            sub.resolve_structure(num_ty),
+            Some(builtin(&mut sub, "Int"))
+        );
+    }
+
+    #[test]
+    fn mismatched_add_operands_fail_to_solve() {
+        let mut sub = Substitution::new();
+        let mut scope = LocalScope::new();
+        let mut cs = Vec::new();
+        constrain_expr(
+            &mut sub,
+            &mut scope,
+            &e(CExpr::BinOp(
+                BinOp::Add,
+                Box::new(e(CExpr::IntLit(1))),
+                Box::new(e(CExpr::StringLit("x".to_string()))),
+            )),
+            &mut cs,
+        );
+        let equal = cs
+            .into_iter()
+            .find_map(|c| match c {
+                Constraint::Equal {
+                    expected, actual, ..
+                } => Some((expected, actual)),
+                _ => None,
+            })
+            .unwrap();
+        assert!(crate::unify::unify(&mut sub, equal.0, equal.1).is_err());
+    }
+
+    #[test]
+    fn div_requires_fractional() {
+        let mut sub = Substitution::new();
+        let mut scope = LocalScope::new();
+        let mut cs = Vec::new();
+        constrain_expr(
+            &mut sub,
+            &mut scope,
+            &e(CExpr::BinOp(
+                BinOp::Div,
+                Box::new(e(CExpr::FloatLit(1.0))),
+                Box::new(e(CExpr::FloatLit(2.0))),
+            )),
+            &mut cs,
+        );
+        assert!(has_instance(&cs, "Fractional").is_some());
+    }
+
+    #[test]
+    fn int_div_and_mod_require_integral() {
+        let mut sub = Substitution::new();
+        let mut scope = LocalScope::new();
+        let mut cs = Vec::new();
+        constrain_expr(
+            &mut sub,
+            &mut scope,
+            &e(CExpr::BinOp(
+                BinOp::IntDiv,
+                Box::new(e(CExpr::IntLit(7))),
+                Box::new(e(CExpr::IntLit(2))),
+            )),
+            &mut cs,
+        );
+        assert!(has_instance(&cs, "Integral").is_some());
+    }
+
+    #[test]
+    fn append_requires_semigroup() {
+        let mut sub = Substitution::new();
+        let mut scope = LocalScope::new();
+        let mut cs = Vec::new();
+        constrain_expr(
+            &mut sub,
+            &mut scope,
+            &e(CExpr::BinOp(
+                BinOp::Append,
+                Box::new(e(CExpr::StringLit("a".to_string()))),
+                Box::new(e(CExpr::StringLit("b".to_string()))),
+            )),
+            &mut cs,
+        );
+        assert!(has_instance(&cs, "Semigroup").is_some());
+    }
+
+    #[test]
+    fn equality_requires_eq_and_returns_bool() {
+        let mut sub = Substitution::new();
+        let mut scope = LocalScope::new();
+        let mut cs = Vec::new();
+        let ty = constrain_expr(
+            &mut sub,
+            &mut scope,
+            &e(CExpr::BinOp(
+                BinOp::Eq,
+                Box::new(e(CExpr::IntLit(1))),
+                Box::new(e(CExpr::IntLit(2))),
+            )),
+            &mut cs,
+        );
+        assert!(has_instance(&cs, "Eq").is_some());
+        solve_equalities(&mut sub, cs);
+        assert_eq!(sub.resolve_structure(ty), Some(builtin(&mut sub, "Bool")));
+    }
+
+    #[test]
+    fn ordering_comparison_requires_ord_and_returns_bool() {
+        let mut sub = Substitution::new();
+        let mut scope = LocalScope::new();
+        let mut cs = Vec::new();
+        let ty = constrain_expr(
+            &mut sub,
+            &mut scope,
+            &e(CExpr::BinOp(
+                BinOp::Lt,
+                Box::new(e(CExpr::IntLit(1))),
+                Box::new(e(CExpr::IntLit(2))),
+            )),
+            &mut cs,
+        );
+        assert!(has_instance(&cs, "Ord").is_some());
+        solve_equalities(&mut sub, cs);
+        assert_eq!(sub.resolve_structure(ty), Some(builtin(&mut sub, "Bool")));
+    }
+
+    #[test]
+    fn cons_binop_builds_a_list_of_the_head_type() {
+        let mut sub = Substitution::new();
+        let mut scope = LocalScope::new();
+        let mut cs = Vec::new();
+        let ty = constrain_expr(
+            &mut sub,
+            &mut scope,
+            &e(CExpr::BinOp(
+                BinOp::Cons,
+                Box::new(e(CExpr::IntLit(1))),
+                Box::new(e(CExpr::List(vec![]))),
+            )),
+            &mut cs,
+        );
+        solve_equalities(&mut sub, cs);
+        match sub.resolve_structure(ty) {
+            Some(Structure::App(r, args)) if r == Ref::Builtin("List".to_string()) => {
+                assert_eq!(
+                    sub.resolve_structure(args[0]),
+                    Some(builtin(&mut sub, "Int"))
+                );
+            }
+            other => panic!("expected List Int, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn and_or_require_boolean_operands() {
+        let mut sub = Substitution::new();
+        let mut scope = LocalScope::new();
+        let mut cs = Vec::new();
+        let ty = constrain_expr(
+            &mut sub,
+            &mut scope,
+            &e(CExpr::BinOp(
+                BinOp::And,
+                Box::new(e(CExpr::Var(Ref::Builtin("bogus1".to_string())))),
+                Box::new(e(CExpr::Var(Ref::Builtin("bogus2".to_string())))),
+            )),
+            &mut cs,
+        );
+        // Both operands are deferred Lookups here (not concrete literals),
+        // so just check the two Equal-to-Bool constraints got generated and
+        // the result itself is already Bool without needing to solve.
+        assert_eq!(sub.resolve_structure(ty), Some(builtin(&mut sub, "Bool")));
+        let equal_count = cs
+            .iter()
+            .filter(|c| matches!(c, Constraint::Equal { .. }))
+            .count();
+        assert_eq!(equal_count, 2);
+    }
+
+    #[test]
+    fn pow_constrains_base_with_num_and_exponent_with_integral_independently() {
+        let mut sub = Substitution::new();
+        let mut scope = LocalScope::new();
+        scope.push();
+        let base_ty = app0(&mut sub, "Float");
+        scope.bind("base", base_ty);
+        let exp_ty = app0(&mut sub, "Int");
+        scope.bind("exp", exp_ty);
+
+        let mut cs = Vec::new();
+        let ty = constrain_expr(
+            &mut sub,
+            &mut scope,
+            &e(CExpr::BinOp(
+                BinOp::Pow,
+                Box::new(e(CExpr::Var(Ref::Local("base".to_string())))),
+                Box::new(e(CExpr::Var(Ref::Local("exp".to_string())))),
+            )),
+            &mut cs,
+        );
+        assert_eq!(ty, base_ty); // base and exponent may differ -- result is base's type
+        let num_ty = has_instance(&cs, "Num").unwrap();
+        let integral_ty = has_instance(&cs, "Integral").unwrap();
+        assert_eq!(
+            sub.resolve_structure(num_ty),
+            Some(builtin(&mut sub, "Float"))
+        );
+        assert_eq!(
+            sub.resolve_structure(integral_ty),
+            Some(builtin(&mut sub, "Int"))
+        );
+    }
+
+    #[test]
+    fn pipe_applies_the_right_hand_function_to_the_left_hand_value() {
+        let mut sub = Substitution::new();
+        let mut scope = LocalScope::new();
+        scope.push();
+        let int_ty = app0(&mut sub, "Int");
+        let bool_ty = app0(&mut sub, "Bool");
+        let f_ty = sub.fresh_bound(Structure::Fn(int_ty, bool_ty));
+        scope.bind("x", int_ty);
+        scope.bind("f", f_ty);
+
+        let mut cs = Vec::new();
+        let ty = constrain_expr(
+            &mut sub,
+            &mut scope,
+            &e(CExpr::BinOp(
+                BinOp::Pipe,
+                Box::new(e(CExpr::Var(Ref::Local("x".to_string())))),
+                Box::new(e(CExpr::Var(Ref::Local("f".to_string())))),
+            )),
+            &mut cs,
+        );
+        solve_equalities(&mut sub, cs);
+        assert_eq!(sub.resolve_structure(ty), Some(builtin(&mut sub, "Bool")));
+    }
+
+    #[test]
+    fn compose_builds_the_end_to_end_function_type() {
+        let mut sub = Substitution::new();
+        let mut scope = LocalScope::new();
+        scope.push();
+        let int_ty = app0(&mut sub, "Int");
+        let bool_ty = app0(&mut sub, "Bool");
+        let string_ty = app0(&mut sub, "String");
+        let f_ty = sub.fresh_bound(Structure::Fn(int_ty, bool_ty));
+        let g_ty = sub.fresh_bound(Structure::Fn(bool_ty, string_ty));
+        scope.bind("f", f_ty);
+        scope.bind("g", g_ty);
+
+        let mut cs = Vec::new();
+        let ty = constrain_expr(
+            &mut sub,
+            &mut scope,
+            &e(CExpr::BinOp(
+                BinOp::Compose,
+                Box::new(e(CExpr::Var(Ref::Local("f".to_string())))),
+                Box::new(e(CExpr::Var(Ref::Local("g".to_string())))),
+            )),
+            &mut cs,
+        );
+        solve_equalities(&mut sub, cs);
+        match sub.resolve_structure(ty) {
+            Some(Structure::Fn(a, c)) => {
+                assert_eq!(sub.resolve_structure(a), Some(builtin(&mut sub, "Int")));
+                assert_eq!(sub.resolve_structure(c), Some(builtin(&mut sub, "String")));
+            }
+            other => panic!("expected a Fn Int String shape, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn negate_requires_num_and_preserves_the_operands_type() {
+        let mut sub = Substitution::new();
+        let mut scope = LocalScope::new();
+        let mut cs = Vec::new();
+        let ty = constrain_expr(
+            &mut sub,
+            &mut scope,
+            &e(CExpr::Negate(Box::new(e(CExpr::IntLit(1))))),
+            &mut cs,
+        );
+        let num_ty = has_instance(&cs, "Num").expect("Negate should require Num");
+        assert_eq!(num_ty, ty);
         assert_eq!(sub.resolve_structure(ty), Some(builtin(&mut sub, "Int")));
     }
 }

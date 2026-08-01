@@ -286,6 +286,20 @@ interface (Num a, Ord a) => Integral a where
   mod    :: a -> a -> a
 ```
 
+#### Exponentiation
+
+`^` (spec §4.8) is not a method of any single interface above — unlike
+`+`/`-`/`*`/`/`/`div`/`mod`, its signature constrains *two different* type
+variables via two different interfaces at once, so it's a standalone built-in
+signature, matching Haskell exactly:
+
+```knot
+(^) :: (Num a, Integral b) => a -> b -> a
+```
+
+Base and exponent may differ in type — `2.5 ^ 3` is a `Float` base raised to
+an `Int` exponent — the same shape as `fromIntegral` below, just infix.
+
 Instances are built-in for:
 - `Num Int` and `Num Float`
 - `Integral Int`
