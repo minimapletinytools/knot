@@ -30,13 +30,17 @@
 //! comment for the one real gap (`map`/`foldl`/... need higher-kinded
 //! polymorphism `Structure` doesn't represent yet). There is still no
 //! public `check_module` entry point — that needs the `ast.rs` tree-walk
-//! gap closed first.
+//! gap closed first. `exhaustiveness.rs` (TM9, a stretch goal per the plan)
+//! is a fully self-contained pattern-match usefulness checker (Maranget's
+//! algorithm) — a warning-only pass, never wired into `check_module` at
+//! all since it doesn't need to be.
 
 pub mod annotation;
 pub mod ast;
 pub mod constrain;
 pub mod elaborate;
 pub mod error;
+pub mod exhaustiveness;
 pub mod interface;
 pub mod prelude;
 pub mod solve;
