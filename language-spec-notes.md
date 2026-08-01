@@ -604,6 +604,19 @@ specify (or leave entirely unconstrained) the whole record at once. The leaf cas
 `Sensitivity` of a scalar type — is where the actual constraint vocabulary lives; still
 open, see §13.
 
+**Scope of the recursion — product shapes only, so far.** The rule above only covers
+*product* shapes: record and tuple, where the set of fields is fixed and statically known.
+It does not (yet) cover *sum* shapes — any multi-constructor `type` (§3.5), including
+`List` (`Nil | Cons a (List a)` — `:`/`[]` are surface sugar over an ordinary recursive ADT
+here, exactly as in Haskell/Elm, not a structurally distinct case), `Option`, `Result`, or a
+user's own `type Shape = Circle Float | Rectangle Float Float`. Recursing `Sensitivity` into
+a sum type would mean letting a constraint change *which constructor* is active (`Cons h t`
+becoming `Nil`, `Some x` becoming `None`) — a change to the value's shape, not just to a
+field within a fixed shape — and that's a genuinely harder, unsolved problem, not merely an
+unimplemented case of the rule above. Until it's designed, `Sensitivity` of any sum type
+(built-in or user-defined, `List` included) falls to the same scalar leaf case as any other
+non-product type.
+
 ---
 
 ## 12. Typed Holes

@@ -241,8 +241,11 @@ new piece is the small annotation-key → expected-type table itself.~~
   AST already mirrors `CAnnotation`'s `value: Spanned<CExpr>` shape, so it falls out for free
   from elaborating the whole tree uniformly (§6/§7).
 
-No new milestone yet — folding this into TM6 once `interface/table.rs` exists, as a sibling
-`annotation/table.rs` with the same shape, is the likely spot (see §7).
+No new milestone yet — folding this into TM6 once `interface/table.rs` exists is the likely
+spot, but as *two* siblings, not one: `annotation/table.rs` (the lookup-table half — same
+shape as `interface/table.rs`) and `annotation/sensitivity.rs` (the `sensitivity_of`
+recursion, §4 — a genuinely different shape, closer in kind to `unify.rs`'s structural
+matching than to a lookup table). See §6/§7.
 
 ---
 
@@ -313,9 +316,31 @@ fn sensitivity_of(sub: &Substitution, ty: TypeVarId) -> TypeVarId {
         Structure::Tuple(elems) =>
             sub.fresh_bound(Structure::Tuple(elems.iter().map(|e| sensitivity_of(sub, *e)).collect())),
         _ => leaf_sensitivity(sub, ty),   // Exact a | Range a a | Tolerance a a | Free -- §13, TBD
+                                            // (every App falls here -- List, Option, Result,
+                                            // and user ADTs alike; see note below)
     }
 }
 ```
+
+**Known gap, not decided here — and it isn't List-specific.** `List` is not a distinct case
+requiring its own logic: like Elm's and Haskell's `List`, it's an ordinary (self-)recursive
+ADT (`Nil | Cons a (List a)`, `:`/`[]` are pure surface sugar over that — see spec §3.6's
+"Generic Containers" framing, which is about prelude/interface pre-definition, not a
+structurally distinct runtime shape). `Structure::App(Ref, Vec<TypeVarId>)` already treats
+`List`, `Option`, `Result`, and every user-defined ADT identically — `Ref` doesn't
+distinguish built-in from user-defined — so there's no bespoke List branch to add here.
+
+The actual, more general gap: `sensitivity_of` only has a defined recursion for *product*
+shapes (`Record`/`Tuple` — fixed, statically-known fields, spec §9.6). It has none for *sum*
+shapes — any multi-constructor ADT, whether `List`'s `Nil | Cons`, `Option`'s `None | Some
+a`, or a user's own `type Shape = Circle Float | Rectangle Float Float`. Recursing into a
+sum type means the "shape" of the value itself can change (`Cons h t -> Nil`, `Some x ->
+None`), which is a different and harder problem than mirroring a fixed set of fields — this
+is the real content behind the "no length changes" boundary flagged in
+`7-29-2026_unravel_discussion.md`'s §6, just misattributed there (and in an earlier draft of
+this note) to `List` specifically rather than to sum types in general. Every `App` — `List`
+included, with no special treatment — correctly falls through to `leaf_sensitivity` until
+sum-type recursion gets its own design pass.
 
 Generalization (the simplified, non-rank-based alternative to §2's Elm mechanism):
 
@@ -482,8 +507,12 @@ dictionary actually gets threaded).
    `List`/`Map`/`String` module *interfaces* properly rather than ad hoc.
 4. **Confirm the crate name** (`knot-checker`) and this plan's scope split before I start
    TM0 — same checkpoint pattern as the parser plan.
-5. **When does `annotation/table.rs` (§3.5) actually get implemented?** — the mechanism is
-   now clear enough to build, but it depends on spec §11 (unravel/solver) settling further
-   first, per the discussion doc's own "open threads." Gate it on that, or start it alongside
-   TM6 with just the fixed-expected-type keys (`nodeId`, `position`, ...) and leave `unravel`
-   itself stubbed until its design is less in flux?
+5. **When does `annotation/table.rs`/`sensitivity.rs` (§3.5/§4) actually get implemented?** —
+   the Record/Tuple (product) recursion in `sensitivity_of` is clear enough to build and
+   unit-test now, but two things still gate a *complete* implementation: the leaf constraint
+   vocabulary (spec §13, still TBD) and whether/how `sensitivity_of` should ever recurse into
+   sum-type (multi-constructor) ADTs at all — `List`, `Option`, `Result`, and user types like
+   `Shape` alike, not `List` specifically (flagged-not-solved in the discussion doc, not yet
+   addressed by spec §9.6). Gate the whole thing on those settling, or start alongside TM6
+   with the fixed-expected-type keys (`nodeId`, `position`, ...) plus the product recursion,
+   leaving the leaf case and sum-type handling stubbed until further along?
