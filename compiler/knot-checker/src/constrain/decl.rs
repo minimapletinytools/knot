@@ -410,15 +410,24 @@ fn constrain_group_chain(
     // `solve.rs`), never as a raw `LocalScope` hit -- that's the whole point
     // of let-polymorphism (each use gets its own fresh instantiation). So
     // this frame closes *now*, before recursing into later groups/the final
-    // body, not after. A `let`-expression's names (`top_level: false`) are
-    // the opposite: `Ref::Local` resolves via `LocalScope` unconditionally
-    // (see `constrain::expr::constrain_name_ref`), and this session's
-    // documented simplification is that they stay monomorphic on purpose —
-    // so their frame needs to stay open through the whole rest of the chain,
-    // exactly like it did before this fix, or a later sibling/the final `in`
-    // body would wrongly stop being able to see them at all.
+    // body, not after.
+    //
+    // A `let`-expression's names (`top_level: false`) need the *same*
+    // polymorphism, but can't go through `Lookup` -- `Ref::Local` is what
+    // `knot-canonical` gives a reference to a `let`-bound name, same as a
+    // lambda param, so it has to keep resolving via `LocalScope` (see
+    // `constrain::expr::constrain_name_ref`). The frame therefore stays
+    // open through the rest of the chain (a later sibling/the final `in`
+    // body must still be able to see these names at all), but each member
+    // is promoted from `Monomorphic` to `Generalizable` first: every
+    // reference from here on emits its own `Constraint::LookupLocal`
+    // instead of reusing this group's own header type variable directly.
     if top_level {
         scope.pop();
+    } else {
+        for member in &members {
+            scope.promote_to_generalizable(&member.name);
+        }
     }
     let (result_ty, body_con) =
         constrain_group_chain(sub, scope, by_name, sccs, index + 1, top_level, finish);
@@ -729,7 +738,7 @@ mod tests {
         }
         assert_eq!(
             sub.resolve_structure(result_ty),
-            sub.resolve_structure(scope.lookup("a"))
+            sub.resolve_structure(scope.lookup("a").header_ty())
         );
     }
 }

@@ -27,7 +27,7 @@ use knot_syntax::ast::expr::BinOp;
 use knot_syntax::span::{Span, Spanned};
 
 use crate::constrain::pattern::constrain_pattern;
-use crate::constrain::{Constraint, LocalScope};
+use crate::constrain::{Constraint, LocalBinding, LocalScope};
 use crate::ty::Structure;
 use crate::var::{Substitution, TypeVarId};
 
@@ -173,17 +173,19 @@ fn constrain_binop(
     }
 }
 
-/// Resolves a `Var`/`Ctor` reference: immediate for `Ref::Local` (never
-/// generalized, so no constraint needed at all), deferred via `Lookup` for
-/// everything else (see `constrain/mod.rs`) -- *except* a `Ref::TopLevel`
-/// that happens to already be in `scope`, which means it's a self/mutual
-/// reference to a binding in the very group currently being checked
-/// (`constrain::decl`, TM4): still monomorphic for now, exactly like a
-/// local, since it hasn't been generalized yet and won't be until this
-/// whole group finishes solving. `Ref::Unresolved` is neither — `knot-
-/// canonical` already recorded the real error for it, so this returns a
-/// bare, unconstrained fresh variable rather than compounding that error
-/// with a confusing downstream one.
+/// Resolves a `Var`/`Ctor` reference. `Ref::Local` covers three cases (see
+/// `LocalBinding`): a lambda/case/do param or a group's own self/mutual
+/// reference is `Monomorphic` — resolves immediately, no constraint needed;
+/// a `let`-bound name that's been `promote_to_generalizable`d resolves via
+/// its own `Constraint::LookupLocal` instead, exactly mirroring `Lookup`
+/// but keyed by `TypeVarId`. A `Ref::TopLevel` that happens to already be in
+/// `scope` is that same self/mutual-reference case (`constrain::decl`, TM4)
+/// — always `Monomorphic` while it's there, since it hasn't been
+/// generalized yet and won't be until this whole group finishes solving.
+/// Everything else defers via `Lookup` (see `constrain/mod.rs`).
+/// `Ref::Unresolved` is neither — `knot-canonical` already recorded the
+/// real error for it, so this returns a bare, unconstrained fresh variable
+/// rather than compounding that error with a confusing downstream one.
 fn constrain_name_ref(
     sub: &mut Substitution,
     scope: &LocalScope,
@@ -192,9 +194,20 @@ fn constrain_name_ref(
     constraints: &mut Vec<Constraint>,
 ) -> TypeVarId {
     match reference {
-        Ref::Local(name) => scope.lookup(name),
+        Ref::Local(name) => match scope.lookup(name) {
+            LocalBinding::Monomorphic(ty) => ty,
+            LocalBinding::Generalizable(key) => {
+                let ty = sub.fresh_unbound();
+                constraints.push(Constraint::LookupLocal {
+                    span,
+                    key,
+                    expected: ty,
+                });
+                ty
+            }
+        },
         Ref::Unresolved(_) => sub.fresh_unbound(),
-        Ref::TopLevel(name) if scope.try_lookup(name).is_some() => scope.lookup(name),
+        Ref::TopLevel(name) if scope.try_lookup(name).is_some() => scope.lookup(name).header_ty(),
         _ => {
             let ty = sub.fresh_unbound();
             constraints.push(Constraint::Lookup {
@@ -407,10 +420,12 @@ mod tests {
     }
 
     /// Test-only: solves the `Equal`/`And` constraints these tests produce.
-    /// Not the real `solve.rs` -- `Lookup`/`HasInstance`/`Let` aren't
-    /// resolvable without a real environment, which doesn't exist yet, so
-    /// tests exercising those paths only check the constraint *shape*
-    /// instead of round-tripping through this.
+    /// Not the real `solve.rs` -- `Lookup`/`LookupLocal`/`HasInstance` aren't
+    /// resolvable without a real environment, which doesn't exist here, so
+    /// tests that actually need one of those resolved (e.g. real
+    /// let-polymorphic reuse) go through `crate::solve::solve` directly
+    /// instead (see `later_let_binding_can_reference_an_earlier_sibling`);
+    /// everything else here only checks the constraint *shape*.
     fn solve_equalities(sub: &mut Substitution, constraints: Vec<Constraint>) {
         for c in constraints {
             match c {
@@ -432,7 +447,10 @@ mod tests {
                     solve_equalities(sub, vec![*header_con]);
                     solve_equalities(sub, vec![*body_con]);
                 }
-                Constraint::True | Constraint::HasInstance { .. } | Constraint::Lookup { .. } => {}
+                Constraint::True
+                | Constraint::HasInstance { .. }
+                | Constraint::Lookup { .. }
+                | Constraint::LookupLocal { .. } => {}
             }
         }
     }
@@ -1161,6 +1179,11 @@ mod tests {
         // let x = 1; y = x + 1 in y  -- regression test: an earlier bug had
         // each SCC group's own scope pop before anything after it (later
         // siblings, or the final body) got a chance to see those names.
+        // Uses the real `solve::solve`, not the shallow `solve_equalities`
+        // above: Fix #1 gives `x` real let-polymorphism, so `y`'s reference
+        // to it goes through `Constraint::LookupLocal`, resolved against
+        // `solve.rs`'s own `local_env` -- which the test-only solver above
+        // doesn't have (see its own doc comment).
         let mut sub = Substitution::new();
         let mut scope = LocalScope::new();
         let mut cs = Vec::new();
@@ -1183,7 +1206,18 @@ mod tests {
             )),
             &mut cs,
         );
-        solve_equalities(&mut sub, cs);
+        // Not checking `pending` here: `x + 1`'s `Num` obligation lands on a
+        // concrete, non-generalized `Int` (nothing left to quantify over in
+        // a bare `x = 1`), so it stays a real pending obligation -- checking
+        // it against an instance table is `interface::instance`'s job
+        // (TM6), not relevant to what this regression test is actually
+        // about.
+        let (_pending, errors) = crate::solve::solve(
+            &mut sub,
+            &mut crate::solve::SchemeEnv::new(),
+            &Constraint::And(cs),
+        );
+        assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(sub.resolve_structure(ty), Some(builtin(&mut sub, "Int")));
     }
 }

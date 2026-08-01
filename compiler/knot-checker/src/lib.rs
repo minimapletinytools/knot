@@ -34,6 +34,15 @@
 //! is a fully self-contained pattern-match usefulness checker (Maranget's
 //! algorithm) — a warning-only pass, never wired into `check_module` at
 //! all since it doesn't need to be.
+//!
+//! **Post-TM9**: see `knot-checker-gaps-plan.md` at the repo root for a
+//! full audit of what TM0-TM9 left unsound (beyond the two already-known
+//! deferrals above) and the fix plan being worked through. Fix #1 is done:
+//! `let`-bound names now get real let-polymorphism too, not just top-level
+//! ones — `constrain::LocalBinding`/`Constraint::LookupLocal`/`solve.rs`'s
+//! `local_env` mirror the `Ref::TopLevel`/`Lookup`/`SchemeEnv` machinery
+//! for names `Ref::Local` can't otherwise tell apart from an ordinary
+//! monomorphic param.
 
 pub mod annotation;
 pub mod ast;

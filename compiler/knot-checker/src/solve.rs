@@ -22,20 +22,24 @@
 //! concrete (left in the returned list — checking those against a real
 //! instance table is `interface/table.rs`'s job, TM6).
 //!
-//! **What a top-level `Constraint::Let` actually does here**: push every
-//! member's `header_ty` onto `ambient` (so no *inner* `generalize` call
-//! mistakes an outer, still-in-progress binding's own type variable for one
-//! it owns) and register any signature's `given` facts, solve `header_con`,
-//! then for each member build a `Scheme` — a signed member's is just its
-//! signature restated (`declared`'s `rigid_vars`/`given` directly); an
-//! unsigned one needs the real `generalize` (`ftv(ty) \ ftv(ambient)`,
-//! gathering up any of *its own* pending obligations into the new scheme's
-//! `constraints` along the way) — run the ambiguous-CAF check against it
-//! (this session's replacement for the monomorphism restriction, plan §3),
-//! and install it into the scheme environment. A non-top-level `Let` (a
-//! `let`-expression, per `constrain::mod`'s own doc on why `Ref::Local`
-//! can't distinguish these) skips all of that: just `header_con` then
-//! `body_con`, since nothing will ever look a `let`-bound name up by scheme.
+//! **What a `Constraint::Let` actually does here**: push every member's
+//! `header_ty` onto `ambient` (so no *inner* `generalize` call mistakes an
+//! outer, still-in-progress binding's own type variable for one it owns)
+//! and register any signature's `given` facts, solve `header_con`, then for
+//! each member build a `Scheme` — a signed member's is just its signature
+//! restated (`declared`'s `rigid_vars`/`given` directly); an unsigned one
+//! needs the real `generalize` (`ftv(ty) \ ftv(ambient)`, gathering up any
+//! of *its own* pending obligations into the new scheme's `constraints`
+//! along the way) — then run the ambiguous-CAF check against it (this
+//! session's replacement for the monomorphism restriction, plan §3). Both
+//! `top_level: true` and `false` groups do all of this identically; only
+//! the destination differs: `true` installs into `env` (the global
+//! `SchemeEnv`, keyed by name, for `Constraint::Lookup` to find later);
+//! `false` installs into `local_env` (keyed by the member's own
+//! `header_ty`, for `Constraint::LookupLocal` to find instead) — see
+//! `constrain::mod`'s own doc on why `Ref::Local` forces a `let`-bound
+//! name through a different lookup constraint than a top-level one, even
+//! though both now get real let-polymorphism.
 
 use std::collections::{HashMap, HashSet};
 
@@ -119,11 +123,13 @@ pub fn solve(
 ) -> (Vec<PendingInstance>, Vec<TypeError>) {
     let mut ambient = Vec::new();
     let mut given: HashMap<TypeVarId, HashSet<String>> = HashMap::new();
+    let mut local_env: HashMap<TypeVarId, Scheme> = HashMap::new();
     let mut pending = Vec::new();
     let mut errors = Vec::new();
     solve_rec(
         sub,
         env,
+        &mut local_env,
         &mut ambient,
         &mut given,
         &mut pending,
@@ -157,6 +163,7 @@ pub fn solve(
 fn solve_rec(
     sub: &mut Substitution,
     env: &mut SchemeEnv,
+    local_env: &mut HashMap<TypeVarId, Scheme>,
     ambient: &mut Vec<TypeVarId>,
     given: &mut HashMap<TypeVarId, HashSet<String>>,
     pending: &mut Vec<PendingInstance>,
@@ -214,9 +221,39 @@ fn solve_rec(
                 kind: TypeErrorKind::UnboundValue(reference_display(reference)),
             }),
         },
+        // The `let`-bound counterpart of `Lookup` above -- identical logic,
+        // just keyed by `TypeVarId` against `local_env` instead of by
+        // `SchemeKey` against `env` (see `constrain::mod`'s own doc on why
+        // `Ref::Local` needs a separate constraint at all).
+        Constraint::LookupLocal {
+            span,
+            key,
+            expected,
+        } => match local_env.get(key).cloned() {
+            Some(scheme) => {
+                let (fresh_ty, fresh_constraints) = instantiate(sub, &scheme);
+                if let Err(e) = unify(sub, *expected, fresh_ty) {
+                    errors.push(TypeError {
+                        span: *span,
+                        kind: TypeErrorKind::Unify(e),
+                    });
+                }
+                for (ty, interface) in fresh_constraints {
+                    pending.push(PendingInstance {
+                        span: *span,
+                        interface,
+                        ty,
+                    });
+                }
+            }
+            None => panic!(
+                "LookupLocal({key:?}) has no scheme -- constrain::decl should have installed one \
+                 into local_env before any reference to it could have been generated"
+            ),
+        },
         Constraint::And(cs) => {
             for c in cs {
-                solve_rec(sub, env, ambient, given, pending, errors, c);
+                solve_rec(sub, env, local_env, ambient, given, pending, errors, c);
             }
         }
         Constraint::Let {
@@ -235,7 +272,9 @@ fn solve_rec(
                 }
             }
 
-            solve_rec(sub, env, ambient, given, pending, errors, header_con);
+            solve_rec(
+                sub, env, local_env, ambient, given, pending, errors, header_con,
+            );
 
             // Pop this group's own header_tys *before* generalizing them --
             // `ambient` must reflect only outer (ancestor, still-in-progress)
@@ -246,22 +285,26 @@ fn solve_rec(
             // generalization for every top-level binding.
             ambient.truncate(start);
 
-            if *top_level {
-                for m in members {
-                    let scheme = match &m.declared {
-                        Some(d) => Scheme {
-                            vars: d.rigid_vars.clone(),
-                            constraints: d.given.clone(),
-                            ty: m.header_ty,
-                        },
-                        None => generalize(sub, ambient, m.header_ty, pending),
-                    };
-                    check_ambiguous(sub, &scheme, m.span, errors);
+            for m in members {
+                let scheme = match &m.declared {
+                    Some(d) => Scheme {
+                        vars: d.rigid_vars.clone(),
+                        constraints: d.given.clone(),
+                        ty: m.header_ty,
+                    },
+                    None => generalize(sub, ambient, m.header_ty, pending),
+                };
+                check_ambiguous(sub, &scheme, m.span, errors);
+                if *top_level {
                     env.insert(SchemeKey::TopLevel(m.name.clone()), scheme);
+                } else {
+                    local_env.insert(m.header_ty, scheme);
                 }
             }
 
-            solve_rec(sub, env, ambient, given, pending, errors, body_con);
+            solve_rec(
+                sub, env, local_env, ambient, given, pending, errors, body_con,
+            );
         }
     }
 }
@@ -489,6 +532,43 @@ mod tests {
     fn let_polymorphism_lets_a_top_level_binding_be_used_at_two_types() {
         let mut sub = Substitution::new();
         let cs = decls("identity x = x\nuseIdentity = (identity 1, identity True)\n");
+        let tree = constrain_module(&mut sub, &cs);
+        let mut env = SchemeEnv::new();
+        seed_bool_ctors(&mut sub, &mut env);
+        let (pending, errors) = solve(&mut sub, &mut env, &tree);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(pending.is_empty());
+
+        let use_scheme = scheme_of(&env, "useIdentity");
+        match sub.resolve_structure(use_scheme.ty) {
+            Some(Structure::Tuple(elems)) => {
+                assert_eq!(elems.len(), 2);
+                let int_ty =
+                    sub.fresh_bound(Structure::App(Ref::Builtin("Int".to_string()), vec![]));
+                let bool_ty =
+                    sub.fresh_bound(Structure::App(Ref::Builtin("Bool".to_string()), vec![]));
+                assert_eq!(
+                    sub.resolve_structure(elems[0]),
+                    sub.resolve_structure(int_ty)
+                );
+                assert_eq!(
+                    sub.resolve_structure(elems[1]),
+                    sub.resolve_structure(bool_ty)
+                );
+            }
+            other => panic!("expected a Tuple(Int, Bool), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn let_polymorphism_lets_a_let_bound_binding_be_used_at_two_types() {
+        // Fix #1's own flagship: same shape as the top-level version above,
+        // but `id` is `let`-bound inside `useIdentity`'s body instead of
+        // being a sibling top-level function -- exercises
+        // `LocalBinding::Generalizable`/`Constraint::LookupLocal`/
+        // `local_env` end to end rather than `Lookup`/the global `SchemeEnv`.
+        let mut sub = Substitution::new();
+        let cs = decls("useIdentity = let id = \\x -> x in (id 1, id True)\n");
         let tree = constrain_module(&mut sub, &cs);
         let mut env = SchemeEnv::new();
         seed_bool_ctors(&mut sub, &mut env);

@@ -154,7 +154,7 @@ mod tests {
             &p(CPattern::Var("x".to_string())),
             &mut cs,
         );
-        assert_eq!(scope.lookup("x"), ty);
+        assert_eq!(scope.lookup("x").header_ty(), ty);
     }
 
     #[test]
@@ -217,7 +217,7 @@ mod tests {
                 assert_eq!(*r, reference);
                 match sub.resolve_structure(*expected) {
                     Some(Structure::Fn(field, ret)) => {
-                        assert_eq!(field, scope.lookup("x"));
+                        assert_eq!(field, scope.lookup("x").header_ty());
                         assert_eq!(ret, result);
                     }
                     other => panic!("expected a curried Fn shape, got {other:?}"),
@@ -244,7 +244,10 @@ mod tests {
         );
         match sub.resolve_structure(ty) {
             Some(Structure::Tuple(elems)) => {
-                assert_eq!(elems, vec![scope.lookup("a"), scope.lookup("b")]);
+                assert_eq!(
+                    elems,
+                    vec![scope.lookup("a").header_ty(), scope.lookup("b").header_ty()]
+                );
             }
             other => panic!("expected a Tuple shape, got {other:?}"),
         }
@@ -311,8 +314,8 @@ mod tests {
             )),
             &mut cs,
         );
-        assert_eq!(scope.lookup("x"), ty);
-        assert_eq!(scope.lookup("full"), ty);
+        assert_eq!(scope.lookup("x").header_ty(), ty);
+        assert_eq!(scope.lookup("full").header_ty(), ty);
     }
 
     #[test]
