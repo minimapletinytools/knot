@@ -29,22 +29,30 @@ pub enum Structure {
     Unit,
 }
 
-/// A quantified type. `vars` are the `Substitution` slots — `Rigid` while the
-/// scheme's own binding is being body-checked (plan §5), instantiated to
-/// fresh flexible variables at every other use site (TM3).
+/// A quantified type: `∀vars. constraints => ty`. `vars` are the
+/// `Substitution` slots — `Rigid` while the scheme's own binding is being
+/// body-checked (plan §5), instantiated to fresh flexible variables at
+/// every other use site (TM5). `constraints` are that binding's own
+/// `Ord a =>`-style obligations, carried on the *scheme* rather than
+/// discharged once and forgotten — instantiating re-derives a fresh
+/// `HasInstance` obligation per quantified var from these, so each call site
+/// gets its own copy to satisfy against whatever concrete type it actually
+/// uses, exactly like the rest of the scheme's shape.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Scheme {
     pub vars: Vec<TypeVarId>,
+    pub constraints: Vec<(TypeVarId, String)>,
     pub ty: TypeVarId,
 }
 
 impl Scheme {
-    /// A non-generalized type: no quantified variables at all. What most
-    /// lambda/case-bound names get directly — `generalize` (TM5) is only
-    /// needed at `let`/top-level binding boundaries.
+    /// A non-generalized type: no quantified variables, no constraints. What
+    /// most lambda/case-bound names get directly — `generalize` (TM5) is
+    /// only needed at `let`/top-level binding boundaries.
     pub fn monomorphic(ty: TypeVarId) -> Self {
         Scheme {
             vars: Vec::new(),
+            constraints: Vec::new(),
             ty,
         }
     }

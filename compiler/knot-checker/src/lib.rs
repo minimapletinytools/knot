@@ -9,12 +9,14 @@
 //! structural unification over `App`/`Fn`/`Tuple`/`Unit`/`Record` (the last
 //! via field-gathering), the occurs check, and rigid-variable handling — is
 //! TM1+TM2. `constrain::{expr, pattern}` (TM3) generate `Constraint`s over
-//! everything but `Let` (needs TM4's SCC splitting) and `Do` (needs the
-//! Context interface's `pure`/`bind`, spec §6.4). `constrain::decl` (TM4),
-//! `solve.rs` (TM5), the interface/instance and
-//! annotation tables (TM6), and dictionary elaboration (TM7) don't exist yet
-//! — there is no public `check_module` entry point until enough of those
-//! exist to make one meaningful.
+//! everything but `Do` (needs the Context interface's `pure`/`bind`, spec
+//! §6.4). `constrain::decl` (TM4) does SCC dependency splitting for
+//! `let`/top-level binding groups, builds the resulting nested
+//! `Constraint::Let` tree, and wires real rigid variables up for signed
+//! bindings. `solve.rs` (TM5), the interface/instance and annotation tables
+//! (TM6), and dictionary elaboration (TM7) don't exist yet — there is no
+//! public `check_module` entry point until enough of those exist to make
+//! one meaningful.
 
 pub mod constrain;
 pub mod error;

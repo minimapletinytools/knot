@@ -12,12 +12,14 @@
 //! instance actually exists (that's `interface/table.rs`'s job, TM6);
 //! generation only ever records *what* must hold, never checks it.
 //!
-//! **Not yet handled**: `Let` needs TM4's SCC dependency splitting to build
-//! a real `Constraint::Let`; `Do` needs the Context interface's
-//! `pure`/`bind` dictionary story (spec §6.4). `Annotated`, by contrast,
-//! *is* handled — deliberately shallow: its annotation values aren't
-//! constrained here at all (that's TM6's annotation-checking layer, plan
-//! §3.5), so this pass only ever looks straight through to the target
+//! `Let` delegates to `constrain::decl::constrain_let_bindings` (TM4) for
+//! its SCC-based dependency splitting.
+//!
+//! **Not yet handled**: `Do` needs the Context interface's `pure`/`bind`
+//! dictionary story (spec §6.4). `Annotated`, by contrast, *is* handled —
+//! deliberately shallow: its annotation values aren't constrained here at
+//! all (that's TM6's annotation-checking layer, plan §3.5), so this pass
+//! only ever looks straight through to the target
 //! expression.
 
 use knot_canonical::ast::{CExpr, Ref};
@@ -173,9 +175,14 @@ fn constrain_binop(
 
 /// Resolves a `Var`/`Ctor` reference: immediate for `Ref::Local` (never
 /// generalized, so no constraint needed at all), deferred via `Lookup` for
-/// everything else (see `constrain/mod.rs`). `Ref::Unresolved` is neither —
-/// `knot-canonical` already recorded the real error for it, so this returns
-/// a bare, unconstrained fresh variable rather than compounding that error
+/// everything else (see `constrain/mod.rs`) -- *except* a `Ref::TopLevel`
+/// that happens to already be in `scope`, which means it's a self/mutual
+/// reference to a binding in the very group currently being checked
+/// (`constrain::decl`, TM4): still monomorphic for now, exactly like a
+/// local, since it hasn't been generalized yet and won't be until this
+/// whole group finishes solving. `Ref::Unresolved` is neither — `knot-
+/// canonical` already recorded the real error for it, so this returns a
+/// bare, unconstrained fresh variable rather than compounding that error
 /// with a confusing downstream one.
 fn constrain_name_ref(
     sub: &mut Substitution,
@@ -187,6 +194,7 @@ fn constrain_name_ref(
     match reference {
         Ref::Local(name) => scope.lookup(name),
         Ref::Unresolved(_) => sub.fresh_unbound(),
+        Ref::TopLevel(name) if scope.try_lookup(name).is_some() => scope.lookup(name),
         _ => {
             let ty = sub.fresh_unbound();
             constraints.push(Constraint::Lookup {
@@ -363,8 +371,15 @@ pub fn constrain_expr(
             });
             e_ty
         }
-        CExpr::Let(..) => {
-            todo!("Let needs TM4's SCC dependency splitting to build a real Constraint::Let")
+        CExpr::Let(bindings, body) => {
+            let (result_ty, let_con) = crate::constrain::decl::constrain_let_bindings(
+                sub,
+                scope,
+                bindings,
+                |sub, scope, cs| constrain_expr(sub, scope, body, cs),
+            );
+            constraints.push(let_con);
+            result_ty
         }
         CExpr::Do(..) => {
             todo!("Do needs the Context interface's pure/bind dictionary story (spec §6.4)")
@@ -403,10 +418,21 @@ mod tests {
                     expected, actual, ..
                 } => crate::unify::unify(sub, expected, actual).unwrap(),
                 Constraint::And(cs) => solve_equalities(sub, cs),
-                Constraint::True
-                | Constraint::HasInstance { .. }
-                | Constraint::Lookup { .. }
-                | Constraint::Let { .. } => {}
+                // Not the real solve.rs (TM5): no generalization, no scheme
+                // environment for Lookup -- just enough to prove a `let`
+                // with no self-referencing polymorphic reuse type-checks
+                // end-to-end. `header_con`'s self/mutual references already
+                // resolved monomorphically at generation time (constrain::
+                // decl), so walking straight into both halves is sound here.
+                Constraint::Let {
+                    header_con,
+                    body_con,
+                    ..
+                } => {
+                    solve_equalities(sub, vec![*header_con]);
+                    solve_equalities(sub, vec![*body_con]);
+                }
+                Constraint::True | Constraint::HasInstance { .. } | Constraint::Lookup { .. } => {}
             }
         }
     }
@@ -1104,6 +1130,60 @@ mod tests {
         );
         let num_ty = has_instance(&cs, "Num").expect("Negate should require Num");
         assert_eq!(num_ty, ty);
+        assert_eq!(sub.resolve_structure(ty), Some(builtin(&mut sub, "Int")));
+    }
+
+    #[test]
+    fn let_expression_delegates_to_constrain_decl_and_type_checks_end_to_end() {
+        // let x = 1 in x + 1
+        let mut sub = Substitution::new();
+        let mut scope = LocalScope::new();
+        let mut cs = Vec::new();
+        let ty = constrain_expr(
+            &mut sub,
+            &mut scope,
+            &e(CExpr::Let(
+                vec![(p(CPattern::Var("x".to_string())), e(CExpr::IntLit(1)))],
+                Box::new(e(CExpr::BinOp(
+                    BinOp::Add,
+                    Box::new(e(CExpr::Var(Ref::Local("x".to_string())))),
+                    Box::new(e(CExpr::IntLit(1))),
+                ))),
+            )),
+            &mut cs,
+        );
+        solve_equalities(&mut sub, cs);
+        assert_eq!(sub.resolve_structure(ty), Some(builtin(&mut sub, "Int")));
+    }
+
+    #[test]
+    fn later_let_binding_can_reference_an_earlier_sibling() {
+        // let x = 1; y = x + 1 in y  -- regression test: an earlier bug had
+        // each SCC group's own scope pop before anything after it (later
+        // siblings, or the final body) got a chance to see those names.
+        let mut sub = Substitution::new();
+        let mut scope = LocalScope::new();
+        let mut cs = Vec::new();
+        let ty = constrain_expr(
+            &mut sub,
+            &mut scope,
+            &e(CExpr::Let(
+                vec![
+                    (p(CPattern::Var("x".to_string())), e(CExpr::IntLit(1))),
+                    (
+                        p(CPattern::Var("y".to_string())),
+                        e(CExpr::BinOp(
+                            BinOp::Add,
+                            Box::new(e(CExpr::Var(Ref::Local("x".to_string())))),
+                            Box::new(e(CExpr::IntLit(1))),
+                        )),
+                    ),
+                ],
+                Box::new(e(CExpr::Var(Ref::Local("y".to_string())))),
+            )),
+            &mut cs,
+        );
+        solve_equalities(&mut sub, cs);
         assert_eq!(sub.resolve_structure(ty), Some(builtin(&mut sub, "Int")));
     }
 }

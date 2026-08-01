@@ -17,10 +17,11 @@
 //! bindings are never generalized, so they're resolved immediately against
 //! `LocalScope` below, with no constraint needed at all.
 
+pub mod decl;
 pub mod expr;
 pub mod pattern;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use knot_canonical::ast::Ref;
 use knot_syntax::span::Span;
@@ -35,10 +36,11 @@ pub enum Constraint {
         expected: TypeVarId,
         actual: TypeVarId,
     },
-    /// A signature's `Ord a =>`-style obligation on a concrete, now-inferred
-    /// type. Nothing in this milestone emits one yet (that needs the
-    /// operator/interface table BinOp and Negate depend on) — the variant
-    /// exists now so `Equal`'s sibling shapes are all settled at once.
+    /// A signature's `Ord a =>`-style obligation (or `BinOp`/`Negate`'s own
+    /// implicit one, e.g. `Add` needing `Num`) on a concrete, now-inferred
+    /// type. Checking whether a resolvable instance actually exists is
+    /// `interface/table.rs`'s job (TM6) — generation only ever records
+    /// *what* must hold.
     HasInstance {
         span: Span,
         interface: String,
@@ -51,16 +53,52 @@ pub enum Constraint {
         expected: TypeVarId,
     },
     And(Vec<Constraint>),
-    /// `let`/top-level binding-group scoping and generalization (plan §2/§4)
-    /// — shape only, matching `ty.rs`'s Structure/Scheme precedent. Nothing
-    /// constructs one of these until TM4's SCC splitting exists.
+    /// `let`/top-level binding-group scoping and generalization (plan §2/§4).
+    /// Built by `constrain::decl` (TM4) from an SCC-ordered dependency
+    /// split — one `Let` per strongly-connected component, nested so a
+    /// component's dependencies are always the *outer* `Let`s (their own
+    /// `body_con` is the next component's `Let`, and so on inward).
+    /// `header_con` constrains every member's own params/body, generated
+    /// with each member already bound in `LocalScope` to its own
+    /// `header_ty` — that's what lets self/mutual references inside the
+    /// group resolve monomorphically instead of through `Lookup` (see
+    /// `LocalScope::try_lookup`). Actually running `generalize` over each
+    /// unsigned member once `header_con` solves — and just restating the
+    /// signature directly for a signed one — is `solve.rs`'s job (TM5);
+    /// this is still just a generation-time data shape, not the algorithm.
     Let {
-        rigid_vars: Vec<TypeVarId>,
-        flex_vars: Vec<TypeVarId>,
-        header: BTreeMap<String, TypeVarId>,
+        members: Vec<LetMember>,
         header_con: Box<Constraint>,
         body_con: Box<Constraint>,
     },
+}
+
+/// One binding within a `Constraint::Let` group.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LetMember {
+    pub name: String,
+    /// The placeholder type `header_con` was generated against — self/
+    /// mutual references inside the group point straight at this.
+    pub header_ty: TypeVarId,
+    /// `Some` for a binding with an explicit signature — see
+    /// `DeclaredScheme`. `None` means its `Scheme` needs the general
+    /// `ftv`-difference `generalize` algorithm instead (plan §4/§5).
+    pub declared: Option<DeclaredScheme>,
+}
+
+/// A signature restates a binding's scheme directly rather than leaving
+/// anything for `generalize` to infer: `rigid_vars` are the signature's own
+/// type variables (`Substitution::fresh_rigid` slots, plan §5), and `given`
+/// are its `Ord a =>`-style obligations, expressed as `(rigid var,
+/// interface)` pairs. These are "given," not "wanted": the body may freely
+/// rely on them (checked against this list, not the real instance table —
+/// there's no concrete type to look up for a rigid variable), and they
+/// become the resulting `Scheme.constraints` for callers to discharge fresh
+/// at each instantiation instead.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeclaredScheme {
+    pub rigid_vars: Vec<TypeVarId>,
+    pub given: Vec<(TypeVarId, String)>,
 }
 
 /// Tracks *only* simple local bindings (lambda params, case/as patterns, do
@@ -98,13 +136,24 @@ impl LocalScope {
     /// reaching this with an unknown name means a bug in this crate, not a
     /// user error to report gracefully.
     pub fn lookup(&self, name: &str) -> TypeVarId {
+        self.try_lookup(name).unwrap_or_else(|| {
+            panic!("Ref::Local({name:?}) not found in scope -- knot-canonical should have already guaranteed this")
+        })
+    }
+
+    /// Non-panicking lookup. Used for `Ref::TopLevel` names too (see
+    /// `constrain::expr::constrain_name_ref`) — while a `let`/top-level
+    /// binding group is being checked (TM4/`constrain::decl`), its own
+    /// members are pushed here just like any local binding, so a
+    /// self/mutually-recursive reference resolves monomorphically instead of
+    /// going through the deferred `Lookup` constraint. A `Ref::TopLevel` name
+    /// belonging to some *other*, already-processed group correctly falls
+    /// through (`None`) to that deferred path instead.
+    pub fn try_lookup(&self, name: &str) -> Option<TypeVarId> {
         self.frames
             .iter()
             .rev()
             .find_map(|frame| frame.get(name))
             .copied()
-            .unwrap_or_else(|| {
-                panic!("Ref::Local({name:?}) not found in scope -- knot-canonical should have already guaranteed this")
-            })
     }
 }
