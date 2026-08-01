@@ -73,37 +73,58 @@ pub fn seed(sub: &mut Substitution) -> (SchemeEnv, InstanceTable) {
 
 fn seed_instances(table: &mut InstanceTable) {
     // spec §6.2: instances built-in for Num Int/Float, Integral Int, Fractional Float.
-    table.insert_builtin("Num", Ref::Builtin("Int".to_string()));
-    table.insert_builtin("Num", Ref::Builtin("Float".to_string()));
-    table.insert_builtin("Integral", Ref::Builtin("Int".to_string()));
-    table.insert_builtin("Fractional", Ref::Builtin("Float".to_string()));
+    table.insert_builtin("Num", Ref::Builtin("Int".to_string()), vec![]);
+    table.insert_builtin("Num", Ref::Builtin("Float".to_string()), vec![]);
+    table.insert_builtin("Integral", Ref::Builtin("Int".to_string()), vec![]);
+    table.insert_builtin("Fractional", Ref::Builtin("Float".to_string()), vec![]);
 
     // Eq/Ord/Show for every primitive that needs them (plan §9's open
-    // question #1's own answer: String, Bool, Unit alongside the numerics).
-    for ty in ["Int", "Float", "String", "Bool", "Unit"] {
-        table.insert_builtin("Eq", Ref::Builtin(ty.to_string()));
-        table.insert_builtin("Ord", Ref::Builtin(ty.to_string()));
-        table.insert_builtin("Show", Ref::Builtin(ty.to_string()));
+    // question #1's own answer: String, Bool alongside the numerics). Unit
+    // deliberately isn't here -- `interface::instance::check_instance`'s
+    // hardcoded `Structure::Unit` case answers for it structurally now
+    // (Fix #4), and `Ref::Builtin("Unit")` is unreachable in practice
+    // anyway: Knot's grammar only ever produces the unit type via literal
+    // `()` syntax (`Type::Unit`/`CType::Unit`), never by naming the
+    // identifier `Unit`.
+    for ty in ["Int", "Float", "String", "Bool"] {
+        table.insert_builtin("Eq", Ref::Builtin(ty.to_string()), vec![]);
+        table.insert_builtin("Ord", Ref::Builtin(ty.to_string()), vec![]);
+        table.insert_builtin("Show", Ref::Builtin(ty.to_string()), vec![]);
     }
 
-    // Container head instances -- concrete-element-type uses resolve
-    // correctly; see module docs on the still-missing recursive element
-    // check.
-    for container in ["List", "Option", "Result"] {
-        table.insert_builtin("Eq", Ref::Builtin(container.to_string()));
-        table.insert_builtin("Ord", Ref::Builtin(container.to_string()));
-        table.insert_builtin("Show", Ref::Builtin(container.to_string()));
+    // Container instances -- `requires` is what makes these genuinely
+    // recursive now (Fix #4): `List Weird`'s `Eq` correctly fails unless
+    // `Weird` itself has one, instead of the container's own instance
+    // being unconditional.
+    for container in ["List", "Option"] {
+        for interface in ["Eq", "Ord", "Show"] {
+            table.insert_builtin(
+                interface,
+                Ref::Builtin(container.to_string()),
+                vec![(0, interface.to_string())],
+            );
+        }
+    }
+    // Result e a -- both positions need the interface (comparing/showing a
+    // Result needs both its error and value types to support it).
+    for interface in ["Eq", "Ord", "Show"] {
+        table.insert_builtin(
+            interface,
+            Ref::Builtin("Result".to_string()),
+            vec![(0, interface.to_string()), (1, interface.to_string())],
+        );
     }
 
     // spec §6.3/§6.4: Collection (List, Map), Context (Option, Result, IO,
     // List) -- keyed by the constructor's own `Ref`, exactly like every
-    // other instance here; `interface::instance::check_pending`'s new
-    // `Structure::Ctor` branch is what actually resolves a `map`/`bind`
-    // caller's obligation against these.
-    table.insert_builtin("Collection", Ref::Builtin("List".to_string()));
-    table.insert_builtin("Collection", Ref::Builtin("Map".to_string()));
+    // other instance here; no `requires` of their own (the obligation is
+    // on the bare constructor variable itself, not on some argument
+    // position of it -- see `interface::instance::check_instance`'s
+    // `Structure::Ctor` case).
+    table.insert_builtin("Collection", Ref::Builtin("List".to_string()), vec![]);
+    table.insert_builtin("Collection", Ref::Builtin("Map".to_string()), vec![]);
     for context in ["Option", "Result", "IO", "List"] {
-        table.insert_builtin("Context", Ref::Builtin(context.to_string()));
+        table.insert_builtin("Context", Ref::Builtin(context.to_string()), vec![]);
     }
 }
 

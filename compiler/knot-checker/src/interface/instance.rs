@@ -10,42 +10,56 @@
 //! unconditionally (`insert_builtin` never checks either): they're
 //! hand-written by this compiler, not user input to validate.
 //!
-//! **Not yet handled**: only `Structure::App`- or `Structure::Ctor`-headed
-//! obligations (an ordinary named type or a resolved constructor variable,
-//! built-in or user-defined either way) can be checked against this table
-//! at all — see `check_pending`. Extending `Eq`/`Ord`/`Show` to structural
-//! types (`Tuple`, `Record`) needs matching on the *shape* of a `Structure`,
-//! not a `Ref`, which is a different (and, notably, a genuinely *recursive*
-//! — a tuple's own `Eq`-ness depends on each element's) kind of lookup than
-//! this table does. A `Tuple`/`Record`/`Fn`/`Unit`-headed (or still-
-//! unresolved, including an unresolved `VarApp` head — a genuine kind
-//! error, spec §6.3/§6.4) obligation is left unresolved rather than either
-//! wrongly confirmed or wrongly rejected.
+//! **`check_instance` is the real, recursive answer** (Fix #4,
+//! `knot-checker-gaps-plan.md`) to "does `ty` have `interface`" — a
+//! parametric instance's own `requires` (e.g. `instance Eq a => Eq (List
+//! a)`'s `Eq a`) is checked recursively against each corresponding
+//! argument, and `Tuple`/`Record`/`Unit` get hardcoded structural rules
+//! (spec: these derive `Eq`/`Ord`/`Show` from their own parts) rather than
+//! a table lookup at all — no `Ref` to key them by in the first place.
+//! `has_instance` stays a flat existence check underneath (used for
+//! coherence: does *this exact* head have *some* instance, full stop,
+//! ignoring what its own parameters might need) — `insert_declared`'s
+//! superclass/duplicate checks only ever need that shallow question, not
+//! the recursive one.
 //!
-//! Also not yet handled: a *parametric* instance's own constraints (e.g.
-//! `instance Eq a => Eq (List a)`'s `Eq a` requirement) aren't checked
-//! recursively here — `has_instance` only confirms the head has an entry at
-//! all. Actually verifying the element type's own instance is exactly the
-//! "real algorithm, not just a lookup" the plan's §3 flags for dictionary
-//! *construction* — that's `elaborate.rs`'s job (TM7), which already needs
-//! the recursive version to build the dictionary value itself; duplicating
-//! a shallower version here for a mere existence check isn't worth it.
+//! **Still not handled**: a user can't declare an instance *for* a
+//! `Tuple`/`Record`/`Fn` shape directly (`head_ref` returns `None` for
+//! those `CType`s, so `build_instance_table` silently skips such a
+//! declaration) — only this table's own hardcoded structural rule ever
+//! answers for them. A `Fn`-headed obligation, or a `VarApp` whose head is
+//! still unresolved (a genuine kind error, spec §6.3/§6.4), is never
+//! confirmed by anything — see `check_instance`'s own doc comment.
 
 use std::collections::HashMap;
 
-use knot_canonical::ast::{CDecl, CType, Ref};
+use knot_canonical::ast::{CConstraint, CDecl, CType, Ref};
 use knot_syntax::span::Spanned;
 
 use crate::error::{TypeError, TypeErrorKind};
 use crate::interface::table::{is_known_interface, superclasses};
 use crate::solve::PendingInstance;
 use crate::ty::Structure;
-use crate::var::Substitution;
+use crate::var::{Substitution, TypeVarId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InstanceEntry {
+pub enum InstanceKind {
     BuiltIn,
     Declared,
+}
+
+/// One `(interface, head)` table entry: not just "does it exist" but
+/// "which of the head's own positional type arguments need which interface
+/// too" — e.g. `List`'s `Eq` entry says "position 0 needs `Eq`" (from
+/// `instance Eq a => Eq (List a)`, or the equivalent hand-written fact for
+/// a built-in in `prelude.rs`). `requires` is empty for a non-parametric
+/// instance (`instance Eq Shape`, or any of the numeric primitives) — never
+/// having to consult anything further is just the zero-argument case of
+/// the same rule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstanceEntry {
+    pub kind: InstanceKind,
+    pub requires: Vec<(usize, String)>,
 }
 
 #[derive(Debug, Default)]
@@ -63,16 +77,29 @@ impl InstanceTable {
             .contains_key(&(interface.to_string(), head.clone()))
     }
 
-    /// TM8's seam — built-in instances are trusted, not checked.
-    pub fn insert_builtin(&mut self, interface: &str, head: Ref) {
-        self.entries
-            .insert((interface.to_string(), head), InstanceEntry::BuiltIn);
+    fn entry(&self, interface: &str, head: &Ref) -> Option<&InstanceEntry> {
+        self.entries.get(&(interface.to_string(), head.clone()))
+    }
+
+    /// TM8's seam — built-in instances are trusted, not checked. `requires`
+    /// is this instance's own positional-argument obligations, same shape
+    /// and meaning as a declared instance's (see `InstanceEntry`) — e.g.
+    /// `List`'s `Eq` entry passes `vec![(0, "Eq".to_string())]`.
+    pub fn insert_builtin(&mut self, interface: &str, head: Ref, requires: Vec<(usize, String)>) {
+        self.entries.insert(
+            (interface.to_string(), head),
+            InstanceEntry {
+                kind: InstanceKind::BuiltIn,
+                requires,
+            },
+        );
     }
 
     fn insert_declared(
         &mut self,
         interface: &str,
         head: Ref,
+        requires: Vec<(usize, String)>,
         span: knot_syntax::span::Span,
         errors: &mut Vec<TypeError>,
     ) {
@@ -96,8 +123,13 @@ impl InstanceTable {
                 });
             }
         }
-        self.entries
-            .insert((interface.to_string(), head), InstanceEntry::Declared);
+        self.entries.insert(
+            (interface.to_string(), head),
+            InstanceEntry {
+                kind: InstanceKind::Declared,
+                requires,
+            },
+        );
     }
 }
 
@@ -112,6 +144,30 @@ fn head_ref(target: &CType) -> Option<&Ref> {
     }
 }
 
+/// Maps each of `target`'s own type-variable-named positional arguments to
+/// whichever interface `constraints` requires of that name — e.g.
+/// `instance Eq a => Eq (List a)`'s target `List a` has `a` at position 0,
+/// matched against `{interface: "Eq", type_var: "a"}` to produce
+/// `[(0, "Eq")]`. A position whose argument isn't a bare type variable (a
+/// concrete nested type) simply needs nothing extra, so it's just absent
+/// from the result.
+fn instance_requires(target: &CType, constraints: &[CConstraint]) -> Vec<(usize, String)> {
+    let CType::Named(_, args) = target else {
+        return Vec::new();
+    };
+    let mut requires = Vec::new();
+    for (pos, arg) in args.iter().enumerate() {
+        if let CType::Var(name) = arg {
+            for c in constraints {
+                if c.type_var == *name {
+                    requires.push((pos, c.interface.clone()));
+                }
+            }
+        }
+    }
+    requires
+}
+
 /// Builds the table from every `CDecl::Instance` in `decls`. Unknown
 /// interfaces are skipped (`knot-canonical` already reported that error);
 /// `insert_builtin` for the actual built-in seeding happens separately.
@@ -124,23 +180,62 @@ pub fn build_instance_table(decls: &[Spanned<CDecl>]) -> (InstanceTable, Vec<Typ
                 continue;
             }
             if let Some(head) = head_ref(&inst.target) {
-                table.insert_declared(&inst.interface, head.clone(), d.span, &mut errors);
+                let requires = instance_requires(&inst.target, &inst.constraints);
+                table.insert_declared(&inst.interface, head.clone(), requires, d.span, &mut errors);
             }
         }
     }
     (table, errors)
 }
 
+/// The real, recursive answer to "does `ty` have `interface`" — see module
+/// docs. `Fn` is never `Eq`/`Ord`/`Show`/anything else (no meaningful
+/// equality, order, or display for a function value); a still-unresolved
+/// type (or a `VarApp` whose head hasn't been pinned to a concrete
+/// constructor yet) answers `false` here too, but see `check_pending`'s own
+/// doc comment on why *reporting* an error still needs to tell that case
+/// apart from a genuine "no."
+pub fn check_instance(
+    sub: &mut Substitution,
+    table: &InstanceTable,
+    interface: &str,
+    ty: TypeVarId,
+) -> bool {
+    match sub.resolve_structure(ty) {
+        Some(Structure::App(head, args)) => match table.entry(interface, &head) {
+            Some(entry) => entry
+                .requires
+                .iter()
+                .all(|(pos, req_interface)| check_instance(sub, table, req_interface, args[*pos])),
+            None => false,
+        },
+        Some(Structure::Ctor(head)) => table.has_instance(interface, &head),
+        // Structural facts, not table lookups -- gated to exactly `Eq`/
+        // `Ord`/`Show` (same as `Unit` below), so a dangling `Num (Int,
+        // Int)` obligation (nonsensical -- Knot has no tuple arithmetic)
+        // correctly still fails instead of wrongly inheriting `Int`'s own
+        // `Num` instance through the recursion.
+        Some(Structure::Tuple(elems)) if matches!(interface, "Eq" | "Ord" | "Show") => elems
+            .iter()
+            .all(|e| check_instance(sub, table, interface, *e)),
+        Some(Structure::Record(fields, _)) if matches!(interface, "Eq" | "Ord" | "Show") => fields
+            .values()
+            .all(|f| check_instance(sub, table, interface, *f)),
+        // One value, trivially all three.
+        Some(Structure::Unit) => matches!(interface, "Eq" | "Ord" | "Show"),
+        _ => false,
+    }
+}
+
 /// Checks every still-unresolved (concrete-typed) obligation `solve::solve`
-/// returned against `table`, appending a `TypeErrorKind::NoInstance` for
-/// each one with no matching entry. Anything not headed by a plain
-/// `Structure::App` or a resolved `Structure::Ctor` (see module docs) is
-/// silently left unchecked, not flagged either way -- a `Collection`/
-/// `Context` obligation on a still-*unresolved* constructor variable lands
-/// here too (`sub.resolve_structure` returns `None` for it, same as any
-/// other unbound variable), which is correct: that's a kind error, not a
-/// missing-instance one, and this crate doesn't report kind errors yet
-/// (see `ty::Structure::VarApp`'s own doc comment).
+/// returned against `table` via `check_instance`, appending a
+/// `TypeErrorKind::NoInstance` for each one that fails. A genuinely
+/// still-*unresolved* type (`sub.resolve_structure` returns `None` — an
+/// unbound flexible variable, or a constructor variable never pinned to a
+/// concrete head) is left alone instead: that's not this obligation's
+/// fault to report, and for the constructor-variable case specifically
+/// it's a kind error this crate doesn't report yet (see `ty::Structure::
+/// VarApp`'s own doc comment), not a missing-instance one.
 pub fn check_pending(
     sub: &mut Substitution,
     table: &InstanceTable,
@@ -148,20 +243,14 @@ pub fn check_pending(
     errors: &mut Vec<TypeError>,
 ) {
     for p in pending {
-        let head = match sub.resolve_structure(p.ty) {
-            Some(Structure::App(head, _)) => Some(head),
-            Some(Structure::Ctor(head)) => Some(head),
-            _ => None,
-        };
-        if let Some(head) = head {
-            if !table.has_instance(&p.interface, &head) {
-                errors.push(TypeError {
-                    span: p.span,
-                    kind: TypeErrorKind::NoInstance {
-                        interface: p.interface,
-                    },
-                });
-            }
+        let is_resolved = sub.resolve_structure(p.ty).is_some();
+        if is_resolved && !check_instance(sub, table, &p.interface, p.ty) {
+            errors.push(TypeError {
+                span: p.span,
+                kind: TypeErrorKind::NoInstance {
+                    interface: p.interface,
+                },
+            });
         }
     }
 }
@@ -173,7 +262,7 @@ mod tests {
     #[test]
     fn builtin_instances_are_trusted_unconditionally() {
         let mut table = InstanceTable::new();
-        table.insert_builtin("Num", Ref::Builtin("Int".to_string()));
+        table.insert_builtin("Num", Ref::Builtin("Int".to_string()), vec![]);
         assert!(table.has_instance("Num", &Ref::Builtin("Int".to_string())));
         assert!(!table.has_instance("Num", &Ref::Builtin("String".to_string())));
     }
@@ -243,7 +332,7 @@ mod tests {
     fn check_pending_accepts_a_seeded_builtin_instance() {
         let mut sub = Substitution::new();
         let mut table = InstanceTable::new();
-        table.insert_builtin("Num", Ref::Builtin("Int".to_string()));
+        table.insert_builtin("Num", Ref::Builtin("Int".to_string()), vec![]);
         let ty = sub.fresh_bound(Structure::App(Ref::Builtin("Int".to_string()), vec![]));
         let pending = vec![PendingInstance {
             span: knot_syntax::span::Span::new(0, 0),
@@ -259,7 +348,7 @@ mod tests {
     fn check_pending_resolves_a_ctor_headed_obligation_against_the_table() {
         let mut sub = Substitution::new();
         let mut table = InstanceTable::new();
-        table.insert_builtin("Collection", Ref::Builtin("List".to_string()));
+        table.insert_builtin("Collection", Ref::Builtin("List".to_string()), vec![]);
         let ty = sub.fresh_bound(Structure::Ctor(Ref::Builtin("List".to_string())));
         let pending = vec![PendingInstance {
             span: knot_syntax::span::Span::new(0, 0),
@@ -307,10 +396,10 @@ mod tests {
     }
 
     #[test]
-    fn check_pending_leaves_non_app_headed_obligations_unflagged() {
+    fn check_pending_leaves_a_still_unresolved_type_variable_unflagged() {
         let mut sub = Substitution::new();
         let table = InstanceTable::new();
-        let ty = sub.fresh_bound(Structure::Tuple(vec![]));
+        let ty = sub.fresh_unbound();
         let pending = vec![PendingInstance {
             span: knot_syntax::span::Span::new(0, 0),
             interface: "Eq".to_string(),
@@ -319,6 +408,143 @@ mod tests {
         let mut errors = Vec::new();
         check_pending(&mut sub, &table, pending, &mut errors);
         assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn empty_tuple_trivially_satisfies_eq_ord_show() {
+        let mut sub = Substitution::new();
+        let table = InstanceTable::new();
+        let ty = sub.fresh_bound(Structure::Tuple(vec![]));
+        for interface in ["Eq", "Ord", "Show"] {
+            assert!(check_instance(&mut sub, &table, interface, ty));
+        }
+    }
+
+    #[test]
+    fn a_function_is_never_eq_ord_or_show() {
+        let mut sub = Substitution::new();
+        let table = InstanceTable::new();
+        let a = sub.fresh_unbound();
+        let fn_ty = sub.fresh_bound(Structure::Fn(a, a));
+        assert!(!check_instance(&mut sub, &table, "Eq", fn_ty));
+    }
+
+    #[test]
+    fn tuple_is_eq_only_if_every_element_is() {
+        let mut sub = Substitution::new();
+        let mut table = InstanceTable::new();
+        table.insert_builtin("Eq", Ref::Builtin("Int".to_string()), vec![]);
+        let int_ty = sub.fresh_bound(Structure::App(Ref::Builtin("Int".to_string()), vec![]));
+        let weird_ty = sub.fresh_bound(Structure::App(Ref::Builtin("Weird".to_string()), vec![]));
+
+        let ok_pair = sub.fresh_bound(Structure::Tuple(vec![int_ty, int_ty]));
+        assert!(check_instance(&mut sub, &table, "Eq", ok_pair));
+
+        let bad_pair = sub.fresh_bound(Structure::Tuple(vec![int_ty, weird_ty]));
+        assert!(!check_instance(&mut sub, &table, "Eq", bad_pair));
+    }
+
+    #[test]
+    fn tuple_never_structurally_satisfies_a_non_derivable_interface() {
+        // Knot has no tuple arithmetic -- (Int, Int) must not inherit Int's
+        // own Num instance just because every element happens to have one.
+        let mut sub = Substitution::new();
+        let mut table = InstanceTable::new();
+        table.insert_builtin("Num", Ref::Builtin("Int".to_string()), vec![]);
+        let int_ty = sub.fresh_bound(Structure::App(Ref::Builtin("Int".to_string()), vec![]));
+        let pair = sub.fresh_bound(Structure::Tuple(vec![int_ty, int_ty]));
+        assert!(!check_instance(&mut sub, &table, "Num", pair));
+    }
+
+    #[test]
+    fn record_is_eq_only_if_every_field_is() {
+        let mut sub = Substitution::new();
+        let mut table = InstanceTable::new();
+        table.insert_builtin("Eq", Ref::Builtin("Int".to_string()), vec![]);
+        let int_ty = sub.fresh_bound(Structure::App(Ref::Builtin("Int".to_string()), vec![]));
+        let weird_ty = sub.fresh_bound(Structure::App(Ref::Builtin("Weird".to_string()), vec![]));
+
+        let mut ok_fields = std::collections::BTreeMap::new();
+        ok_fields.insert("x".to_string(), int_ty);
+        let ok_record = sub.fresh_bound(Structure::Record(ok_fields, None));
+        assert!(check_instance(&mut sub, &table, "Eq", ok_record));
+
+        let mut bad_fields = std::collections::BTreeMap::new();
+        bad_fields.insert("x".to_string(), weird_ty);
+        let bad_record = sub.fresh_bound(Structure::Record(bad_fields, None));
+        assert!(!check_instance(&mut sub, &table, "Eq", bad_record));
+    }
+
+    #[test]
+    fn a_parametric_builtin_instance_recurses_into_its_own_element_type() {
+        // List Weird's Eq must fail even though List itself has a seeded Eq
+        // entry -- the whole point of `requires` (Fix #4).
+        let mut sub = Substitution::new();
+        let mut table = InstanceTable::new();
+        table.insert_builtin("Eq", Ref::Builtin("Int".to_string()), vec![]);
+        table.insert_builtin(
+            "Eq",
+            Ref::Builtin("List".to_string()),
+            vec![(0, "Eq".to_string())],
+        );
+        let int_ty = sub.fresh_bound(Structure::App(Ref::Builtin("Int".to_string()), vec![]));
+        let weird_ty = sub.fresh_bound(Structure::App(Ref::Builtin("Weird".to_string()), vec![]));
+        let list_int = sub.fresh_bound(Structure::App(
+            Ref::Builtin("List".to_string()),
+            vec![int_ty],
+        ));
+        let list_weird = sub.fresh_bound(Structure::App(
+            Ref::Builtin("List".to_string()),
+            vec![weird_ty],
+        ));
+
+        assert!(check_instance(&mut sub, &table, "Eq", list_int));
+        assert!(!check_instance(&mut sub, &table, "Eq", list_weird));
+    }
+
+    #[test]
+    fn nested_containers_resolve_two_levels_deep() {
+        let mut sub = Substitution::new();
+        let mut table = InstanceTable::new();
+        table.insert_builtin("Eq", Ref::Builtin("Int".to_string()), vec![]);
+        table.insert_builtin(
+            "Eq",
+            Ref::Builtin("List".to_string()),
+            vec![(0, "Eq".to_string())],
+        );
+        let int_ty = sub.fresh_bound(Structure::App(Ref::Builtin("Int".to_string()), vec![]));
+        let list_int = sub.fresh_bound(Structure::App(
+            Ref::Builtin("List".to_string()),
+            vec![int_ty],
+        ));
+        let list_list_int = sub.fresh_bound(Structure::App(
+            Ref::Builtin("List".to_string()),
+            vec![list_int],
+        ));
+        assert!(check_instance(&mut sub, &table, "Eq", list_list_int));
+    }
+
+    #[test]
+    fn a_declared_parametric_instance_populates_requires_from_its_own_constraints() {
+        let cs = decls(
+            "type Box a = Box a\n\
+             instance Eq a => Eq (Box a) where\n  (==) x y = True\n",
+        );
+        let (table, errors) = build_instance_table(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+
+        let mut sub = Substitution::new();
+        let int_ty = sub.fresh_bound(Structure::App(Ref::Builtin("Int".to_string()), vec![]));
+        let weird_ty = sub.fresh_bound(Structure::App(Ref::Builtin("Weird".to_string()), vec![]));
+        let box_ref = Ref::TopLevel("Box".to_string());
+        let box_int = sub.fresh_bound(Structure::App(box_ref.clone(), vec![int_ty]));
+        let box_weird = sub.fresh_bound(Structure::App(box_ref, vec![weird_ty]));
+
+        // Int itself needs its own seeded Eq for the recursion to succeed.
+        let mut table_with_int = table;
+        table_with_int.insert_builtin("Eq", Ref::Builtin("Int".to_string()), vec![]);
+        assert!(check_instance(&mut sub, &table_with_int, "Eq", box_int));
+        assert!(!check_instance(&mut sub, &table_with_int, "Eq", box_weird));
     }
 
     // -- end-to-end: TM3 (constrain) + TM5 (solve) + TM6 (this table) --

@@ -52,6 +52,25 @@
 //!   seven built-ins (see `ty::Structure::VarApp`'s own doc comment). `Do`
 //!   (`constrain::expr::desugar_do`) is real now too, since it falls
 //!   straight out of `bind`/`pure` having real schemes.
+//! - **Fix #4** (done): `interface::instance::check_instance` replaces the
+//!   old flat `has_instance` lookup at both its call sites
+//!   (`check_pending`, `elaborate::resolve_dictionary`) with a real
+//!   recursive check — `InstanceEntry.requires` records a parametric
+//!   instance's own positional obligations (`instance Eq a => Eq (List
+//!   a)` -> "position 0 needs `Eq`"), populated for both declared and
+//!   hand-written built-in instances, and `Tuple`/`Record`/`Unit` get
+//!   hardcoded structural `Eq`/`Ord`/`Show` rules instead of a table
+//!   lookup (no `Ref` to key them by). `List Weird`'s `Eq` and `(Weird,
+//!   Int)`'s `Eq` are now correctly rejected instead of silently ignored.
+//!   Dictionary *construction* (as opposed to existence-checking) for
+//!   structural obligations is deliberately still out of scope — see
+//!   `elaborate.rs`'s own doc comment on why that belongs with Fix #3
+//!   instead. Skipped one literal step from the gaps plan on inspection:
+//!   `Structure::Tuple`/`Record`'s hardcoded rule is gated to `Eq`/`Ord`/
+//!   `Show` specifically (matching `Unit`'s own case) rather than applying
+//!   to every interface unconditionally — the plan's own code sketch
+//!   omitted that gate, which would have wrongly let e.g. `(Int, Int)`
+//!   inherit a `Num` instance it should never have.
 
 pub mod annotation;
 pub mod ast;
