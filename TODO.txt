@@ -144,7 +144,13 @@ alternatively, the UI can serialize the state directly into the file with specia
     -consider getting rid of `let {f1 f2 f3} = someRecrod` pattern matching syntax, or allwo it and use it to enable the special record let binding syntax (actually that's probably better than implicit field access for special let bound record node) 
     -annotations not allowed on expression holes, we could techinacly allow this maybe?
     DONE-change postfix annotation to prefix notation
-
+    -polymorphic output types, do they need special treatment
+        -e.g.
+            let x :: (Num a) => a = 5.
+            y = 0.5 + x (x is a float)
+            z = 3 + x (x is an int)
+        -so there are actually 2 x's in the runtime. Compiler secretly sees x as x :: (Num a) => (typeclass dict) -> a
+        -with that idea, x is actually scretly a boxed node
 
 
 

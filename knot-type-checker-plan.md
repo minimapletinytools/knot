@@ -153,12 +153,40 @@ a *sound* content hash (plain Canonical AST isn't enough, because it doesn't yet
 dictionary a given `==` dispatches to). This plan's output is that representation; the
 hashing scheme itself remains future work, not part of this crate.
 
-**Deliberately deferred, not designed**: whether a constrained top-level binding gets a
-monomorphism-restriction-style single evaluation shared across all its uses, or is free to
-re-elaborate (and re-evaluate) per instantiation. Haskell's monomorphism restriction exists
-specifically to avoid silently repeating expensive work at each use of a polymorphic CAF —
-given Knot's node-graph/lazy-sharing model, this has real runtime implications beyond type
-checking, so it belongs with the runtime/partial-reevaluation design, not decided here.
+**Resolved, 2026-08-01 — no monomorphism restriction; ambiguous CAFs are a type error
+instead.** This was originally deferred to the runtime team as "MR vs. full generalization."
+It doesn't need to be: a narrower rule makes the scenario MR/defaulting exists to handle
+impossible to even type-check, closing the question out here rather than picking a side.
+
+**The rule**: a zero-argument binding (a true CAF — `x = expr`, not `f x = expr`) may not
+generalize over any type variable that still carries an unresolved `HasInstance` obligation.
+If, after solving, such a binding's quantifiable variables include one with a dangling
+interface constraint, that's a compile error ("ambiguous type — `x` takes no arguments, so
+which instance to use can never be determined; give it a concrete type"), not a silent
+default and not a generalize-and-hope. Bindings with arity ≥ 1 (actual functions) are
+*never* restricted, regardless of where the constrained variable appears in the signature —
+`myMax :: Ord a => a -> a -> a` and `fromIntegral :: (Integral a, Num b) => a -> b` (spec
+§6.2's `b` appears *only* in the return type, never in an argument) both stay exactly as
+unrestricted as they already are in Haskell, no special-casing needed for either: a real
+call always supplies `a` via its argument, and a return-only variable like `fromIntegral`'s
+`b` gets pinned the same way it already would, by ordinary unification with whatever the
+call's result feeds into.
+
+(Why not restrict based on argument- vs. return-*position* within one signature — the
+initially-tempting alternative? It doesn't survive currying: `a -> b -> c` **is**
+`a -> (b -> c)`, so "the output" isn't a stable slot to forbid constrained variables from.
+And even a strict "must appear in *some* argument" reading breaks `fromIntegral` outright,
+since its `b` never does. Arity — zero arguments vs. one-or-more — is the axis that's
+actually well-defined and actually load-bearing, not position.)
+
+This is strictly narrower, and simpler to implement, than Haskell's actual Monomorphism
+Restriction: Haskell's trigger condition is *syntactic* (does the LHS have an explicit
+argument pattern) — the well-known wart where `addOne = (+) 1` gets restricted but the
+identical `addOne x = x + 1` doesn't. Knot's version keys off the binding's *resolved type*
+(function-shaped or not) instead, so point-free vs. not makes no difference, and there's no
+defaulting-rules subsystem to design at all — Knot just errors where Haskell would first try
+`Integer`/`Double`-style defaults. See §4 for the check (`check_no_dangling_constraints`,
+run right after `generalize`) and §5 for the corresponding architecture-decision entry.
 
 ---
 
@@ -351,6 +379,27 @@ fn generalize(sub: &Substitution, env: &TypeEnv, ty: TypeVarId) -> Scheme {
     let quantified = ftv_ty.difference(&ftv_env);
     Scheme { vars: quantified.collect(), ty }
 }
+
+// -- ambiguous-CAF check (§3, replaces the monomorphism restriction) --
+// Run once per binding, right after `generalize`, using the `HasInstance` obligations
+// collected for it during solving. Arity is read off the *resolved type*, not the binding's
+// surface syntax -- point-free vs. explicit-argument makes no difference, unlike Haskell.
+
+fn check_no_dangling_constraints(
+    scheme: &Scheme,
+    sub: &Substitution,
+    obligations: &[Constraint],
+) -> Result<(), TypeError> {
+    if matches!(sub.resolve_structure(scheme.ty), Structure::Fn(_, _)) {
+        return Ok(());   // arity >= 1 -- never restricted, see §3
+    }
+    for var in &scheme.vars {
+        if obligations.iter().any(|c| matches!(c, Constraint::HasInstance { ty, .. } if ty == var)) {
+            return Err(TypeError::AmbiguousConstraint { var: *var });
+        }
+    }
+    Ok(())
+}
 ```
 
 Extensible-record unification follows Elm's field-gathering approach directly (concept,
@@ -390,6 +439,13 @@ the other side's row turns out to also have."
   check (they can unify with themselves but not silently specialize to a concrete type),
   the same guarantee Elm's `nameToRigid`/`RigidVar` provides and genuine let-polymorphism
   requires; without it, a signature would be a lie the checker doesn't actually enforce.
+- **No monomorphism restriction — replaced by a stricter, simpler, arity-based rule** (§3):
+  a zero-argument (CAF) binding may never generalize over a variable with a dangling
+  `HasInstance` obligation (`check_no_dangling_constraints`, §4); bindings with arity ≥ 1
+  are always fully generalized, unconditionally, no matter where the constrained variable
+  appears in the signature. Resolves the sharing question for good rather than deferring it
+  to the runtime team — no well-typed Knot program can contain the ambiguous CAF that
+  question was actually about.
 - **Crate name: `knot-checker`**, continuing the naming pattern (`knot-syntax` parses text
   into syntax; `knot-canonical` resolves names into the canonical form; `knot-checker` checks
   and elaborates types). Workspace member alongside the other two, depending on
@@ -431,10 +487,13 @@ compiler/knot-checker/
     ast.rs                      -- the Elaborated AST (TExpr/TPattern/... with a `ty` on every
                                     node and dictionaries threaded through constrained calls)
     error.rs                    -- TypeError (mismatch, occurs-check/infinite type, no
-                                    instance, ambiguous instance, ...), collected not fatal
-                                    (matches knot-canonical's CanonError, not knot-syntax's
-                                    fail-fast ParseError -- there's no backtracking concept
-                                    here either)
+                                    instance, AmbiguousConstraint (§3/§4 -- a dangling-
+                                    constraint CAF; coherence, §3, already rules out the
+                                    Haskell sense of "ambiguous instance" via multiple
+                                    candidates, so this is the only ambiguity kind that
+                                    survives), ...), collected not fatal (matches
+                                    knot-canonical's CanonError, not knot-syntax's fail-fast
+                                    ParseError -- there's no backtracking concept here either)
 ```
 
 ---
@@ -456,7 +515,8 @@ compiler/knot-checker/
 - **TM5** — `solve.rs`: the driver that ties generation to `unify.rs`, builds the
   scheme environment, runs `generalize` at each binding group's boundary, collects
   `TypeError`s instead of stopping at the first (matching `knot-canonical`'s error-collection
-  stance, for the same reason).
+  stance, for the same reason). Also runs `check_no_dangling_constraints` (§3/§4) right after
+  each `generalize` call — small enough to land in this milestone rather than its own.
 - **TM6** — `interface/table.rs`: the closed interface/method/superclass table (hardcoded,
   small). `interface/instance.rs`: table construction from built-ins + `knot-canonical`'s
   already-validated `CInstanceDecl`s, coherence + superclass-existence checks. Sibling
@@ -492,22 +552,18 @@ dictionary actually gets threaded).
 
 ## 9. Open questions for you
 
-1. **Monomorphism-restriction-style sharing** (§3's closing note) — does a polymorphic,
-   constrained top-level binding need to evaluate once and share the result across
-   instantiations, or is per-instantiation re-elaboration/re-evaluation fine? This has real
-   runtime/caching implications, not just type-checking ones.
-2. **Built-in `Eq`/`Ord`/`Show` coverage** — which built-in types need these out of the box
+1. **Built-in `Eq`/`Ord`/`Show` coverage** — which built-in types need these out of the box
    beyond the numeric ones spec §6.2 already lists explicitly (presumably `String`, `Bool`,
    `List a` given `Eq a`/`Ord a`, tuples given their components, `Unit`)? Worth a short
    explicit list in the spec rather than the checker silently deciding.
-3. **`List.map`-style qualified access** — `knot-canonical`'s prelude docs already flagged
+2. **`List.map`-style qualified access** — `knot-canonical`'s prelude docs already flagged
    this as unresolved (is `List.map` the same polymorphic collection-interface `map`
    written with a qualifier, or a distinct concrete function belonging to a real `List`
    stdlib module?). Doesn't block TM0–TM8, but does block designing the built-in
    `List`/`Map`/`String` module *interfaces* properly rather than ad hoc.
-4. **Confirm the crate name** (`knot-checker`) and this plan's scope split before I start
+3. **Confirm the crate name** (`knot-checker`) and this plan's scope split before I start
    TM0 — same checkpoint pattern as the parser plan.
-5. **When does `annotation/table.rs`/`sensitivity.rs` (§3.5/§4) actually get implemented?** —
+4. **When does `annotation/table.rs`/`sensitivity.rs` (§3.5/§4) actually get implemented?** —
    the Record/Tuple (product) recursion in `sensitivity_of` is clear enough to build and
    unit-test now, but two things still gate a *complete* implementation: the leaf constraint
    vocabulary (spec §13, still TBD) and whether/how `sensitivity_of` should ever recurse into
