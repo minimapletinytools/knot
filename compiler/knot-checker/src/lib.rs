@@ -13,13 +13,18 @@
 //! §6.4). `constrain::decl` (TM4) does SCC dependency splitting for
 //! `let`/top-level binding groups, builds the resulting nested
 //! `Constraint::Let` tree, and wires real rigid variables up for signed
-//! bindings. `solve.rs` (TM5), the interface/instance and annotation tables
-//! (TM6), and dictionary elaboration (TM7) don't exist yet — there is no
-//! public `check_module` entry point until enough of those exist to make
-//! one meaningful.
+//! bindings. `solve.rs` (TM5) walks a `Constraint` tree, actually calling
+//! `unify`, generalizing top-level bindings into the `SchemeEnv`, and
+//! instantiating fresh copies at each `Lookup`. The interface/instance and
+//! annotation tables (TM6) and dictionary elaboration (TM7) don't exist yet
+//! — there is no public `check_module` entry point until enough of those
+//! exist to make one meaningful (`solve::PendingInstance`s a full checker
+//! would resolve against the real instance table are, for now, just
+//! returned to the caller unresolved).
 
 pub mod constrain;
 pub mod error;
+pub mod solve;
 pub mod ty;
 pub mod unify;
 pub mod var;

@@ -66,7 +66,32 @@ pub enum Constraint {
     /// unsigned member once `header_con` solves — and just restating the
     /// signature directly for a signed one — is `solve.rs`'s job (TM5);
     /// this is still just a generation-time data shape, not the algorithm.
+    ///
+    /// **`top_level` — a real asymmetry, not a placeholder field.**
+    /// `knot-canonical`'s `Ref` has no separate case for "let-bound name" —
+    /// its own doc comment groups `let` in with lambda/case/do under
+    /// `Ref::Local` (all just "found in an enclosing local scope," since
+    /// name *resolution* has no reason to care about polymorphism). That
+    /// means a reference to a `let`-bound name is `Ref::Local` exactly like
+    /// a lambda parameter, and `constrain::expr::constrain_name_ref`
+    /// resolves *every* `Ref::Local` the same way: an immediate, monomorphic
+    /// `LocalScope` lookup, never a generalized/instantiated one. So a
+    /// `let`-expression's own `Constraint::Let` (`top_level: false`) carries
+    /// real member data, but nothing downstream ever looks it up by scheme —
+    /// solving only needs to walk its `header_con`/`body_con` for ordinary
+    /// unification, not install anything into the scheme environment or run
+    /// the ambiguous-CAF check (§3 of the plan) against it. Only a
+    /// module-level group (`top_level: true`, from `constrain_module`) is
+    /// actually referenced via `Ref::TopLevel` elsewhere and needs the full
+    /// generalize-and-install treatment. Net effect, documented as a real
+    /// (sound, just occasionally over-conservative) limitation: `let`-bound
+    /// names don't get let-polymorphism in this implementation — two uses of
+    /// the same `let`-bound value must agree on one type, same as a lambda
+    /// parameter would. They also aren't checked for the "no ambiguous
+    /// zero-argument bindings" rule top-level bindings get. Only top-level
+    /// definitions get the full treatment.
     Let {
+        top_level: bool,
         members: Vec<LetMember>,
         header_con: Box<Constraint>,
         body_con: Box<Constraint>,
@@ -77,6 +102,7 @@ pub enum Constraint {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LetMember {
     pub name: String,
+    pub span: Span,
     /// The placeholder type `header_con` was generated against — self/
     /// mutual references inside the group point straight at this.
     pub header_ty: TypeVarId,

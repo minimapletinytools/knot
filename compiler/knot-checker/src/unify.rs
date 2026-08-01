@@ -98,7 +98,10 @@ fn check_var_not_in(
     Ok(())
 }
 
-fn structure_children(structure: &Structure) -> Vec<TypeVarId> {
+/// `pub(crate)`, not private — `solve.rs`'s `free_vars` (the `generalize`
+/// helper) needs the exact same structural-child traversal as the occurs
+/// check does.
+pub(crate) fn structure_children(structure: &Structure) -> Vec<TypeVarId> {
     match structure {
         Structure::App(_, args) => args.clone(),
         Structure::Fn(a, b) => vec![*a, *b],

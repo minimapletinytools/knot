@@ -320,6 +320,7 @@ fn constrain_bindings(
     sub: &mut Substitution,
     scope: &mut LocalScope,
     bindings: Vec<RawBinding>,
+    top_level: bool,
     finish: impl FnOnce(&mut Substitution, &mut LocalScope) -> (TypeVarId, Constraint),
 ) -> (TypeVarId, Constraint) {
     let names: Vec<String> = bindings.iter().map(|b| b.name.clone()).collect();
@@ -341,7 +342,7 @@ fn constrain_bindings(
     }
 
     let sccs = scc_order(&names, &edges);
-    constrain_group_chain(sub, scope, &by_name, &sccs, 0, finish)
+    constrain_group_chain(sub, scope, &by_name, &sccs, 0, top_level, finish)
 }
 
 /// Processes `sccs[index..]` recursively: pushes the current group's names,
@@ -357,6 +358,7 @@ fn constrain_group_chain(
     by_name: &HashMap<String, &RawBinding>,
     sccs: &[Vec<String>],
     index: usize,
+    top_level: bool,
     finish: impl FnOnce(&mut Substitution, &mut LocalScope) -> (TypeVarId, Constraint),
 ) -> (TypeVarId, Constraint) {
     let Some(group_names) = sccs.get(index) else {
@@ -377,6 +379,7 @@ fn constrain_group_chain(
         scope.bind(&b.name, header_ty);
         members.push(LetMember {
             name: b.name.clone(),
+            span: b.span,
             header_ty,
             declared,
         });
@@ -402,10 +405,29 @@ fn constrain_group_chain(
         });
     }
 
-    let (result_ty, body_con) = constrain_group_chain(sub, scope, by_name, sccs, index + 1, finish);
-    scope.pop();
+    // Top-level names must be visible to *everything after this group* only
+    // through the deferred `Lookup` + generalized-scheme path (installed by
+    // `solve.rs`), never as a raw `LocalScope` hit -- that's the whole point
+    // of let-polymorphism (each use gets its own fresh instantiation). So
+    // this frame closes *now*, before recursing into later groups/the final
+    // body, not after. A `let`-expression's names (`top_level: false`) are
+    // the opposite: `Ref::Local` resolves via `LocalScope` unconditionally
+    // (see `constrain::expr::constrain_name_ref`), and this session's
+    // documented simplification is that they stay monomorphic on purpose —
+    // so their frame needs to stay open through the whole rest of the chain,
+    // exactly like it did before this fix, or a later sibling/the final `in`
+    // body would wrongly stop being able to see them at all.
+    if top_level {
+        scope.pop();
+    }
+    let (result_ty, body_con) =
+        constrain_group_chain(sub, scope, by_name, sccs, index + 1, top_level, finish);
+    if !top_level {
+        scope.pop();
+    }
 
     let whole = Constraint::Let {
+        top_level,
         members,
         header_con: Box::new(Constraint::And(header_constraints)),
         body_con: Box::new(body_con),
@@ -433,7 +455,7 @@ pub fn constrain_module(sub: &mut Substitution, decls: &[Spanned<CDecl>]) -> Con
         })
         .collect();
     let mut scope = LocalScope::new();
-    let (_unused, tree) = constrain_bindings(sub, &mut scope, bindings, |sub, _| {
+    let (_unused, tree) = constrain_bindings(sub, &mut scope, bindings, true, |sub, _| {
         (sub.fresh_unbound(), Constraint::True)
     });
     tree
@@ -489,7 +511,7 @@ pub fn constrain_let_bindings(
     // every-binding-sees-every-binding visibility, which would need
     // predeclaring placeholder types for destructured names too — not worth
     // the complexity for how rarely a let block actually needs it.
-    constrain_bindings(sub, scope, raw, |sub, scope| {
+    constrain_bindings(sub, scope, raw, false, |sub, scope| {
         let mut constraints = Vec::new();
         for (p, e) in &other_bindings {
             let rhs_ty = constrain_expr(sub, scope, e, &mut constraints);
@@ -520,10 +542,17 @@ mod tests {
     fn as_let(c: &Constraint) -> (&[LetMember], &Constraint, &Constraint) {
         match c {
             Constraint::Let {
+                top_level,
                 members,
                 header_con,
                 body_con,
-            } => (members, header_con, body_con),
+            } => {
+                assert!(
+                    *top_level,
+                    "constrain_module should always produce top_level: true"
+                );
+                (members, header_con, body_con)
+            }
             other => panic!("expected a Let, got {other:?}"),
         }
     }
@@ -621,6 +650,25 @@ mod tests {
             all_equal(header),
             "expected only Equal constraints, got {header:?}"
         );
+    }
+
+    #[test]
+    fn var_pattern_let_binding_produces_a_non_top_level_let() {
+        let mut sub = Substitution::new();
+        let mut scope = LocalScope::new();
+        scope.push();
+        let span = knot_syntax::span::Span::new(0, 0);
+        let bindings = vec![(
+            Spanned::new(span, CPattern::Var("x".to_string())),
+            Spanned::new(span, CExpr::IntLit(1)),
+        )];
+        let (_ty, tree) = constrain_let_bindings(&mut sub, &mut scope, &bindings, |sub, _, _| {
+            sub.fresh_unbound()
+        });
+        match tree {
+            Constraint::Let { top_level, .. } => assert!(!top_level),
+            other => panic!("expected a Let, got {other:?}"),
+        }
     }
 
     #[test]
