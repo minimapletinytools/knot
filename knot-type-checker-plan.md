@@ -190,24 +190,48 @@ keyed by annotation name instead of interface name — mapping a handful of spec
 "how to derive this key's expected type from context" (a constant for most keys; a
 signature-parameterized template for `unravel`, and presumably `solver` once its own shape
 gets pinned down per the discussion doc's §8 proposal). Once the expected type is known,
-checking the annotation's value against it is ordinary type-checking — no new inference
-technique, just a new place that needs to *produce* an expected type before checking can
-start.
+checking the annotation's value against it is ordinary type-checking, *except* for the
+`Sensitivity Out` slot in that template, which is not an ordinary type application — see
+below.
 
-**The reassuring part**: `Sensitivity`/`UnravelInput` were deliberately settled on as
+**Correction, 2026-08-01 — `Sensitivity` is a recursive type-level function, not an
+ordinary ADT.** The original resolution below (kept struck-through context intentionally,
+so the reasoning that got revisited stays visible) assumed wrapping `Out` wholesale was
+enough. It isn't: per spec §9.6, `Sensitivity` must recurse into `Out`'s own record/tuple
+*shape* — `Sensitivity { x : Float, y : Float }` reduces to `{ x : Sensitivity Float, y :
+Sensitivity Float }`, all the way to scalar leaves, before the leaf-level constraint
+vocabulary (`Exact a | Range a a | Tolerance a a | Free`, still TBD — spec §13) ever
+applies. A flat `Exact Out | Range Out Out | ...` over the whole `Out` can't express "let
+me constrain `x` and leave `y` free" at all, which is the entire point of §9.6 — so this
+crate *does* need one genuinely new piece of type-system machinery: a small structural
+function, `sensitivity_of` (§4), that pattern-matches a resolved `Structure` and recurses
+through `Record`/`Tuple` rather than doing a nominal-type lookup. `UnravelInput` is
+unaffected by this correction — it's still an ordinary hand-written generic type alias
+(`{ orig : a, hints : List a }`); only `Sensitivity` needed the flat-ADT plan reopened.
+
+Superseded text, kept for the record of what changed and why:
+
+~~**The reassuring part**: `Sensitivity`/`UnravelInput` were deliberately settled on as
 ordinary, hand-written ADTs/records (`type Sensitivity a = Exact a | Range a a | Tolerance
 a a | Free`; `type alias UnravelInput a = { orig : a, hints : List a }`) rather than an
 auto-derived "deep partial" transform — see the discussion doc §6 for why a real generic/
 type-family feature was rejected. That means this crate needs *zero* new type-system
 machinery for it: no type-level functions that recurse over a type's own field structure,
 nothing beyond the HM + closed-interface architecture already planned. The only genuinely
-new piece is the small annotation-key → expected-type table itself.
+new piece is the small annotation-key → expected-type table itself.~~
 
 **Concrete, not-yet-done follow-ups, deliberately not done as part of this edit**:
-- `Sensitivity`, `UnravelInput`, and `Exact`/`Range`/`Tolerance`/`Free` need to be added to
-  `knot-canonical::prelude`'s `BUILTIN_TYPES`/`BUILTIN_CONSTRUCTORS` once this is actually
-  implemented — premature before this crate (and the annotation-key table) exist to consume
-  them, and while spec §11 is still marked as needing more work.
+- `UnravelInput` and the eventual leaf vocabulary (`Exact`/`Range`/`Tolerance`/`Free`, spec
+  §13) need to be added to `knot-canonical::prelude`'s `BUILTIN_TYPES`/`BUILTIN_CONSTRUCTORS`
+  once this is actually implemented, same as any other built-in generic type — premature
+  before this crate (and the annotation-key table) exist to consume them, and while spec
+  §11/§13 are still marked as needing more work. `Sensitivity` itself is different: it still
+  needs an arity-1 entry in `BUILTIN_TYPES` so `knot-canonical` can resolve the bare name in
+  a signature like `Sensitivity out` (spec §9.1) — but unlike every other built-in type it
+  has no data constructors and no fixed stored shape; `knot-canonical` resolves it as an
+  opaque nominal head only, and *this* crate never unifies against a stored definition for
+  it, special-casing it in `sensitivity_of` (§4) once the concrete type it's applied to is
+  known instead.
 - Tuple-arity-≤3 interacts with multi-argument `unravel`: `Option (a, b, c)` is fine, but a
   4+-parameter function's unravel needs `Option {a: A, b: B, c: C, d: D}` (a record) instead
   of a bare tuple — the same existing rule (`knot-syntax::validate`) already applies
@@ -273,6 +297,23 @@ struct InstanceTable {
 enum InstanceEntry {
     BuiltIn { dict: DictionaryValue },
     Declared { constraints: Vec<CConstraint>, methods: HashMap<String, /* elaborated body */> },
+}
+
+// -- Sensitivity: structural, not nominal (§3.5 correction) --
+// Only valid once `ty` is fully resolved (post-unification) -- this is why deriving
+// `unravel`'s expected type has to happen after solving, not during constraint generation.
+
+fn sensitivity_of(sub: &Substitution, ty: TypeVarId) -> TypeVarId {
+    match sub.resolve_structure(ty) {
+        Structure::Record(fields, ext) =>
+            sub.fresh_bound(Structure::Record(
+                fields.iter().map(|(name, field_ty)| (name.clone(), sensitivity_of(sub, *field_ty))).collect(),
+                ext,
+            )),
+        Structure::Tuple(elems) =>
+            sub.fresh_bound(Structure::Tuple(elems.iter().map(|e| sensitivity_of(sub, *e)).collect())),
+        _ => leaf_sensitivity(sub, ty),   // Exact a | Range a a | Tolerance a a | Free -- §13, TBD
+    }
 }
 ```
 
@@ -351,6 +392,15 @@ compiler/knot-checker/
       mod.rs
       table.rs                  -- closed interface method table (mirrors prelude.rs's shape)
       instance.rs                -- InstanceTable construction + coherence + superclass checks
+    annotation/
+      mod.rs
+      table.rs                  -- annotation-key -> expected-type derivation (§3.5): fixed
+                                    type for most keys, signature-parameterized template for
+                                    `unravel`/`solver`
+      sensitivity.rs             -- sensitivity_of(): structural recursion of `Sensitivity`
+                                    into Record/Tuple shape (§3.5/§4) -- the one genuinely new
+                                    piece of type-system machinery this crate needs beyond HM
+                                    + closed interfaces
     elaborate.rs                -- post-solve pass: resolves HasInstance obligations against
                                     the InstanceTable, inserts explicit dictionary args
     ast.rs                      -- the Elaborated AST (TExpr/TPattern/... with a `ty` on every
@@ -384,9 +434,11 @@ compiler/knot-checker/
   stance, for the same reason).
 - **TM6** — `interface/table.rs`: the closed interface/method/superclass table (hardcoded,
   small). `interface/instance.rs`: table construction from built-ins + `knot-canonical`'s
-  already-validated `CInstanceDecl`s, coherence + superclass-existence checks. Likely spot
-  for a sibling `annotation/table.rs` (§3.5) once `unravel`'s design is stable enough to
-  implement, not blocking the rest of this milestone.
+  already-validated `CInstanceDecl`s, coherence + superclass-existence checks. Sibling
+  `annotation/table.rs` + `annotation/sensitivity.rs` (§3.5/§4/§6) once `unravel`'s design is
+  stable enough to implement — `sensitivity_of`'s Record/Tuple recursion can be built and
+  unit-tested against synthetic types before the leaf vocabulary (spec §13) is pinned down,
+  so it needn't block the rest of this milestone.
 - **TM7** — `elaborate.rs` + `ast.rs`: the post-solve dictionary-insertion pass producing
   the Elaborated AST — the crate's actual deliverable.
 - **TM8** — Built-in instance wiring (`Num Int`, `Num Float`, `Integral Int`,

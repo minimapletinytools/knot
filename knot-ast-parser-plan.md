@@ -19,6 +19,17 @@ annotation *semantics* (merging stacked+block annotations on key conflict, runni
 `unravel`/`solver`) — the parser only needs to capture annotation values as parsed
 expressions and attach them to the right node; later stages interpret them.
 
+Annotations are conceptually ordinary prefix functions with real type signatures
+(`unravel :: Unraveler -> ...` — a function type; other standard keys taking `String`,
+`(Float, Float)`, or `Bool` — see spec §8.5) whose value is checked against that
+signature and otherwise behaves as `identity`. Checking `args` against a key's expected
+type is exactly the semantic analysis this crate defers — the parser's job stops at
+capturing `args` as an ordinary `Spanned<Expr>` (already `Annotation::value` in §4); it
+does not need to know or special-case any key's expected type. Likewise, `Sensitivity`
+(spec §9.6) being a type-level function that recurses into a type's record/tuple shape
+is purely a type-checker concern — the parser sees `Sensitivity` as an ordinary `Type::Named`
+reference like any other type constructor and has nothing extra to do for it.
+
 **Included as a thin post-parse layer** (structural, not semantic — see §3): tuple arity
 ≤ 3 and duplicate top-level bindings. Both are properties of the finished AST that don't
 need type information to check, so they live here rather than being deferred to a future
@@ -150,6 +161,14 @@ pub struct TypeSignature {
 pub struct Annotation { pub key: String, pub value: Spanned<Expr> }
 // @name(args) desugars into this shape at parse time (single arg -> bare value,
 // multiple args -> tuple, per §10 desugaring rule) — one representation, not two.
+//
+// `value` is parsed as an ordinary expression right at its point of attachment, not
+// deferred or reparsed in some separate environment later — so a lambda passed as
+// `unravel`'s value (spec §9.1) can reference whatever let-bindings/parameters are
+// already in scope there, same as any other expression written in that position.
+// Nothing special for this crate to implement here beyond normal recursive descent;
+// scope resolution itself is name resolution's job (out of scope, see §2), but the
+// parser doesn't need to do anything unusual to make that job possible downstream.
 
 pub struct FnDef {
     pub name: String,
@@ -355,6 +374,7 @@ generate one named test per fixture with minimal change — not needed for v1.
 | 3 | User-facing constrained type signatures (`Ord a => ...`)? | Allowed — only *new* interfaces are forbidden; instances of existing ones and constrained signatures using them are both fine. |
 | 4 | Named holes (`_name`) as `let`-binding LHS? | Allowed there, and *only* there — not valid as an expression-position placeholder (`f a _b c` is invalid; `f a _ c` is fine). |
 | 5 | Can annotations attach to `type`/`type alias` declarations? | No, not in v0 — possible V2 feature. |
+| 6 | Do annotation values need special scoping/environment handling in the parser? | No — they're parsed as ordinary expressions inline at their attachment point, so they inherit the ambient lexical scope automatically (spec §8.5); nothing new needed here. |
 
 One more resolved along the way, not originally on this list: **instance-declaration
 syntax** follows Haskell (`instance Eq Shape where (==) a b = ...`) — see `InstanceDecl`

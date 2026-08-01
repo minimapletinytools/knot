@@ -476,6 +476,39 @@ Prefer extracting to named `let` bindings when inline annotations get unwieldy.
 
 The annotation set is open — new keys can be added without changing the language.
 
+### 8.5 Annotations Are Typed, Prefix Functions
+
+An annotation key is not a special grammatical category — it's an ordinary, prefix-
+position Knot function with a real type signature, and `@key(args)` is checked exactly
+like an application of that function: `args` is type-checked against `key`'s declared
+parameter type, then the whole thing behaves as `identity` on the value it's attached to
+at runtime (per this section's "no effect on forward runtime semantics"). Standard keys'
+signatures:
+
+- `unravel :: Unraveler -> ...` — takes a **function type** (see §11; `Unraveler`'s exact
+  shape mirrors the annotated binding's own signature).
+- `nodeId`, `label`, `doc`, `color`, `group` — take `String`.
+- `position` — takes `(Float, Float)`.
+- `collapsed` — takes `Bool`.
+
+New keys (the set is open, per above) are added the same way: give the key a type.
+
+**Scoping**: when an annotation's value is itself a function — as with `unravel` — that
+function may reference anything in scope at the point the annotation is written: the
+same `let`-bound names, function parameters, and imports visible to the binding it
+annotates. This is what lets an `unravel` body close over its own function's parameters
+(§11.1's `\inputs sensitivity -> ...`).
+
+**Placement — the one special rule**: as ordinary prefix functions, annotations follow
+the expression-atom binding rule of §8.3. The one addition to that rule is that an
+annotation may also be stacked immediately above three things that are *not* expression
+atoms: the right-hand side of a `let` binding, a function definition, and a `name ::
+Type` signature line. The first two are really just the atom rule applied with the whole
+bound value (or function body) as the atom; the signature-line case is the genuine
+exception, since a bare `:: Type` line isn't an expression at all — §8.1's stacked form
+is this rule combined with the AST-level merging of a signature and its definition into
+one binding.
+
 ---
 
 ## 11. Unravel (Reverse Execution) 
@@ -549,6 +582,27 @@ result = complexTransform input
 @{ unravel = myDomainUnraveler }
 output = domainSpecificOp input
 ```
+
+### 9.6 `Sensitivity` Is a Recursive Type Function
+
+`Sensitivity` (the output-change type threaded through §9.1's unravel signatures) is not
+an ordinary parametric type applied wholesale to a binding's output — it's a type-level
+function that recurses into that output type's *shape*, mirroring structure rather than
+wrapping it:
+
+```
+Sensitivity(record { f1 : T1, f2 : T2, ... }) = record { f1 : Sensitivity(T1), f2 : Sensitivity(T2), ... }
+Sensitivity(tuple(T1, T2, T3))                = tuple(Sensitivity(T1), Sensitivity(T2), Sensitivity(T3))
+Sensitivity(scalar T)                         = <leaf sensitivity vocabulary for T>  -- TBD, §13
+```
+
+This recursion applies uniformly to **user-defined record types**, not just built-in
+tuples/records: if a binding's output is `type alias Point = { x : Float, y : Float }`,
+its `Sensitivity Point` is `{ x : Sensitivity Float, y : Sensitivity Float }`. That lets
+an unravel caller constrain `x` while leaving `y` free, rather than being forced to
+specify (or leave entirely unconstrained) the whole record at once. The leaf case —
+`Sensitivity` of a scalar type — is where the actual constraint vocabulary lives; still
+open, see §13.
 
 ---
 
