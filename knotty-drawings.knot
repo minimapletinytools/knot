@@ -7,13 +7,12 @@ type alias Ref a = Id   -- reference-by-id to a resource defined elsewhere
 -- IsGraphicsElement too) as well as by Group, which doesn't.
 type alias IsElement a = { a | id : Id }
 
--- The bundled constraint: "this record has at least every shared
--- graphics-element field." Not a concrete type on its own — every primitive
--- shape below satisfies it structurally by listing these same fields plus its
--- own geometry, since knot's records have no spread/inheritance sugar.
-type alias IsGraphicsElement a =
-    { a
-    | id : Id
+-- The closed field bundle every graphics-element-shaped type has. Kept as
+-- its own alias (rather than only existing as the open IsGraphicsElement
+-- constraint below) specifically so `..GraphicsElement` has something
+-- concrete to spread — see the "Primitive shapes" section.
+type alias GraphicsElement =
+    { id : Id
     -- transform
     , transform : Transform
     -- paint
@@ -43,6 +42,12 @@ type alias IsGraphicsElement a =
     , title : Maybe String
     , desc : Maybe String
     }
+
+-- The bundled constraint: "this record has at least every shared
+-- graphics-element field." Not a concrete type on its own — every primitive
+-- shape below satisfies it structurally by spreading the same
+-- GraphicsElement fields plus its own geometry.
+type alias IsGraphicsElement a = { a | ..GraphicsElement }
 
 -- Row-polymorphic constraints, one per field, so a function can require just the
 -- slice of IsGraphicsElement it actually touches instead of the whole bundle.
@@ -100,35 +105,13 @@ type TransformOp
 
 -- Primitive shapes ------------------------------------------------------
 --
--- Each one "inherits" IsGraphicsElement purely structurally: it restates every
--- shared field (knot records don't have a spread/extends operator) plus its own
--- geometry. Because the field set is a superset, any of these unifies fine
--- wherever a function asks for `IsGraphicsElement a` or a narrower `Has*`.
+-- Each one spreads GraphicsElement's own fields (`..GraphicsElement`) plus
+-- its own geometry. Because the field set is a superset, any of these
+-- unifies fine wherever a function asks for `IsGraphicsElement a` or a
+-- narrower `Has*`.
 
 type alias Rect =
-    { id : Id
-    , transform : Transform
-    , fill : Paint
-    , stroke : Paint
-    , fillOpacity : Float
-    , strokeOpacity : Float
-    , opacity : Float
-    , fillRule : FillRule
-    , strokeWidth : Float
-    , strokeLinecap : LineCap
-    , strokeLinejoin : LineJoin
-    , strokeDasharray : List Float
-    , strokeDashoffset : Float
-    , strokeMiterlimit : Float
-    , clipPath : Maybe (Ref ClipPath)
-    , mask : Maybe (Ref Mask)
-    , filter : Maybe (Ref Filter)
-    , blendMode : BlendMode
-    , visibility : Bool
-    , display : Bool
-    , className : List String
-    , title : Maybe String
-    , desc : Maybe String
+    { ..GraphicsElement
     -- geometry
     , x : Float
     , y : Float
@@ -139,29 +122,7 @@ type alias Rect =
     }
 
 type alias Circle =
-    { id : Id
-    , transform : Transform
-    , fill : Paint
-    , stroke : Paint
-    , fillOpacity : Float
-    , strokeOpacity : Float
-    , opacity : Float
-    , fillRule : FillRule
-    , strokeWidth : Float
-    , strokeLinecap : LineCap
-    , strokeLinejoin : LineJoin
-    , strokeDasharray : List Float
-    , strokeDashoffset : Float
-    , strokeMiterlimit : Float
-    , clipPath : Maybe (Ref ClipPath)
-    , mask : Maybe (Ref Mask)
-    , filter : Maybe (Ref Filter)
-    , blendMode : BlendMode
-    , visibility : Bool
-    , display : Bool
-    , className : List String
-    , title : Maybe String
-    , desc : Maybe String
+    { ..GraphicsElement
     -- geometry
     , cx : Float
     , cy : Float
@@ -169,29 +130,7 @@ type alias Circle =
     }
 
 type alias Ellipse =
-    { id : Id
-    , transform : Transform
-    , fill : Paint
-    , stroke : Paint
-    , fillOpacity : Float
-    , strokeOpacity : Float
-    , opacity : Float
-    , fillRule : FillRule
-    , strokeWidth : Float
-    , strokeLinecap : LineCap
-    , strokeLinejoin : LineJoin
-    , strokeDasharray : List Float
-    , strokeDashoffset : Float
-    , strokeMiterlimit : Float
-    , clipPath : Maybe (Ref ClipPath)
-    , mask : Maybe (Ref Mask)
-    , filter : Maybe (Ref Filter)
-    , blendMode : BlendMode
-    , visibility : Bool
-    , display : Bool
-    , className : List String
-    , title : Maybe String
-    , desc : Maybe String
+    { ..GraphicsElement
     -- geometry
     , cx : Float
     , cy : Float
@@ -200,29 +139,7 @@ type alias Ellipse =
     }
 
 type alias Line =
-    { id : Id
-    , transform : Transform
-    , fill : Paint
-    , stroke : Paint
-    , fillOpacity : Float
-    , strokeOpacity : Float
-    , opacity : Float
-    , fillRule : FillRule
-    , strokeWidth : Float
-    , strokeLinecap : LineCap
-    , strokeLinejoin : LineJoin
-    , strokeDasharray : List Float
-    , strokeDashoffset : Float
-    , strokeMiterlimit : Float
-    , clipPath : Maybe (Ref ClipPath)
-    , mask : Maybe (Ref Mask)
-    , filter : Maybe (Ref Filter)
-    , blendMode : BlendMode
-    , visibility : Bool
-    , display : Bool
-    , className : List String
-    , title : Maybe String
-    , desc : Maybe String
+    { ..GraphicsElement
     -- geometry
     , x1 : Float
     , y1 : Float
@@ -233,57 +150,13 @@ type alias Line =
 type alias Point = { x : Float, y : Float }
 
 type alias Polyline =
-    { id : Id
-    , transform : Transform
-    , fill : Paint
-    , stroke : Paint
-    , fillOpacity : Float
-    , strokeOpacity : Float
-    , opacity : Float
-    , fillRule : FillRule
-    , strokeWidth : Float
-    , strokeLinecap : LineCap
-    , strokeLinejoin : LineJoin
-    , strokeDasharray : List Float
-    , strokeDashoffset : Float
-    , strokeMiterlimit : Float
-    , clipPath : Maybe (Ref ClipPath)
-    , mask : Maybe (Ref Mask)
-    , filter : Maybe (Ref Filter)
-    , blendMode : BlendMode
-    , visibility : Bool
-    , display : Bool
-    , className : List String
-    , title : Maybe String
-    , desc : Maybe String
+    { ..GraphicsElement
     -- geometry
     , points : List Point
     }
 
 type alias Polygon =
-    { id : Id
-    , transform : Transform
-    , fill : Paint
-    , stroke : Paint
-    , fillOpacity : Float
-    , strokeOpacity : Float
-    , opacity : Float
-    , fillRule : FillRule
-    , strokeWidth : Float
-    , strokeLinecap : LineCap
-    , strokeLinejoin : LineJoin
-    , strokeDasharray : List Float
-    , strokeDashoffset : Float
-    , strokeMiterlimit : Float
-    , clipPath : Maybe (Ref ClipPath)
-    , mask : Maybe (Ref Mask)
-    , filter : Maybe (Ref Filter)
-    , blendMode : BlendMode
-    , visibility : Bool
-    , display : Bool
-    , className : List String
-    , title : Maybe String
-    , desc : Maybe String
+    { ..GraphicsElement
     -- geometry
     , points : List Point
     }
@@ -299,29 +172,7 @@ type PathCommand
     | ClosePath
 
 type alias Path =
-    { id : Id
-    , transform : Transform
-    , fill : Paint
-    , stroke : Paint
-    , fillOpacity : Float
-    , strokeOpacity : Float
-    , opacity : Float
-    , fillRule : FillRule
-    , strokeWidth : Float
-    , strokeLinecap : LineCap
-    , strokeLinejoin : LineJoin
-    , strokeDasharray : List Float
-    , strokeDashoffset : Float
-    , strokeMiterlimit : Float
-    , clipPath : Maybe (Ref ClipPath)
-    , mask : Maybe (Ref Mask)
-    , filter : Maybe (Ref Filter)
-    , blendMode : BlendMode
-    , visibility : Bool
-    , display : Bool
-    , className : List String
-    , title : Maybe String
-    , desc : Maybe String
+    { ..GraphicsElement
     -- geometry
     , d : List PathCommand
     }
