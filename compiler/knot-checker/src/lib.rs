@@ -247,6 +247,38 @@
 //!   gap inherited rather than introduced here: a user re-declaring an
 //!   instance a *builtin* type already has isn't flagged as a duplicate,
 //!   since coherence-checking happens before the builtin table is merged in.
+//!
+//! **`corpus/programs/` (2026-08-02)** — a new corpus tier of realistic,
+//! outcome-agnostic whole-program examples (see that directory's own
+//! README.md) found several more real gaps by trying varied small programs
+//! the way an actual user would write them, rather than checking feature
+//! interactions systematically:
+//! - **Fix #11**: `Semigroup`/`Monoid` had **zero** builtin instances
+//!   anywhere — not `String`, not `List`, nothing. `<>` and `empty` failed
+//!   on every builtin type, breaking the single most common string-
+//!   building pattern outright, and any custom `Show` instance that tried
+//!   to build its own output by concatenating strings. `prelude::
+//!   seed_instances` now seeds both for `String` and `List` (plain
+//!   concatenation needs nothing from the element type, so `requires`
+//!   stays empty, unlike `Eq`/`Ord`/`Show`'s recursive requirement).
+//! - **Fix #12**: a rigid variable's own `given` facts (from a signature's
+//!   declared constraints, or an instance's own context) were never closed
+//!   over the interface hierarchy's superclass relationships — `Ord a =>`
+//!   only ever recorded `given Ord a`, never the implied `given Eq a`, even
+//!   though superclass coherence (`interface::instance::build_instance_
+//!   table`) *guarantees* every real `Ord` instance has a matching `Eq`
+//!   one. `f :: Ord a => a -> a -> Bool; f x y = x == y` wrongly failed
+//!   with `NoInstanceForRigid("Eq")`; same story for `Monoid a =>` never
+//!   implying `given Semigroup a`. `solve::insert_given_with_superclasses`
+//!   now inserts the full transitive superclass closure (reusing
+//!   `interface::table::superclasses`, already used for coherence
+//!   checking) at both of `given`'s own insertion points.
+//!
+//! Both found via real code in `corpus/programs/` (string-building examples
+//! for Fix #11; a binary-search-tree's own `Ord`-constrained `contains`
+//! using `==`, and a `Monoid`-constrained generic combiner using `<>`, for
+//! Fix #12) — see that directory's own README.md for the rest of this
+//! round's findings, several still open.
 
 pub mod annotation;
 pub mod ast;

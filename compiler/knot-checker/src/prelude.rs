@@ -105,6 +105,17 @@ fn seed_instances(table: &mut InstanceTable) {
             );
         }
     }
+
+    // Semigroup/Monoid for String (concatenation, `""`) and List
+    // (concatenation, `[]`) -- previously missing entirely (Fix #11: no
+    // type anywhere had either instance, so `<>` and `empty` failed on
+    // every builtin type, found via `corpus/programs`'s own realistic-
+    // program probing). Concatenating either needs nothing from its own
+    // element type, unlike Eq/Ord/Show above, so `requires` stays empty.
+    for ty in ["String", "List"] {
+        table.insert_builtin("Semigroup", Ref::Builtin(ty.to_string()), vec![]);
+        table.insert_builtin("Monoid", Ref::Builtin(ty.to_string()), vec![]);
+    }
     // Result e a -- both positions need the interface (comparing/showing a
     // Result needs both its error and value types to support it).
     for interface in ["Eq", "Ord", "Show"] {
@@ -738,5 +749,43 @@ mod tests {
         assert!(errors
             .iter()
             .any(|e| matches!(&e.kind, crate::error::TypeErrorKind::NoInstance { interface } if interface == "Num")));
+    }
+
+    #[test]
+    fn string_concatenation_via_semigroup_type_checks() {
+        let mut sub = Substitution::new();
+        let (mut env, table) = seed(&mut sub);
+        let cs = decls("greet name = \"Hello, \" <> name\n");
+        let (tree, _members) = constrain_module(&mut sub, &cs);
+        let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        assert!(errors.is_empty(), "{errors:?}");
+        check_pending(&mut sub, &table, pending, &mut errors);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn list_concatenation_via_semigroup_type_checks() {
+        let mut sub = Substitution::new();
+        let (mut env, table) = seed(&mut sub);
+        let cs = decls("combine a b = a <> b\ncombined = combine [1, 2] [3, 4]\n");
+        let (tree, _members) = constrain_module(&mut sub, &cs);
+        let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        assert!(errors.is_empty(), "{errors:?}");
+        check_pending(&mut sub, &table, pending, &mut errors);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn empty_resolves_for_string_and_list_via_monoid() {
+        let mut sub = Substitution::new();
+        let (mut env, table) = seed(&mut sub);
+        let cs = decls(
+            "emptyStr :: String\nemptyStr = empty\nemptyList :: List Int\nemptyList = empty\n",
+        );
+        let (tree, _members) = constrain_module(&mut sub, &cs);
+        let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        assert!(errors.is_empty(), "{errors:?}");
+        check_pending(&mut sub, &table, pending, &mut errors);
+        assert!(errors.is_empty(), "{errors:?}");
     }
 }

@@ -48,6 +48,7 @@ use knot_syntax::span::Span;
 
 use crate::constrain::Constraint;
 use crate::error::{TypeError, TypeErrorKind};
+use crate::interface::table::superclasses;
 use crate::ty::{Scheme, Structure};
 use crate::unify::{structure_children, unify};
 use crate::var::{Substitution, TypeVarId};
@@ -180,6 +181,38 @@ pub fn solve_with_obligations(
         }
     }
     (unresolved, errors, obligations)
+}
+
+/// Records `var` as `given interface`, *and* every superclass `interface`
+/// itself transitively implies (`Ord` -> `Eq`; `Integral` -> `Num`, `Ord`,
+/// and (via `Ord`) `Eq`) -- not just the literal interface named in a
+/// signature's own constraint list or an instance's own context. Without
+/// this, `f :: Ord a => a -> a -> Bool; f x y = x == y` would wrongly fail
+/// with `NoInstanceForRigid("Eq")`: every real `Ord` instance is
+/// *guaranteed* to have a matching `Eq` one (superclass coherence enforces
+/// this at declaration time, see `interface::instance::build_instance_
+/// table`), so a rigid variable only ever given `Ord` should already be
+/// able to use `Eq`-only operations too. Found via `corpus/programs`'s own
+/// realistic-program probing (Fix #12) -- `binary-search-tree.knot`'s own
+/// `contains` uses `==` under nothing but `Ord a =>`, and `combine-all.knot`
+/// uses `<>` under nothing but `Monoid a =>`.
+fn insert_given_with_superclasses(
+    given: &mut HashMap<TypeVarId, HashSet<String>>,
+    var: TypeVarId,
+    interface: &str,
+) {
+    let mut closure = HashSet::new();
+    closure.insert(interface.to_string());
+    collect_transitive_superclasses(interface, &mut closure);
+    given.entry(var).or_default().extend(closure);
+}
+
+fn collect_transitive_superclasses(interface: &str, out: &mut HashSet<String>) {
+    for sup in superclasses(interface) {
+        if out.insert(sup.to_string()) {
+            collect_transitive_superclasses(sup, out);
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -315,7 +348,7 @@ fn solve_rec(
                 ambient.push(m.header_ty);
                 if let Some(d) = &m.declared {
                     for (var, interface) in &d.given {
-                        given.entry(*var).or_default().insert(interface.clone());
+                        insert_given_with_superclasses(given, *var, interface);
                     }
                 }
             }
@@ -375,7 +408,7 @@ fn solve_rec(
         // (see this variant's own doc comment on why none of that applies).
         Constraint::Given { given: facts, body } => {
             for (var, interface) in facts {
-                given.entry(*var).or_default().insert(interface.clone());
+                insert_given_with_superclasses(given, *var, interface);
             }
             solve_rec(
                 sub,
@@ -859,5 +892,44 @@ mod tests {
         let (ty, cs) = instantiate(&mut sub, &scheme);
         assert_eq!(ty, int_ty);
         assert!(cs.is_empty());
+    }
+
+    #[test]
+    fn ord_given_transitively_implies_eq_given_on_the_same_rigid_var() {
+        // `Ord a =>` alone must let the body use `==`, not just `<`/`>` --
+        // every real Ord instance is guaranteed an Eq one by coherence, so
+        // a rigid `a` only given Ord should already have Eq too (Fix #12).
+        let cs = decls("useBoth :: Ord a => a -> a -> Bool\nuseBoth x y = x == y || x < y\n");
+        let errors = crate::check::check_module(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn monoid_given_transitively_implies_semigroup_given_on_the_same_rigid_var() {
+        let cs = decls("useAppend :: Monoid a => a -> a -> a\nuseAppend x y = x <> y\n");
+        let errors = crate::check::check_module(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn integral_given_transitively_implies_both_num_and_eq_given() {
+        // Integral's own superclasses are [Num, Ord] -- Eq must come along
+        // transitively through Ord, not just Num directly.
+        let cs = decls(
+            "useAll :: Integral a => a -> a -> a\nuseAll x y = if x == y then x + y else x\n",
+        );
+        let errors = crate::check::check_module(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn eq_given_still_does_not_imply_ord_given() {
+        // Sanity check the fix isn't overly permissive -- Eq has no
+        // superclasses of its own, so it must not grant Ord-only operations.
+        let cs = decls("useLess :: Eq a => a -> a -> Bool\nuseLess x y = x < y\n");
+        let errors = crate::check::check_module(&cs);
+        assert!(errors
+            .iter()
+            .any(|e| matches!(&e.kind, TypeErrorKind::NoInstanceForRigid { interface } if interface == "Ord")));
     }
 }

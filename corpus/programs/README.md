@@ -46,19 +46,22 @@ the exchange that preceded this round), already fixed: superclass ordering,
 `InstanceTargetNotNominal`, missing `check_module` entry point.
 
 Found via a first batch of realistic-program probing (this round's own 43
-fixtures, `cargo run --example corpus_report -p knot-checker`), **not yet
-fixed** — 16 of 43 fixtures fail, all tracing back to 7 distinct root
-causes:
+fixtures, `cargo run --example corpus_report -p knot-checker`) — 16 of 43
+fixtures failed initially, tracing back to 7 distinct root causes. After
+fixing #1 and #4 below (`lib.rs`'s own Fix #11/#12), re-running dropped
+that to 6 of 43 failing — the other 10 fixtures now pass cleanly with no
+other changes needed, confirming both fixes landed exactly where expected.
 
-1. **`Semigroup`/`Monoid` have zero builtin instances anywhere** — `<>` and
-   `empty` fail on every builtin type, including `String`. Breaks the most
-   basic string-building pattern outright. Hits `text/*`,
-   `errors/error-mapping.knot`, `interfaces/shape-show.knot`,
-   `data_structures/json-value.knot`, `options/dict-lookup-fallback.knot`.
+1. **Fixed (Fix #11). `Semigroup`/`Monoid` had zero builtin instances
+   anywhere** — `<>` and `empty` failed on every builtin type, including
+   `String`. Broke the most basic string-building pattern outright. Hit
+   `text/*`, `errors/error-mapping.knot`, `interfaces/shape-show.knot`,
+   `data_structures/json-value.knot`, `options/dict-lookup-fallback.knot`
+   (8 files) — all now pass.
 2. **Integer literals never unify with `Float`** — `x :: Float; x = 5` is a
    hard `Unify::Mismatch`. No numeric-literal polymorphism at all. (Avoided
    in this batch's own fixtures once known; still real, see the
-   conversation history's own minimal repro.)
+   conversation history's own minimal repro.) **Not yet fixed.**
 3. **`Collection`/`Context` are broken for both of their 2-parameter
    built-ins** — the `VarApp` mechanism only ever constructs a ctor
    application with exactly one argument and requires exact arity match
@@ -66,18 +69,19 @@ causes:
    that takes two parameters where only the last one varies. Confirmed via
    real code this round: `do`-notation over `Result` fails in both
    `errors/parse-pipeline.knot` and `errors/validate-user.knot`.
-4. **`given` facts are never closed over superclass relationships** — a
-   signature's own `Ord a =>` only ever inserts `"Ord"` into `a`'s `given`
-   set, never the implied `"Eq"`, even though every real `Ord` instance is
-   *guaranteed* to have a matching `Eq` one (superclass coherence enforces
-   this at declaration time). Same story for `Monoid` never implying
-   `Semigroup`. Hits `data_structures/binary-search-tree.knot` (`contains`
-   uses `==` under `Ord a =>`) and `interfaces/combine-all.knot` (`<>`
-   under `Monoid a =>`). `solve.rs` populates `given` in exactly two places
-   (`Constraint::Let`'s declared scheme, `Constraint::Given`), both a plain
-   `insert`, no superclass closure — `interface::table::superclasses`
-   already exists and is used for coherence checking, so this looks like a
-   small, mechanical, low-risk fix once decided on.
+   **Not yet fixed** — needs a real design for partially-applied
+   constructors in `VarApp`, not a quick patch.
+4. **Fixed (Fix #12). `given` facts were never closed over superclass
+   relationships** — a signature's own `Ord a =>` only ever inserted
+   `"Ord"` into `a`'s `given` set, never the implied `"Eq"`, even though
+   every real `Ord` instance is *guaranteed* to have a matching `Eq` one
+   (superclass coherence enforces this at declaration time). Same story
+   for `Monoid` never implying `Semigroup`. Hit
+   `data_structures/binary-search-tree.knot` (`contains` uses `==` under
+   `Ord a =>`) and `interfaces/combine-all.knot` (`<>` under
+   `Monoid a =>`) — both now pass. Fixed via
+   `solve::insert_given_with_superclasses`, reusing the existing
+   `interface::table::superclasses`.
 5. **`InstanceTargetNotNominal` (this session's own Fix #9) blocks
    legitimate custom `Eq`/`Ord`/`Show` instances on records, not just the
    interfaces with no structural fallback** — `interfaces/point-ord.knot`
