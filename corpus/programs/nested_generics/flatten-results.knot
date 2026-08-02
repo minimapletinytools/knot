@@ -1,0 +1,13 @@
+sequenceResults :: List (Result e a) -> Result e (List a)
+sequenceResults xs = case xs of
+  [] -> Ok []
+  h : t ->
+    case h of
+      Err e -> Err e
+      Ok v ->
+        case sequenceResults t of
+          Err e -> Err e
+          Ok rest -> Ok (v : rest)
+
+parseAll :: List (Result String Int) -> Result String (List Int)
+parseAll results = sequenceResults results

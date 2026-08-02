@@ -1,0 +1,14 @@
+type Tree a
+    = Leaf
+    | Node (Tree a) a (Tree a)
+
+instance Show a => Show (Tree a) where
+  show t = case t of
+    Leaf -> "."
+    Node l x r -> "(" <> show l <> " " <> show x <> " " <> show r <> ")"
+
+sample :: Tree Int
+sample = Node (Node Leaf 1 Leaf) 2 (Node Leaf 3 Leaf)
+
+sampleShown :: String
+sampleShown = show sample

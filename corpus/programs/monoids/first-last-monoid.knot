@@ -1,0 +1,16 @@
+type First a = First (Maybe a)
+
+instance Semigroup (First a) where
+  (<>) x y = case x of
+    First Nothing -> y
+    First (Just _) -> x
+
+instance Monoid (First a) where
+  empty = First Nothing
+
+unwrapFirst :: First a -> Maybe a
+unwrapFirst f = case f of
+  First m -> m
+
+firstNonEmpty :: List (Maybe a) -> Maybe a
+firstNonEmpty xs = unwrapFirst (foldl (\acc x -> acc <> First x) empty xs)

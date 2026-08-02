@@ -1,0 +1,9 @@
+quicksort :: Ord a => List a -> List a
+quicksort xs = case xs of
+  [] -> []
+  pivot : rest ->
+    let
+        smaller = filter (\x -> x < pivot) rest
+        larger = filter (\x -> x >= pivot) rest
+    in
+    quicksort smaller <> (pivot : quicksort larger)

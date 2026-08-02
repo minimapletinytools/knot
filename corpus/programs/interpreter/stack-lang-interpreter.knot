@@ -1,0 +1,47 @@
+type Instr
+    = Push Int
+    | Add
+    | Sub
+    | Mul
+    | Dup
+    | Swap
+
+type RuntimeError
+    = StackUnderflow
+
+instance Show RuntimeError where
+  show e = case e of
+    StackUnderflow -> "stack underflow"
+
+step :: Instr -> List Int -> Result RuntimeError (List Int)
+step instr stack = case instr of
+  Push n -> Ok (n : stack)
+  Add -> case stack of
+    a : b : rest -> Ok ((a + b) : rest)
+    _ -> Err StackUnderflow
+  Sub -> case stack of
+    a : b : rest -> Ok ((b - a) : rest)
+    _ -> Err StackUnderflow
+  Mul -> case stack of
+    a : b : rest -> Ok ((a * b) : rest)
+    _ -> Err StackUnderflow
+  Dup -> case stack of
+    a : rest -> Ok (a : a : rest)
+    _ -> Err StackUnderflow
+  Swap -> case stack of
+    a : b : rest -> Ok (b : a : rest)
+    _ -> Err StackUnderflow
+
+runProgram :: List Instr -> Result RuntimeError (List Int)
+runProgram instrs = runProgramHelper instrs []
+
+runProgramHelper :: List Instr -> List Int -> Result RuntimeError (List Int)
+runProgramHelper instrs stack = case instrs of
+  [] -> Ok stack
+  h : t ->
+    case step h stack of
+      Err e -> Err e
+      Ok newStack -> runProgramHelper t newStack
+
+sampleProgram :: List Instr
+sampleProgram = [Push 3, Push 4, Add, Push 2, Mul]

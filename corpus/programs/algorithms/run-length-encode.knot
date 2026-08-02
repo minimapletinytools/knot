@@ -1,0 +1,26 @@
+type alias Run =
+    { value : Int
+    , count : Int
+    }
+
+encode :: List Int -> List Run
+encode xs = case xs of
+  [] -> []
+  h : t -> encodeHelper h 1 t
+
+encodeHelper :: Int -> Int -> List Int -> List Run
+encodeHelper current count rest = case rest of
+  [] -> [{ value = current, count = count }]
+  h : t ->
+    if h == current then
+      encodeHelper current (count + 1) t
+    else
+      { value = current, count = count } : encodeHelper h 1 t
+
+describeRuns :: List Run -> String
+describeRuns runs = case runs of
+  [] -> ""
+  h : t -> foldl (\acc r -> acc <> ", " <> describeRun r) (describeRun h) t
+
+describeRun :: Run -> String
+describeRun r = show r.value <> "x" <> show r.count

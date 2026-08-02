@@ -1,0 +1,23 @@
+type alias Employee =
+    { lastName : String
+    , firstName : String
+    , salary : Int
+    }
+
+sortKey :: Employee -> (String, String)
+sortKey e = (e.lastName, e.firstName)
+
+comesBefore :: Employee -> Employee -> Bool
+comesBefore a b = sortKey a < sortKey b
+
+insertSorted :: Employee -> List Employee -> List Employee
+insertSorted e xs = case xs of
+  [] -> [e]
+  h : t ->
+    if comesBefore e h then
+      e : xs
+    else
+      h : insertSorted e t
+
+sortEmployees :: List Employee -> List Employee
+sortEmployees xs = foldr insertSorted [] xs

@@ -1,0 +1,26 @@
+type alias Todo =
+    { id : Int
+    , description : String
+    , done : Bool
+    }
+
+markDone :: Int -> List Todo -> List Todo
+markDone targetId todos =
+  map
+    (\todo ->
+      if todo.id == targetId then
+        { todo | done = True }
+      else
+        todo
+    )
+    todos
+
+pendingTodos :: List Todo -> List Todo
+pendingTodos todos = filter (\t -> not t.done) todos
+
+completedCount :: List Todo -> Int
+completedCount todos = length (filter (\t -> t.done) todos)
+
+summarize :: List Todo -> String
+summarize todos =
+  show (completedCount todos) <> " of " <> show (length todos) <> " done"

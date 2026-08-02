@@ -1,0 +1,31 @@
+splitAt :: Int -> List a -> (List a, List a)
+splitAt n xs =
+  if n <= 0 then
+    ([], xs)
+  else
+    case xs of
+      [] -> ([], [])
+      h : t ->
+        case splitAt (n - 1) t of
+          (front, back) -> (h : front, back)
+
+merge :: Ord a => List a -> List a -> List a
+merge xs ys = case (xs, ys) of
+  ([], _) -> ys
+  (_, []) -> xs
+  (x : xt, y : yt) ->
+    if x <= y then
+      x : merge xt yt
+    else
+      y : merge xs yt
+
+mergeSort :: Ord a => List a -> List a
+mergeSort xs =
+  let
+      n = length xs
+  in
+  if n <= 1 then
+    xs
+  else
+    case splitAt (div n 2) xs of
+      (front, back) -> merge (mergeSort front) (mergeSort back)

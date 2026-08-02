@@ -1,0 +1,12 @@
+type Max a = Max a
+
+instance Ord a => Semigroup (Max a) where
+  (<>) x y = case (x, y) of
+    (Max a, Max b) -> if a > b then x else y
+
+unwrapMax :: Max a -> a
+unwrapMax m = case m of
+  Max a -> a
+
+maximumOf :: Ord a => a -> List a -> a
+maximumOf first rest = unwrapMax (foldl (\acc x -> acc <> Max x) (Max first) rest)

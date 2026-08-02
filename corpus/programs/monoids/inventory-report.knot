@@ -1,0 +1,18 @@
+type alias Item =
+    { name : String
+    , quantity : Int
+    }
+
+describeItem :: Item -> String
+describeItem item = item.name <> ": " <> show item.quantity
+
+reportLines :: List Item -> List String
+reportLines items = map describeItem items
+
+fullReport :: List Item -> String
+fullReport items = case reportLines items of
+  [] -> "no items"
+  h : t -> foldl (\acc line -> acc <> "\n" <> line) h t
+
+totalQuantity :: List Item -> Int
+totalQuantity items = foldl (\acc item -> acc + item.quantity) 0 items

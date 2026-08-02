@@ -1,0 +1,11 @@
+addThree :: Int -> Int -> Int -> Int
+addThree a b c = a + b + c
+
+addFive :: Int -> Int -> Int
+addFive = addThree 5
+
+doubleThenIncrement :: Int -> Int
+doubleThenIncrement = (\x -> x * 2) >> (\x -> x + 1)
+
+pipelineResult :: Int
+pipelineResult = 3 |> addFive 10 |> doubleThenIncrement

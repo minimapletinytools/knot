@@ -1,0 +1,10 @@
+flattenMaybes :: List (Maybe Int) -> List Int
+flattenMaybes xs = case xs of
+  [] -> []
+  Nothing : t -> flattenMaybes t
+  Just v : t -> v : flattenMaybes t
+
+sumPresent :: Maybe (List (Maybe Int)) -> Int
+sumPresent outer = case outer of
+  Nothing -> 0
+  Just inner -> foldl (\acc x -> acc + x) 0 (flattenMaybes inner)

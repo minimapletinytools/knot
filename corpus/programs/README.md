@@ -108,3 +108,56 @@ other changes needed, confirming both fixes landed exactly where expected.
    (`knot-canonical::prelude`'s own doc comment on qualified `List.map`/
    `Map.lookup`-style access), not a fresh discovery — noted here for
    completeness since it's exactly what a real program hits immediately.
+
+### Round 2 (2026-08-02)
+
+A deeper batch of 19 more fixtures (62 total): sorting algorithms, monoid-
+based reports, layered config via record spread, a stack-language
+interpreter, nested generics (`Maybe (List (Maybe a))`-shaped), and
+multi-interface constraints. 50 of 62 passed initially. 6 of the failures
+are already explained by Round 1's own findings above (#3, #5, #6, #7 —
+same root causes, different fixtures: `errors/parse-pipeline.knot`-style
+`Result` do-notation, `interfaces/point-ord.knot`-style custom `Ord`,
+`data_structures/linked-list-reverse.knot`-style parameterized local `let`,
+`collections/*`'s missing `Map` API). Of the remaining 6, one
+(`patterns/currying-and-composition.knot`) turned out to be this round's
+own authoring mistake, not a bug — `addFive :: Int -> Int -> Int`
+genuinely still needs a second argument before the result is a plain `Int`
+a `|>` stage downstream can accept; fixed the fixture, not the checker. The
+other 5 trace back to three distinct root causes, **not yet fixed**:
+
+8. **Unary negation isn't recognized at the very start of a parenthesized
+   or bracketed (sub)expression** — `knot-syntax`'s own `classify_minus`
+   (`parse/expr.rs`) answers `Subtraction` for symmetric spacing (both
+   absent, as in `(-40.0)` or `[-5, -6]`'s first element) regardless of
+   *where* the `-` sits, even immediately after `(` or `[` where no left
+   operand could possibly exist for it to subtract from. Hard "Expected an
+   expression" parse errors on `f (-5)`, `[-1, -2, -3]`, any
+   parenthesized/bracketed leading negative literal. Found via
+   `numeric/clamp-and-abs.knot`'s `clamp (-40.0) 50.0 raw`.
+9. **A signed function's header-vs-inferred-type `Equal` constraint solves
+   *after* its own body, not before** — so a nested `let` inside the body
+   (a hand-rolled quicksort's `smaller`/`larger`, or any similar
+   locally-filtered/derived binding) generalizes over a parameter-derived
+   variable that hasn't been unified into the enclosing signature's rigid
+   type yet, at that point in solving. It looks like a fresh, ambient-free,
+   freely quantifiable variable, so its interface obligation (`Ord`, from
+   `filter`'s own comparison) gets dragged into the *nested* binding's own
+   scheme instead of correctly staying tied to the already-`given`-covered
+   rigid one — misfiring `AmbiguousConstraint` on perfectly ordinary code.
+   Hits `algorithms/quicksort.knot` and
+   `multi_interface/generic-function-multi-constraint.knot` (its own `let
+   biggest = ...` inside `rankAndShow`).
+10. **A parametric instance's own recursive `requires` check has no way to
+    resolve a bare rigid variable** — `interface::instance::check_instance`'s
+    recursion into e.g. `instance Ord a => Semigroup (Max a)`'s own `Ord`
+    requirement on its argument hits a rigid `a` (a signature's or
+    instance's own type variable), which `Substitution::resolve_structure`
+    always answers `None` for by design — so the check answers `false`
+    unconditionally no matter how thoroughly `given` already established
+    the interface, misreporting `NoInstance` for the *outer* interface
+    (`Semigroup`, not `Ord`). This also breaks self-referential parametric
+    instances recursing into their own element type (`instance Show a =>
+    Show (Tree a)` calling `show` on child nodes). Hits
+    `monoids/max-min-via-ord.knot` and
+    `multi_interface/recursive-tree-show.knot`.

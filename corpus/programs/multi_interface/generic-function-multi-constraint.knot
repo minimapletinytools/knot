@@ -1,0 +1,13 @@
+describeIfDifferent :: (Eq a, Show a) => a -> a -> String
+describeIfDifferent x y =
+  if x == y then
+    "same"
+  else
+    show x <> " /= " <> show y
+
+rankAndShow :: (Ord a, Show a) => a -> a -> a -> String
+rankAndShow x y z =
+  let
+      biggest = if x > y then (if x > z then x else z) else (if y > z then y else z)
+  in
+  "biggest is " <> show biggest

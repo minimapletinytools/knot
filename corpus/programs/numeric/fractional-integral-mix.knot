@@ -1,0 +1,8 @@
+roundTripReciprocal :: Float -> Float
+roundTripReciprocal x = recip (recip x)
+
+centsToDollarsAndCents :: Int -> (Int, Int)
+centsToDollarsAndCents totalCents = (div totalCents 100, mod totalCents 100)
+
+averageAsFloat :: Int -> Int -> Float
+averageAsFloat a b = (fromIntegral a + fromIntegral b) / 2.0

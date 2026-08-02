@@ -1,0 +1,29 @@
+type Shape
+    = Circle Float
+    | Square Float
+
+area :: Shape -> Float
+area s = case s of
+  Circle r -> 3.14159 * r * r
+  Square side -> side * side
+
+instance Eq Shape where
+  (==) a b = area a == area b
+
+instance Ord Shape where
+  compare a b = compare (area a) (area b)
+
+instance Show Shape where
+  show s = case s of
+    Circle r -> "Circle(" <> show r <> ")"
+    Square side -> "Square(" <> show side <> ")"
+
+biggerShape :: Shape -> Shape -> Shape
+biggerShape a b = if a > b then a else b
+
+describeComparison :: Shape -> Shape -> String
+describeComparison a b =
+  if a == b then
+    show a <> " and " <> show b <> " have equal area"
+  else
+    show (biggerShape a b) <> " is bigger"

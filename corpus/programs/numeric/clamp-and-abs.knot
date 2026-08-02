@@ -1,0 +1,14 @@
+clamp :: Ord a => a -> a -> a -> a
+clamp lo hi x =
+  if x < lo then
+    lo
+  else if x > hi then
+    hi
+  else
+    x
+
+distanceFromZero :: Int -> Int
+distanceFromZero n = if n < 0 then negate n else n
+
+clampedTemperature :: Float -> Float
+clampedTemperature raw = clamp (-40.0) 50.0 raw

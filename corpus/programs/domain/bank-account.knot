@@ -1,0 +1,38 @@
+type alias Account =
+    { owner : String
+    , balance : Int
+    }
+
+type TransactionError
+    = InsufficientFunds Int
+    | InvalidAmount
+
+deposit :: Int -> Account -> Result TransactionError Account
+deposit amount account =
+  if amount <= 0 then
+    Err InvalidAmount
+  else
+    Ok { account | balance = account.balance + amount }
+
+withdraw :: Int -> Account -> Result TransactionError Account
+withdraw amount account =
+  if amount <= 0 then
+    Err InvalidAmount
+  else if amount > account.balance then
+    Err (InsufficientFunds (amount - account.balance))
+  else
+    Ok { account | balance = account.balance - amount }
+
+instance Show TransactionError where
+  show e = case e of
+    InsufficientFunds shortfall -> "insufficient funds, short by " <> show shortfall
+    InvalidAmount -> "invalid amount"
+
+transfer :: Int -> Account -> Account -> Result TransactionError (Account, Account)
+transfer amount from to =
+  case withdraw amount from of
+    Err e -> Err e
+    Ok updatedFrom ->
+      case deposit amount to of
+        Err e -> Err e
+        Ok updatedTo -> Ok (updatedFrom, updatedTo)

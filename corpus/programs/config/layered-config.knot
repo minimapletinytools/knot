@@ -1,0 +1,42 @@
+type alias BaseConfig =
+    { host : String
+    , port : Int
+    , debug : Bool
+    }
+
+type alias DevConfig =
+    { ..BaseConfig
+    , hotReload : Bool
+    }
+
+type alias ProdConfig =
+    { ..BaseConfig
+    , tlsCert : String
+    }
+
+type alias HasHost a = { a | host : String }
+
+describeHost :: HasHost a -> String
+describeHost config = config.host
+
+defaultDevConfig :: DevConfig
+defaultDevConfig =
+  { host = "localhost"
+  , port = 3000
+  , debug = True
+  , hotReload = True
+  }
+
+defaultProdConfig :: ProdConfig
+defaultProdConfig =
+  { host = "example.com"
+  , port = 443
+  , debug = False
+  , tlsCert = "/etc/ssl/cert.pem"
+  }
+
+devHost :: String
+devHost = describeHost defaultDevConfig
+
+prodHost :: String
+prodHost = describeHost defaultProdConfig
