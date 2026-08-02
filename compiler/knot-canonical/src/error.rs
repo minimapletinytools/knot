@@ -70,6 +70,24 @@ pub enum CanonErrorKind {
         expected: usize,
         found: usize,
     },
+    /// An extensible-record alias (`type alias Selectable a = { a |
+    /// isSelected : Bool }`) had its own row-extension parameter (`a`)
+    /// applied to a concrete argument that isn't itself record-shaped (nor
+    /// another still-open row variable) — there's no record to merge
+    /// `isSelected` into. `param` is the alias's own declared parameter
+    /// name that ended up here; `alias` is the alias itself.
+    RecordExtensionNotARecord {
+        alias: String,
+        param: String,
+    },
+    /// Merging an extensible-record alias's own fields with its concrete
+    /// extension argument's fields found the same field name on both
+    /// sides — e.g. `type alias Selectable a = { a | name : Bool }`
+    /// applied to a record that already declares its own `name` field.
+    RecordExtensionFieldConflict {
+        alias: String,
+        field: String,
+    },
     Custom(String),
 }
 

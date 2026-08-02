@@ -203,27 +203,113 @@ fn topo_order(
 
 /// Replaces every `CType::Var` named in `mapping` — an alias's own body,
 /// substituting its declared parameters for the real type arguments at one
-/// particular use site. Plain structural recursion otherwise.
-fn substitute_vars(ty: &CType, mapping: &HashMap<String, CType>) -> CType {
+/// particular use site. Plain structural recursion otherwise, except for a
+/// record's own row-extension slot (see `substitute_record_ext`) — that one
+/// isn't an ordinary `CType` position, since `CType::Record`'s extension is
+/// just a variable *name*, not a nested `CType`, so substituting a concrete
+/// type into it (`type alias Selectable a = { a | isSelected : Bool }`
+/// applied to `Selectable Foo`) needs its own merge logic instead of the
+/// plain `CType::Var` case above.
+fn substitute_vars(
+    ty: &CType,
+    mapping: &HashMap<String, CType>,
+    alias_name: &str,
+    errors: &mut Vec<CanonError>,
+    span: Span,
+) -> CType {
     match ty {
         CType::Var(v) => mapping.get(v).cloned().unwrap_or_else(|| ty.clone()),
         CType::Named(r, args) => CType::Named(
             r.clone(),
-            args.iter().map(|a| substitute_vars(a, mapping)).collect(),
+            args.iter()
+                .map(|a| substitute_vars(a, mapping, alias_name, errors, span))
+                .collect(),
         ),
         CType::Fn(a, b) => CType::Fn(
-            Box::new(substitute_vars(a, mapping)),
-            Box::new(substitute_vars(b, mapping)),
+            Box::new(substitute_vars(a, mapping, alias_name, errors, span)),
+            Box::new(substitute_vars(b, mapping, alias_name, errors, span)),
         ),
-        CType::Tuple(ts) => CType::Tuple(ts.iter().map(|t| substitute_vars(t, mapping)).collect()),
-        CType::Record(fields, ext) => CType::Record(
-            fields
-                .iter()
-                .map(|(n, t)| (n.clone(), substitute_vars(t, mapping)))
+        CType::Tuple(ts) => CType::Tuple(
+            ts.iter()
+                .map(|t| substitute_vars(t, mapping, alias_name, errors, span))
                 .collect(),
-            ext.clone(),
         ),
+        CType::Record(fields, ext) => {
+            let own_fields: Vec<(String, CType)> = fields
+                .iter()
+                .map(|(n, t)| {
+                    (
+                        n.clone(),
+                        substitute_vars(t, mapping, alias_name, errors, span),
+                    )
+                })
+                .collect();
+            substitute_record_ext(own_fields, ext, mapping, alias_name, errors, span)
+        }
         CType::Unit => CType::Unit,
+    }
+}
+
+/// Resolves a record's own row-extension slot once its declared fields
+/// (`own_fields`) are already substituted. `ext` is just a variable name —
+/// three things can happen once it's looked up in `mapping`:
+/// - not one of the alias's own parameters (or no extension at all): left
+///   untouched, exactly as before this fix existed.
+/// - substituted with another still-free variable (`CType::Var`): the
+///   extension is still genuinely open, just renamed to that variable —
+///   e.g. a wrapping alias forwarding its own parameter along.
+/// - substituted with a concrete record (`CType::Record`): the extension
+///   is resolved *now* — merge that record's own fields in and adopt its
+///   own extension (closed if it had none), so e.g. `Selectable Foo`
+///   becomes the closed `{ name : String, isSelected : Bool }` rather than
+///   staying dangling on the unsubstituted `a`. A field declared by both
+///   sides is a `RecordExtensionFieldConflict`, not silently overwritten.
+/// - substituted with anything else (a nominal type, tuple, function, unit
+///   — none of which are record-shaped): `RecordExtensionNotARecord`, and
+///   the extension is left as-is (best-effort recovery, matching this
+///   file's other error-then-proceed cases) since there's no sound record
+///   to produce instead.
+fn substitute_record_ext(
+    own_fields: Vec<(String, CType)>,
+    ext: &Option<String>,
+    mapping: &HashMap<String, CType>,
+    alias_name: &str,
+    errors: &mut Vec<CanonError>,
+    span: Span,
+) -> CType {
+    let Some(name) = ext else {
+        return CType::Record(own_fields, None);
+    };
+    match mapping.get(name) {
+        None => CType::Record(own_fields, Some(name.clone())),
+        Some(CType::Var(other)) => CType::Record(own_fields, Some(other.clone())),
+        Some(CType::Record(other_fields, other_ext)) => {
+            let mut merged = own_fields;
+            for (field_name, field_ty) in other_fields {
+                if merged.iter().any(|(n, _)| n == field_name) {
+                    errors.push(CanonError::new(
+                        CanonErrorKind::RecordExtensionFieldConflict {
+                            alias: alias_name.to_string(),
+                            field: field_name.clone(),
+                        },
+                        span,
+                    ));
+                } else {
+                    merged.push((field_name.clone(), field_ty.clone()));
+                }
+            }
+            CType::Record(merged, other_ext.clone())
+        }
+        Some(_) => {
+            errors.push(CanonError::new(
+                CanonErrorKind::RecordExtensionNotARecord {
+                    alias: alias_name.to_string(),
+                    param: name.clone(),
+                },
+                span,
+            ));
+            CType::Record(own_fields, Some(name.clone()))
+        }
     }
 }
 
@@ -260,7 +346,7 @@ fn substitute(
             }
             let mapping: HashMap<String, CType> =
                 def.params.iter().cloned().zip(sub_args).collect();
-            substitute_vars(&def.body, &mapping)
+            substitute_vars(&def.body, &mapping, name, errors, span)
         }
         CType::Named(r, args) => CType::Named(
             r.clone(),
@@ -452,6 +538,89 @@ mod tests {
             })
             .unwrap();
         assert!(matches!(variant_ty, CType::Record(..)));
+    }
+
+    #[test]
+    fn an_extensible_record_alias_merges_a_concrete_records_fields() {
+        // `Selectable Foo` should become the closed `{ name : String,
+        // isSelected : Bool }`, not leave its own row variable dangling.
+        let cs = decls(
+            "type alias Foo = { name : String }\n\
+             type alias Selectable a = { a | isSelected : Bool }\n\
+             useSelectableFoo :: Selectable Foo -> Bool\n\
+             useSelectableFoo s = s.isSelected\n",
+        );
+        let ty = fn_sig_ty(&cs, "useSelectableFoo");
+        match ty {
+            CType::Fn(a, _) => match *a {
+                CType::Record(fields, ext) => {
+                    assert_eq!(ext, None, "merged result should be closed");
+                    assert!(fields.iter().any(|(n, t)| n == "isSelected"
+                        && matches!(t, CType::Named(Ref::Builtin(b), _) if b == "Bool")));
+                    assert!(fields.iter().any(|(n, t)| n == "name"
+                        && matches!(t, CType::Named(Ref::Builtin(b), _) if b == "String")));
+                    assert_eq!(fields.len(), 2);
+                }
+                other => panic!("expected a merged Record, got {other:?}"),
+            },
+            other => panic!("expected a Fn shape, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_extensible_record_alias_forwarded_by_another_alias_stays_open() {
+        // `Wrap a = Selectable a` just forwards its own parameter along --
+        // the row stays a genuinely free variable, not merged into anything.
+        let cs = decls(
+            "type alias Selectable a = { a | isSelected : Bool }\n\
+             type alias Wrap a = Selectable a\n\
+             useWrap :: Wrap a -> Bool\n\
+             useWrap w = w.isSelected\n",
+        );
+        let ty = fn_sig_ty(&cs, "useWrap");
+        match ty {
+            CType::Fn(a, _) => match *a {
+                CType::Record(fields, ext) => {
+                    assert!(ext.is_some(), "row should still be open");
+                    assert_eq!(fields.len(), 1);
+                }
+                other => panic!("expected an open Record, got {other:?}"),
+            },
+            other => panic!("expected a Fn shape, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extending_a_non_record_type_is_a_record_extension_error() {
+        let mut state = knot_syntax::ParseState::new(
+            "type alias Selectable a = { a | isSelected : Bool }\n\
+             bad :: Selectable Int -> Bool\n\
+             bad s = s.isSelected\n",
+        );
+        let raw = state.parse_decls().unwrap();
+        let (_cdecls, errors) = resolve_decls(&raw);
+        assert!(errors.iter().any(|e| matches!(
+            &e.kind,
+            CanonErrorKind::RecordExtensionNotARecord { alias, param }
+                if alias == "Selectable" && param == "a"
+        )));
+    }
+
+    #[test]
+    fn conflicting_field_names_between_alias_and_extension_are_reported() {
+        let mut state = knot_syntax::ParseState::new(
+            "type alias Foo = { name : String }\n\
+             type alias Selectable a = { a | name : Bool }\n\
+             bad :: Selectable Foo -> Bool\n\
+             bad s = True\n",
+        );
+        let raw = state.parse_decls().unwrap();
+        let (_cdecls, errors) = resolve_decls(&raw);
+        assert!(errors.iter().any(|e| matches!(
+            &e.kind,
+            CanonErrorKind::RecordExtensionFieldConflict { alias, field }
+                if alias == "Selectable" && field == "name"
+        )));
     }
 
     #[test]

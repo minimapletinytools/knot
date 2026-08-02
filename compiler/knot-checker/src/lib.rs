@@ -178,6 +178,34 @@
 //!   with `UnknownInterface` before ever reaching this crate at all — fixed
 //!   there, not here, since `BUILTIN_INTERFACES` is `knot-canonical`'s own
 //!   closed list.
+//! - **Fix #7** (done, entirely in `knot-canonical`): an extensible-record
+//!   alias (spec §3.4's `{ r | field : Type }`) applied to a *concrete*
+//!   argument in its own row-extension position — `type alias Selectable a
+//!   = { a | isSelected : Bool }` used as `Selectable Foo` — never actually
+//!   substituted anything into that slot. `CType::Record`'s extension is
+//!   just a variable *name* (`Option<String>`), not a nested `CType`, so
+//!   `resolve::alias::substitute_vars`'s old `CType::Record` case cloned it
+//!   through unchanged regardless of what `a` had been mapped to. The
+//!   practical effect: `Selectable Foo`'s own declared type stayed the
+//!   generic, still-row-polymorphic `{ isSelected : Bool | a }` instead of
+//!   becoming the concrete closed `{ name : String, isSelected : Bool }`,
+//!   so a value's own literal definition failed to unify against its own
+//!   signature — a valid program rejected for a reason that had nothing to
+//!   do with what should actually be checked. Fixed by a new
+//!   `substitute_record_ext`: when the extension name resolves (via
+//!   substitution) to another still-free variable, the row just gets
+//!   renamed and stays open; when it resolves to a concrete `CType::
+//!   Record`, that record's own fields are merged in and its own extension
+//!   adopted (closed if it had none); anything else (a nominal type,
+//!   tuple, function, unit) is a new `RecordExtensionNotARecord` error, and
+//!   a field declared on both sides is `RecordExtensionFieldConflict`
+//!   rather than one silently shadowing the other. Confirmed against real
+//!   Elm's own reported behavior for this exact pattern: once `Selectable
+//!   Foo` resolves concretely, a *downstream* use with a closed, non-
+//!   extensible signature demanding fewer fields (`Foo -> String` given a
+//!   `Selectable Foo`) is still correctly rejected — for the right reason
+//!   (an exact-match closed record short of `isSelected`), not the
+//!   previous, unrelated one.
 
 pub mod annotation;
 pub mod ast;

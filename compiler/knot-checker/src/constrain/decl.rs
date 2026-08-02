@@ -1253,4 +1253,46 @@ mod tests {
             other => panic!("expected a Fn shape, got {other:?}"),
         }
     }
+
+    // -- extensible record aliases applied to a concrete type --
+    // (`type alias Selectable a = { a | isSelected : Bool }`, then
+    // `Selectable Foo` -- see `knot_canonical::resolve::alias`'s own
+    // `substitute_record_ext` for where the merge actually happens.)
+
+    #[test]
+    fn an_extensible_record_aliases_own_definition_type_checks() {
+        let cs = decls(
+            "type alias Foo = { name : String }\n\
+             type alias Selectable a = { a | isSelected : Bool }\n\
+             makeSelectableFoo :: Selectable Foo\n\
+             makeSelectableFoo =\n  { name = \"Bar\", isSelected = True }\n",
+        );
+        let mut sub = Substitution::new();
+        let (tree, _members) = constrain_module(&mut sub, &cs);
+        let (mut env, _table) = crate::prelude::seed(&mut sub);
+        let (_pending, errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn passing_a_selectable_foo_to_a_plain_foo_signature_is_still_rejected() {
+        // `Selectable Foo` has an extra `isSelected` field beyond what the
+        // closed `Foo -> String` signature accepts -- matches real Elm's
+        // own behavior for this exact program (a closed record alias
+        // demands an *exact* field match, not "at least these fields").
+        let cs = decls(
+            "type alias Foo = { name : String }\n\
+             type alias Selectable a = { a | isSelected : Bool }\n\
+             getFooName :: Foo -> String\n\
+             getFooName foo = foo.name\n\
+             makeSelectableFoo :: Selectable Foo\n\
+             makeSelectableFoo =\n  { name = \"Bar\", isSelected = True }\n\
+             getMyFooName = getFooName makeSelectableFoo\n",
+        );
+        let mut sub = Substitution::new();
+        let (tree, _members) = constrain_module(&mut sub, &cs);
+        let (mut env, _table) = crate::prelude::seed(&mut sub);
+        let (_pending, errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+    }
 }
