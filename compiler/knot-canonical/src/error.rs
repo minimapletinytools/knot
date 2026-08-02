@@ -56,6 +56,20 @@ pub enum CanonErrorKind {
         module: Vec<String>,
         name: String,
     },
+    /// A `type alias` whose own expansion never terminates, e.g. `type alias
+    /// Bad = Bad`, or a longer cycle through several aliases — see
+    /// `resolve::alias`'s own module doc comment on why this can't just be
+    /// expanded like a recursive ADT can.
+    CyclicTypeAlias(String),
+    /// A type alias used with the wrong number of type arguments, e.g. `type
+    /// alias Pair a = (a, a)` referenced as bare `Pair` or as `Pair Int
+    /// Bool` — checked once during `resolve::alias`'s own expansion, the
+    /// same spirit as `ConstructorArityMismatch` above.
+    TypeAliasArityMismatch {
+        name: String,
+        expected: usize,
+        found: usize,
+    },
     Custom(String),
 }
 

@@ -5,6 +5,7 @@
 //! problem in the same file, matching how a real editor wants all diagnostics
 //! at once, not one-at-a-time.
 
+pub mod alias;
 pub mod decl;
 pub mod expr;
 pub mod pattern;

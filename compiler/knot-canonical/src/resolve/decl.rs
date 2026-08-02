@@ -24,6 +24,7 @@ use crate::ast::{CAnnotation, CDecl, CFnDef, CInstanceDecl, CModule};
 use crate::env::{Env, ModuleRegistry};
 use crate::error::{CanonError, CanonErrorKind};
 use crate::prelude;
+use crate::resolve::alias::expand_aliases;
 use crate::resolve::expr::resolve_expr;
 use crate::resolve::pattern::resolve_pattern_group;
 use crate::resolve::ty;
@@ -37,11 +38,12 @@ pub fn resolve_module(
     let mut env = Env::for_module(&module.imports, registry);
     let mut errors = Vec::new();
     collect_top_level(&mut env, &module.decls);
-    let decls = module
+    let mut decls: Vec<Spanned<CDecl>> = module
         .decls
         .iter()
         .map(|d| resolve_decl(&mut env, d, &mut errors))
         .collect();
+    expand_aliases(&mut decls, &mut errors);
     (
         CModule {
             name: module.name.clone(),
@@ -59,10 +61,11 @@ pub fn resolve_decls(decls: &[Spanned<Decl>]) -> (Vec<Spanned<CDecl>>, Vec<Canon
     let mut env = Env::for_decls();
     let mut errors = Vec::new();
     collect_top_level(&mut env, decls);
-    let cdecls = decls
+    let mut cdecls: Vec<Spanned<CDecl>> = decls
         .iter()
         .map(|d| resolve_decl(&mut env, d, &mut errors))
         .collect();
+    expand_aliases(&mut cdecls, &mut errors);
     (cdecls, errors)
 }
 
