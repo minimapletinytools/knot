@@ -31,17 +31,17 @@ type alias IsGraphicsElement a =
     , strokeDashoffset : Float
     , strokeMiterlimit : Float
     -- compositing
-    , clipPath : Option (Ref ClipPath)
-    , mask : Option (Ref Mask)
-    , filter : Option (Ref Filter)
+    , clipPath : Maybe (Ref ClipPath)
+    , mask : Maybe (Ref Mask)
+    , filter : Maybe (Ref Filter)
     , blendMode : BlendMode
     -- visibility
     , visibility : Bool
     , display : Bool
     -- metadata
     , className : List String
-    , title : Option String
-    , desc : Option String
+    , title : Maybe String
+    , desc : Maybe String
     }
 
 -- Row-polymorphic constraints, one per field, so a function can require just the
@@ -64,17 +64,17 @@ type alias HasStrokeDasharray a = { a | strokeDasharray : List Float }
 type alias HasStrokeDashoffset a = { a | strokeDashoffset : Float }
 type alias HasStrokeMiterlimit a = { a | strokeMiterlimit : Float }
 
-type alias HasClipPath a = { a | clipPath : Option (Ref ClipPath) }
-type alias HasMask a = { a | mask : Option (Ref Mask) }
-type alias HasFilter a = { a | filter : Option (Ref Filter) }
+type alias HasClipPath a = { a | clipPath : Maybe (Ref ClipPath) }
+type alias HasMask a = { a | mask : Maybe (Ref Mask) }
+type alias HasFilter a = { a | filter : Maybe (Ref Filter) }
 type alias HasBlendMode a = { a | blendMode : BlendMode }
 
 type alias HasVisibility a = { a | visibility : Bool }
 type alias HasDisplay a = { a | display : Bool }
 
 type alias HasClassName a = { a | className : List String }
-type alias HasTitle a = { a | title : Option String }
-type alias HasDesc a = { a | desc : Option String }
+type alias HasTitle a = { a | title : Maybe String }
+type alias HasDesc a = { a | desc : Maybe String }
 
 type Paint
     = NoPaint
@@ -94,7 +94,7 @@ type alias Transform = List TransformOp
 type TransformOp
     = Translate Float Float
     | Scale Float Float
-    | Rotate Float (Option (Float, Float))  -- angle, optional pivot
+    | Rotate Float (Maybe (Float, Float))  -- angle, optional pivot
     | SkewX Float
     | SkewY Float
 
@@ -120,22 +120,22 @@ type alias Rect =
     , strokeDasharray : List Float
     , strokeDashoffset : Float
     , strokeMiterlimit : Float
-    , clipPath : Option (Ref ClipPath)
-    , mask : Option (Ref Mask)
-    , filter : Option (Ref Filter)
+    , clipPath : Maybe (Ref ClipPath)
+    , mask : Maybe (Ref Mask)
+    , filter : Maybe (Ref Filter)
     , blendMode : BlendMode
     , visibility : Bool
     , display : Bool
     , className : List String
-    , title : Option String
-    , desc : Option String
+    , title : Maybe String
+    , desc : Maybe String
     -- geometry
     , x : Float
     , y : Float
     , width : Float
     , height : Float
-    , rx : Option Float   -- corner rounding; None = sharp corners
-    , ry : Option Float
+    , rx : Maybe Float   -- corner rounding; Nothing = sharp corners
+    , ry : Maybe Float
     }
 
 type alias Circle =
@@ -153,15 +153,15 @@ type alias Circle =
     , strokeDasharray : List Float
     , strokeDashoffset : Float
     , strokeMiterlimit : Float
-    , clipPath : Option (Ref ClipPath)
-    , mask : Option (Ref Mask)
-    , filter : Option (Ref Filter)
+    , clipPath : Maybe (Ref ClipPath)
+    , mask : Maybe (Ref Mask)
+    , filter : Maybe (Ref Filter)
     , blendMode : BlendMode
     , visibility : Bool
     , display : Bool
     , className : List String
-    , title : Option String
-    , desc : Option String
+    , title : Maybe String
+    , desc : Maybe String
     -- geometry
     , cx : Float
     , cy : Float
@@ -183,15 +183,15 @@ type alias Ellipse =
     , strokeDasharray : List Float
     , strokeDashoffset : Float
     , strokeMiterlimit : Float
-    , clipPath : Option (Ref ClipPath)
-    , mask : Option (Ref Mask)
-    , filter : Option (Ref Filter)
+    , clipPath : Maybe (Ref ClipPath)
+    , mask : Maybe (Ref Mask)
+    , filter : Maybe (Ref Filter)
     , blendMode : BlendMode
     , visibility : Bool
     , display : Bool
     , className : List String
-    , title : Option String
-    , desc : Option String
+    , title : Maybe String
+    , desc : Maybe String
     -- geometry
     , cx : Float
     , cy : Float
@@ -214,15 +214,15 @@ type alias Line =
     , strokeDasharray : List Float
     , strokeDashoffset : Float
     , strokeMiterlimit : Float
-    , clipPath : Option (Ref ClipPath)
-    , mask : Option (Ref Mask)
-    , filter : Option (Ref Filter)
+    , clipPath : Maybe (Ref ClipPath)
+    , mask : Maybe (Ref Mask)
+    , filter : Maybe (Ref Filter)
     , blendMode : BlendMode
     , visibility : Bool
     , display : Bool
     , className : List String
-    , title : Option String
-    , desc : Option String
+    , title : Maybe String
+    , desc : Maybe String
     -- geometry
     , x1 : Float
     , y1 : Float
@@ -247,15 +247,15 @@ type alias Polyline =
     , strokeDasharray : List Float
     , strokeDashoffset : Float
     , strokeMiterlimit : Float
-    , clipPath : Option (Ref ClipPath)
-    , mask : Option (Ref Mask)
-    , filter : Option (Ref Filter)
+    , clipPath : Maybe (Ref ClipPath)
+    , mask : Maybe (Ref Mask)
+    , filter : Maybe (Ref Filter)
     , blendMode : BlendMode
     , visibility : Bool
     , display : Bool
     , className : List String
-    , title : Option String
-    , desc : Option String
+    , title : Maybe String
+    , desc : Maybe String
     -- geometry
     , points : List Point
     }
@@ -275,15 +275,15 @@ type alias Polygon =
     , strokeDasharray : List Float
     , strokeDashoffset : Float
     , strokeMiterlimit : Float
-    , clipPath : Option (Ref ClipPath)
-    , mask : Option (Ref Mask)
-    , filter : Option (Ref Filter)
+    , clipPath : Maybe (Ref ClipPath)
+    , mask : Maybe (Ref Mask)
+    , filter : Maybe (Ref Filter)
     , blendMode : BlendMode
     , visibility : Bool
     , display : Bool
     , className : List String
-    , title : Option String
-    , desc : Option String
+    , title : Maybe String
+    , desc : Maybe String
     -- geometry
     , points : List Point
     }
@@ -313,15 +313,15 @@ type alias Path =
     , strokeDasharray : List Float
     , strokeDashoffset : Float
     , strokeMiterlimit : Float
-    , clipPath : Option (Ref ClipPath)
-    , mask : Option (Ref Mask)
-    , filter : Option (Ref Filter)
+    , clipPath : Maybe (Ref ClipPath)
+    , mask : Maybe (Ref Mask)
+    , filter : Maybe (Ref Filter)
     , blendMode : BlendMode
     , visibility : Bool
     , display : Bool
     , className : List String
-    , title : Option String
-    , desc : Option String
+    , title : Maybe String
+    , desc : Maybe String
     -- geometry
     , d : List PathCommand
     }
