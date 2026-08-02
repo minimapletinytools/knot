@@ -74,4 +74,18 @@ pub enum TypeErrorKind {
         interface: String,
         superclass: String,
     },
+    /// An `instance` declaration's own target isn't a type
+    /// `interface::instance::InstanceTable` can key an instance by at all —
+    /// a bare type variable, function type, tuple, record, or `()` (see
+    /// that module's own `head_ref`). `Eq`/`Ord`/`Show` derive
+    /// automatically for `Tuple`/`Record`/`Unit` via `check_instance`'s own
+    /// hardcoded structural rule, with no declaration needed — an explicit
+    /// one there would be silently unreachable dead code, not a real
+    /// instance. No other interface has any such fallback, so previously
+    /// an explicit instance for one of these shapes just vanished with no
+    /// diagnostic at all, surfacing only as a confusing `NoInstance` at
+    /// whatever call site tried to use it.
+    InstanceTargetNotNominal {
+        interface: String,
+    },
 }

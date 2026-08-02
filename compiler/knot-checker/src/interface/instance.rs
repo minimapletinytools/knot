@@ -3,12 +3,14 @@
 //! `interface/instance.rs`); seeding the *built-in* instances (`Num Int`,
 //! ...) is `insert_builtin`'s job, called from wherever TM8 ends up living.
 //!
-//! **Coherence and superclass existence** (plan §3) are checked when a
-//! *declared* instance is inserted — at most one instance per `(interface,
-//! head)` pair, and a superclass's own instance must already be present
-//! (`instance Ord Shape` needs `Eq Shape` first). Built-ins are trusted
-//! unconditionally (`insert_builtin` never checks either): they're
-//! hand-written by this compiler, not user input to validate.
+//! **Coherence and superclass existence** (plan §3) are checked by
+//! `build_instance_table` itself, across the *whole* module in two passes
+//! (see that function's own doc comment on why one pass isn't enough) — at
+//! most one instance per `(interface, head)` pair, and a superclass's own
+//! instance must exist *somewhere* in the module, regardless of which one
+//! was declared textually first. Built-ins are trusted unconditionally
+//! (`insert_builtin` never checks either): they're hand-written by this
+//! compiler, not user input to validate.
 //!
 //! **`check_instance` is the real, recursive answer** (Fix #4,
 //! `knot-checker-gaps-plan.md`) to "does `ty` have `interface`" — a
@@ -19,17 +21,21 @@
 //! a table lookup at all — no `Ref` to key them by in the first place.
 //! `has_instance` stays a flat existence check underneath (used for
 //! coherence: does *this exact* head have *some* instance, full stop,
-//! ignoring what its own parameters might need) — `insert_declared`'s
-//! superclass/duplicate checks only ever need that shallow question, not
-//! the recursive one.
+//! ignoring what its own parameters might need) — `insert_declared_unchecked`'s
+//! caller (`build_instance_table`'s own superclass/duplicate passes) only
+//! ever needs that shallow question, not the recursive one.
 //!
-//! **Still not handled**: a user can't declare an instance *for* a
-//! `Tuple`/`Record`/`Fn` shape directly (`head_ref` returns `None` for
-//! those `CType`s, so `build_instance_table` silently skips such a
-//! declaration) — only this table's own hardcoded structural rule ever
-//! answers for them. A `Fn`-headed obligation, or a `VarApp` whose head is
-//! still unresolved (a genuine kind error, spec §6.3/§6.4), is never
-//! confirmed by anything — see `check_instance`'s own doc comment.
+//! **A user can't declare an instance *for* a `Var`/`Fn`/`Tuple`/`Record`/
+//! `Unit` shape directly** (`head_ref` returns `None` for those `CType`s —
+//! no `Ref` to key an instance-table entry by at all) — only this table's
+//! own hardcoded structural rule ever answers for `Eq`/`Ord`/`Show` on
+//! `Tuple`/`Record`/`Unit`, and no interface at all can be given to a bare
+//! `Fn`/`Var` target. This used to be silent (the declaration just vanished
+//! with no diagnostic, surfacing only as a confusing `NoInstance` wherever
+//! a caller tried to use it) — `build_instance_table` now reports a real
+//! `InstanceTargetNotNominal` at the declaration site instead. A `VarApp`
+//! whose head is still unresolved (a genuine kind error, spec §6.3/§6.4) is
+//! never confirmed by anything — see `check_instance`'s own doc comment.
 
 use std::collections::HashMap;
 
@@ -95,34 +101,33 @@ impl InstanceTable {
         );
     }
 
-    fn insert_declared(
+    /// Merges `other`'s own entries into `self`, keeping `self`'s own entry
+    /// on a `(interface, head)` collision — `check::check_module`'s own
+    /// glue for combining `prelude::seed`'s builtin table with a module's
+    /// own `build_instance_table` result. Called with the *declared* table
+    /// as `self` so a builtin entry never silently shadows a real user
+    /// declaration; a user "redeclaring" an interface a builtin type
+    /// already has (`instance Eq Int where ...`) is untested, unusual
+    /// territory this doesn't specially diagnose — it just keeps the
+    /// user's own entry, same as any other collision here.
+    pub fn merge_from(&mut self, other: InstanceTable) {
+        for (key, entry) in other.entries {
+            self.entries.entry(key).or_insert(entry);
+        }
+    }
+
+    /// Registers a declared instance's own existence with no checking at
+    /// all — `build_instance_table`'s own two passes do the duplicate and
+    /// superclass checks themselves, across *every* declared instance
+    /// first, so a superclass declared later in the same module (`instance
+    /// Ord Shape` followed by `instance Eq Shape`) is visible by the time
+    /// either check runs. See `build_instance_table`'s own doc comment.
+    fn insert_declared_unchecked(
         &mut self,
         interface: &str,
         head: Ref,
         requires: Vec<(usize, String)>,
-        span: knot_syntax::span::Span,
-        errors: &mut Vec<TypeError>,
     ) {
-        if self.has_instance(interface, &head) {
-            errors.push(TypeError {
-                span,
-                kind: TypeErrorKind::DuplicateInstance {
-                    interface: interface.to_string(),
-                },
-            });
-            return;
-        }
-        for superclass in superclasses(interface) {
-            if !self.has_instance(superclass, &head) {
-                errors.push(TypeError {
-                    span,
-                    kind: TypeErrorKind::MissingSuperclassInstance {
-                        interface: interface.to_string(),
-                        superclass: superclass.to_string(),
-                    },
-                });
-            }
-        }
         self.entries.insert(
             (interface.to_string(), head),
             InstanceEntry {
@@ -168,23 +173,89 @@ fn instance_requires(target: &CType, constraints: &[CConstraint]) -> Vec<(usize,
     requires
 }
 
+/// `(interface, head, requires, span)` for one declared instance this table
+/// can key by `Ref` — `build_instance_table`'s own intermediate shape
+/// between collecting every such declaration and its two checking passes.
+type DeclaredInstance<'a> = (&'a str, Ref, Vec<(usize, String)>, knot_syntax::span::Span);
+
 /// Builds the table from every `CDecl::Instance` in `decls`. Unknown
 /// interfaces are skipped (`knot-canonical` already reported that error);
 /// `insert_builtin` for the actual built-in seeding happens separately.
+///
+/// **Two passes, deliberately not one.** A single forward pass checking
+/// each instance's own superclasses as it's inserted would make coherence
+/// depend on declaration order *within the same module* — `instance Ord
+/// Shape` followed later by `instance Eq Shape` would wrongly report a
+/// missing `Eq` superclass, purely because `Eq` hadn't been registered yet
+/// at the point `Ord` was processed, even though both are declared in this
+/// same module. Elm/Haskell have no such ordering requirement, so neither
+/// should this. Pass 1 registers every instance's own existence first
+/// (first occurrence per `(interface, head)` wins; a later duplicate is
+/// reported via `DuplicateInstance` and otherwise ignored — not inserted,
+/// not superclass-checked in pass 2 either, matching what a single
+/// early-return pass would have done for it). Pass 2 then checks every
+/// *accepted* instance's own superclasses against the now-fully-populated
+/// table, so order within the module no longer matters.
 pub fn build_instance_table(decls: &[Spanned<CDecl>]) -> (InstanceTable, Vec<TypeError>) {
     let mut table = InstanceTable::new();
     let mut errors = Vec::new();
+
+    let mut declared: Vec<DeclaredInstance> = Vec::new();
     for d in decls {
-        if let CDecl::Instance(inst) = &d.node {
-            if !is_known_interface(&inst.interface) {
-                continue;
-            }
-            if let Some(head) = head_ref(&inst.target) {
-                let requires = instance_requires(&inst.target, &inst.constraints);
-                table.insert_declared(&inst.interface, head.clone(), requires, d.span, &mut errors);
+        let CDecl::Instance(inst) = &d.node else {
+            continue;
+        };
+        if !is_known_interface(&inst.interface) {
+            continue;
+        }
+        match head_ref(&inst.target) {
+            Some(head) => declared.push((
+                inst.interface.as_str(),
+                head.clone(),
+                instance_requires(&inst.target, &inst.constraints),
+                d.span,
+            )),
+            None => errors.push(TypeError {
+                span: d.span,
+                kind: TypeErrorKind::InstanceTargetNotNominal {
+                    interface: inst.interface.clone(),
+                },
+            }),
+        }
+    }
+
+    let mut accepted = vec![false; declared.len()];
+    for (i, (interface, head, requires, span)) in declared.iter().enumerate() {
+        if table.has_instance(interface, head) {
+            errors.push(TypeError {
+                span: *span,
+                kind: TypeErrorKind::DuplicateInstance {
+                    interface: interface.to_string(),
+                },
+            });
+        } else {
+            table.insert_declared_unchecked(interface, head.clone(), requires.clone());
+            accepted[i] = true;
+        }
+    }
+
+    for (i, (interface, head, _, span)) in declared.iter().enumerate() {
+        if !accepted[i] {
+            continue;
+        }
+        for superclass in superclasses(interface) {
+            if !table.has_instance(superclass, head) {
+                errors.push(TypeError {
+                    span: *span,
+                    kind: TypeErrorKind::MissingSuperclassInstance {
+                        interface: interface.to_string(),
+                        superclass: superclass.to_string(),
+                    },
+                });
             }
         }
     }
+
     (table, errors)
 }
 
@@ -299,6 +370,49 @@ mod tests {
     }
 
     #[test]
+    fn a_superclass_declared_after_its_own_subclass_in_the_same_module_is_still_accepted() {
+        // Same two instances as
+        // `a_declared_instance_with_its_superclass_already_present_is_accepted`,
+        // just in the opposite declaration order -- coherence must not
+        // depend on where in the module each instance happens to be
+        // written.
+        let cs = decls(
+            "type Shape = Circle Float\n\
+             instance Ord Shape where\n  compare a b = EQ\n\
+             instance Eq Shape where\n  (==) a b = True\n",
+        );
+        let (table, errors) = build_instance_table(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(table.has_instance("Eq", &Ref::TopLevel("Shape".to_string())));
+        assert!(table.has_instance("Ord", &Ref::TopLevel("Shape".to_string())));
+    }
+
+    #[test]
+    fn a_duplicate_instance_with_a_genuinely_missing_superclass_reports_each_error_once() {
+        // Two `Ord Shape`s (a duplicate) and no `Eq` at all -- the second,
+        // rejected `Ord` shouldn't also get its own independent
+        // MissingSuperclassInstance check (pass 2 only checks accepted
+        // instances), so this should be exactly one DuplicateInstance and
+        // exactly one MissingSuperclassInstance, not two of the latter.
+        let cs = decls(
+            "type Shape = Circle Float\n\
+             instance Ord Shape where\n  compare a b = EQ\n\
+             instance Ord Shape where\n  compare a b = EQ\n",
+        );
+        let (_table, errors) = build_instance_table(&cs);
+        let duplicates = errors
+            .iter()
+            .filter(|e| matches!(&e.kind, TypeErrorKind::DuplicateInstance { .. }))
+            .count();
+        let missing_superclass = errors
+            .iter()
+            .filter(|e| matches!(&e.kind, TypeErrorKind::MissingSuperclassInstance { .. }))
+            .count();
+        assert_eq!(duplicates, 1, "{errors:?}");
+        assert_eq!(missing_superclass, 1, "{errors:?}");
+    }
+
+    #[test]
     fn declaring_the_same_instance_twice_is_a_duplicate_error() {
         let cs = decls(
             "type Shape = Circle Float\n\
@@ -309,6 +423,39 @@ mod tests {
         assert!(errors
             .iter()
             .any(|e| matches!(&e.kind, TypeErrorKind::DuplicateInstance { interface } if interface == "Eq")));
+    }
+
+    #[test]
+    fn a_non_eq_ord_show_instance_targeting_a_record_is_a_real_error_not_silent() {
+        // Semigroup has no structural fallback the way Eq/Ord/Show do --
+        // this used to just vanish from the table with no diagnostic at
+        // all, only surfacing later as a confusing NoInstance wherever a
+        // caller tried to use `<>` on a Point.
+        let cs = decls("instance Semigroup { x : Float } where\n  (<>) a b = { x = a.x }\n");
+        let (table, errors) = build_instance_table(&cs);
+        assert!(errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::InstanceTargetNotNominal { interface } if interface == "Semigroup"
+        )));
+        // And it really isn't registered anywhere -- the diagnostic isn't
+        // just cosmetic alongside a table entry that still works.
+        assert!(table.entries.is_empty());
+    }
+
+    #[test]
+    fn an_eq_instance_targeting_a_tuple_is_also_reported_even_though_eq_derives_structurally() {
+        // Eq/Ord/Show *do* derive automatically for Tuple/Record/Unit via
+        // check_instance's own hardcoded rule, with no declaration needed
+        // -- so an explicit one here would be unreachable dead code, not a
+        // working instance. Reported the same way as any other
+        // non-nominal target, for the same reason: silence would be
+        // actively misleading (it'd look like the explicit body matters).
+        let cs = decls("instance Eq (Int, Int) where\n  (==) a b = True\n");
+        let (_table, errors) = build_instance_table(&cs);
+        assert!(errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::InstanceTargetNotNominal { interface } if interface == "Eq"
+        )));
     }
 
     #[test]

@@ -1,8 +1,14 @@
-//! Walks `corpus/` (at the repo root, shared with future crates — see
+//! Walks `corpus/syntax/` (at the repo root, shared with future crates — see
 //! `knot-ast-parser-plan.md` §6) and checks that every `valid/` fixture parses
 //! cleanly and completely, and every `invalid/` fixture is rejected (either a
 //! parse error, or parsing only part of the file and leaving the rest
 //! unconsumed).
+//!
+//! `corpus/syntax/` is grammar-only — free variables and undeclared names are
+//! fine, since nothing here runs past parsing (see `parses_completely`). It's
+//! a sibling to `corpus/semantic/` (see that directory's own `README.md`),
+//! which exercises `knot-canonical`/`knot-checker` instead and needs
+//! realistic, fully-resolvable programs to do that.
 //!
 //! Not yet doing AST snapshot comparison (`insta`) — that's a reasonable
 //! follow-up once there's a stable AST worth pinning down file by file. For
@@ -18,7 +24,7 @@
 use std::path::{Path, PathBuf};
 
 fn corpus_root() -> PathBuf {
-    Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus")).to_path_buf()
+    Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/syntax")).to_path_buf()
 }
 
 fn knot_files(dir: &Path) -> Vec<PathBuf> {

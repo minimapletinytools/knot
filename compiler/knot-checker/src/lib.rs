@@ -206,9 +206,51 @@
 //!   `Selectable Foo`) is still correctly rejected — for the right reason
 //!   (an exact-match closed record short of `isSelected`), not the
 //!   previous, unrelated one.
+//!
+//! **`corpus/semantic/` planning (2026-08-01)** — drafting an interaction
+//! matrix for a real semantic test corpus (see that directory's own
+//! `README.md`) surfaced three more findings by grounding each matrix row
+//! in a live test rather than guessing:
+//! - **Fix #8**: `interface::instance::build_instance_table`'s superclass
+//!   coherence check used to depend on declaration order *within one
+//!   module* — `instance Ord Shape` followed later by `instance Eq Shape`
+//!   in the same file wrongly reported a missing `Eq` superclass, purely
+//!   because the single forward pass checked `has_instance` against the
+//!   table *as built so far*. Now two passes: every instance's own
+//!   existence is registered first (duplicates rejected, first occurrence
+//!   wins), then every accepted instance's superclasses are checked against
+//!   the now-fully-populated table, so order no longer matters.
+//! - **Fix #9**: an instance for any interface other than `Eq`/`Ord`/`Show`
+//!   targeting a `Tuple`/`Record`/`Unit`/bare-variable/`Fn` shape (e.g.
+//!   `instance Semigroup Point where ...` for a record type) used to just
+//!   vanish from the table with **no diagnostic at all** (`head_ref`
+//!   returns `None` for those shapes — no `Ref` to key an entry by), only
+//!   surfacing later as a confusing `NoInstance` wherever a caller tried to
+//!   use it. `build_instance_table` now reports a real
+//!   `TypeErrorKind::InstanceTargetNotNominal` at the declaration site.
+//! - **Fix #10**: added `check::check_module`, the entry point this file's
+//!   own doc comment had been noting as missing since TM0. Confirmed live
+//!   why this mattered before writing more than a couple of semantic
+//!   fixtures: nothing anywhere merged `prelude::seed`'s builtin
+//!   `InstanceTable` with a module's own declared one, so a scratch test
+//!   for the utterly mundane `addX a b = a + b` on `Float`s spuriously
+//!   reported `NoInstance("Num")` purely from a test harness forgetting
+//!   that merge — exactly the trap a hand-wired-per-fixture corpus would
+//!   keep hitting. `check_module` deliberately does *not* also call
+//!   `elaborate::elaborate_module` — seeing both together would double-count
+//!   `NoInstance` errors for ordinary bindings while still missing every
+//!   obligation from inside an instance method's own body (elaboration only
+//!   walks `LetMember`s; instance methods aren't threaded through it at all
+//!   yet, per Fix #5's own note above) — `check_pending` alone is the
+//!   complete, correct source of truth for "does every obligation in this
+//!   module resolve." `check_module`'s own doc comment also names a narrow
+//!   gap inherited rather than introduced here: a user re-declaring an
+//!   instance a *builtin* type already has isn't flagged as a duplicate,
+//!   since coherence-checking happens before the builtin table is merged in.
 
 pub mod annotation;
 pub mod ast;
+pub mod check;
 pub mod constrain;
 pub mod elaborate;
 pub mod error;
