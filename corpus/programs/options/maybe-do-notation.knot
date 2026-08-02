@@ -1,0 +1,11 @@
+type alias Point =
+    { x : Float
+    , y : Float
+    }
+
+addPoints :: Maybe Point -> Maybe Point -> Maybe Point
+addPoints mp1 mp2 =
+  do
+    p1 <- mp1
+    p2 <- mp2
+    pure { x = p1.x + p2.x, y = p1.y + p2.y }

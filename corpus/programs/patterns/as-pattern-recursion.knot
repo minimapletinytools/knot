@@ -1,0 +1,11 @@
+dedupeConsecutive :: List Int -> List Int
+dedupeConsecutive xs = case xs of
+  [] -> []
+  first : rest ->
+    case rest of
+      (second : _) as tail ->
+        if first == second then
+          dedupeConsecutive tail
+        else
+          first : dedupeConsecutive tail
+      [] -> first : []

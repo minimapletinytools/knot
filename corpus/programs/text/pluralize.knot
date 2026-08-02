@@ -1,0 +1,9 @@
+pluralize :: Int -> String -> String
+pluralize count word =
+  if count == 1 then
+    word
+  else
+    word <> "s"
+
+describeCount :: Int -> String -> String
+describeCount count word = show count <> " " <> pluralize count word

@@ -1,0 +1,6 @@
+pairs :: List Int -> List Int -> List (Int, Int)
+pairs xs ys =
+  do
+    x <- xs
+    y <- ys
+    pure (x, y)

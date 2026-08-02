@@ -1,0 +1,20 @@
+type Expr
+    = Lit Int
+    | Add Expr Expr
+    | Sub Expr Expr
+    | Mul Expr Expr
+    | Neg Expr
+
+eval :: Expr -> Int
+eval e = case e of
+  Lit n -> n
+  Add a b -> eval a + eval b
+  Sub a b -> eval a - eval b
+  Mul a b -> eval a * eval b
+  Neg a -> negate (eval a)
+
+sampleExpr :: Expr
+sampleExpr = Add (Lit 1) (Mul (Lit 2) (Lit 3))
+
+sampleResult :: Int
+sampleResult = eval sampleExpr

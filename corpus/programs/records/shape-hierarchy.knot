@@ -1,0 +1,23 @@
+type alias HasArea a = { a | area : Float }
+
+type alias Circle =
+    { radius : Float
+    , area : Float
+    }
+
+type alias Square =
+    { side : Float
+    , area : Float
+    }
+
+makeCircle :: Float -> Circle
+makeCircle r = { radius = r, area = 3.14159 * r * r }
+
+makeSquare :: Float -> Square
+makeSquare s = { side = s, area = s * s }
+
+doubleArea :: HasArea a -> Float
+doubleArea shape = shape.area * 2.0
+
+circleAndSquareDoubled :: (Float, Float)
+circleAndSquareDoubled = (doubleArea (makeCircle 1.0), doubleArea (makeSquare 2.0))

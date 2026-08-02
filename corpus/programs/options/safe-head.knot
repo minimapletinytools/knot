@@ -1,0 +1,9 @@
+safeHead :: List a -> Maybe a
+safeHead xs = case xs of
+  [] -> Nothing
+  h : _ -> Just h
+
+safeTail :: List a -> Maybe (List a)
+safeTail xs = case xs of
+  [] -> Nothing
+  _ : t -> Just t

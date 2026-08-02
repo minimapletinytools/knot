@@ -1,0 +1,9 @@
+@{
+  nodeId = "add-node",
+  label = "Add Two Numbers"
+}
+addTwo :: Int -> Int -> Int
+addTwo a b = a + b
+
+scaleAndAdd :: Int -> Int -> Int -> Int
+scaleAndAdd factor a b = @nodeId("scale-result") (factor * addTwo a b)

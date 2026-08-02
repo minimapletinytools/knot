@@ -1,0 +1,25 @@
+type alias User =
+    { name : String
+    , age : Int
+    }
+
+validateName :: String -> Result String String
+validateName n =
+  if n == "" then
+    Err "name must not be empty"
+  else
+    Ok n
+
+validateAge :: Int -> Result String Int
+validateAge a =
+  if a < 0 then
+    Err "age must not be negative"
+  else
+    Ok a
+
+makeUser :: String -> Int -> Result String User
+makeUser n a =
+  do
+    validName <- validateName n
+    validAge <- validateAge a
+    pure { name = validName, age = validAge }

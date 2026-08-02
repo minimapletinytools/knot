@@ -1,0 +1,14 @@
+type alias Engine =
+    { horsepower : Int
+    }
+
+type alias Car =
+    { make : String
+    , engine : Engine
+    }
+
+upgradeEngine :: Car -> Car
+upgradeEngine car = { car | engine = { horsepower = car.engine.horsepower + 50 } }
+
+horsepowerOf :: Car -> Int
+horsepowerOf car = car.engine.horsepower

@@ -1,0 +1,7 @@
+withDefault :: a -> Maybe a -> a
+withDefault fallback maybeValue = case maybeValue of
+  Just v -> v
+  Nothing -> fallback
+
+greetingFor :: Maybe String -> String
+greetingFor maybeName = "Hello, " <> withDefault "stranger" maybeName

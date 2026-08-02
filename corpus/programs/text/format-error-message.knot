@@ -1,0 +1,13 @@
+type ValidationError
+    = TooShort Int
+    | TooLong Int
+    | Empty
+
+instance Show ValidationError where
+  show e = case e of
+    TooShort minLen -> "too short (minimum " <> show minLen <> ")"
+    TooLong maxLen -> "too long (maximum " <> show maxLen <> ")"
+    Empty -> "must not be empty"
+
+formatError :: String -> ValidationError -> String
+formatError fieldName err = fieldName <> ": " <> show err

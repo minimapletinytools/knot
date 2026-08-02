@@ -1,0 +1,15 @@
+type LightState = Red | Yellow | Green
+
+type Event = Timer | Emergency
+
+transition :: LightState -> Event -> LightState
+transition state event = case event of
+  Emergency -> Red
+  Timer ->
+    case state of
+      Red -> Green
+      Green -> Yellow
+      Yellow -> Red
+
+runEvents :: LightState -> List Event -> LightState
+runEvents initial events = foldl transition initial events

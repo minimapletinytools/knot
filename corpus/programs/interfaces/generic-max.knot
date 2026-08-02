@@ -1,0 +1,5 @@
+maxOf :: Ord a => a -> a -> a
+maxOf a b = if a > b then a else b
+
+maxOfList :: Ord a => a -> List a -> a
+maxOfList first rest = foldl maxOf first rest

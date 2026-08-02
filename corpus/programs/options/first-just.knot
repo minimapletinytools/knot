@@ -1,0 +1,10 @@
+firstJust :: List (Maybe a) -> Maybe a
+firstJust xs = case xs of
+  [] -> Nothing
+  h : t ->
+    case h of
+      Just v -> Just v
+      Nothing -> firstJust t
+
+firstMatching :: (a -> Bool) -> List a -> Maybe a
+firstMatching pred xs = firstJust (map (\x -> if pred x then Just x else Nothing) xs)

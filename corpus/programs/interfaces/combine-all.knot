@@ -1,0 +1,14 @@
+combineAll :: Monoid a => List a -> a
+combineAll xs = foldl (\acc x -> acc <> x) empty xs
+
+type Sum = Sum Int
+
+instance Semigroup Sum where
+  (<>) a b = case (a, b) of
+    (Sum x, Sum y) -> Sum (x + y)
+
+instance Monoid Sum where
+  empty = Sum 0
+
+sumAll :: List Sum -> Sum
+sumAll xs = combineAll xs

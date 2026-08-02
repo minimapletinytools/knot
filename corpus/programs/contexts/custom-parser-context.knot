@@ -1,0 +1,34 @@
+-- A minimal "parser" context: given remaining input, either fails or
+-- produces a value plus the leftover input.
+type Parser a = Parser (String -> Maybe (a, String))
+
+runParser :: Parser a -> String -> Maybe (a, String)
+runParser p input = case p of
+  Parser f -> f input
+
+instance Context Parser where
+  pure x = Parser (\input -> Just (x, input))
+
+  bind p f =
+    Parser
+      (\input ->
+        case runParser p input of
+          Nothing -> Nothing
+          Just (value, rest) -> runParser (f value) rest
+      )
+
+anyChar :: Parser String
+anyChar =
+  Parser
+    (\input ->
+      case input of
+        "" -> Nothing
+        _ -> Just (input, "")
+    )
+
+twoChars :: Parser (String, String)
+twoChars =
+  do
+    a <- anyChar
+    b <- anyChar
+    pure (a, b)

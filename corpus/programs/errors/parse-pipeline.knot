@@ -1,0 +1,17 @@
+type ParseError
+    = NotANumber String
+    | OutOfRange Int
+
+parseDigit :: Int -> Result ParseError Int
+parseDigit n =
+  if n < 0 || n > 9 then
+    Err (OutOfRange n)
+  else
+    Ok n
+
+combineDigits :: Int -> Int -> Result ParseError Int
+combineDigits tens ones =
+  do
+    validTens <- parseDigit tens
+    validOnes <- parseDigit ones
+    pure (validTens * 10 + validOnes)

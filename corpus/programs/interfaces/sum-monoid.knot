@@ -1,0 +1,15 @@
+type Sum = Sum Int
+
+instance Semigroup Sum where
+  (<>) a b = case (a, b) of
+    (Sum x, Sum y) -> Sum (x + y)
+
+instance Monoid Sum where
+  empty = Sum 0
+
+unwrapSum :: Sum -> Int
+unwrapSum s = case s of
+  Sum n -> n
+
+total :: List Int -> Int
+total xs = unwrapSum (foldl (\acc n -> acc <> Sum n) empty xs)

@@ -1,0 +1,6 @@
+sumOfSquaresOfEvens :: List Int -> Int
+sumOfSquaresOfEvens xs =
+  xs
+    |> filter (\x -> mod x 2 == 0)
+    |> map (\x -> x * x)
+    |> foldl (\acc x -> acc + x) 0

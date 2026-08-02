@@ -1,0 +1,16 @@
+type alias Point =
+    { x : Float
+    , y : Float
+    }
+
+magnitude :: Point -> Float
+magnitude p = p.x * p.x + p.y * p.y
+
+instance Eq Point where
+  (==) a b = a.x == b.x && a.y == b.y
+
+instance Ord Point where
+  compare a b = compare (magnitude a) (magnitude b)
+
+closerToOrigin :: Point -> Point -> Point
+closerToOrigin a b = if a < b then a else b

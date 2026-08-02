@@ -1,0 +1,14 @@
+type alias Address =
+    { street : String
+    , city : String
+    }
+
+type alias Person =
+    { name : String
+    , address : Maybe Address
+    }
+
+cityOf :: Person -> Maybe String
+cityOf person = case person.address of
+  Nothing -> Nothing
+  Just addr -> Just addr.city

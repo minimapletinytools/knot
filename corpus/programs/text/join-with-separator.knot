@@ -1,0 +1,7 @@
+joinWith :: String -> List String -> String
+joinWith sep items = case items of
+  [] -> ""
+  h : t -> foldl (\acc s -> acc <> sep <> s) h t
+
+csvLine :: List String -> String
+csvLine fields = joinWith "," fields

@@ -1,0 +1,9 @@
+type Direction = North | South | East | West
+
+type Move = Move Direction Int
+
+describeMoves :: (Move, Move) -> String
+describeMoves pair = case pair of
+  (Move North d1, Move South d2) -> "opposite vertical moves"
+  (Move East d1, Move West d2) -> "opposite horizontal moves"
+  (Move d1 n1, Move d2 n2) -> "two moves"

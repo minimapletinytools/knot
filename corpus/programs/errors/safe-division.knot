@@ -1,0 +1,12 @@
+safeDivide :: Int -> Int -> Result String Int
+safeDivide a b =
+  if b == 0 then
+    Err "division by zero"
+  else
+    Ok (div a b)
+
+safeDivideChain :: Int -> Int -> Int -> Result String Int
+safeDivideChain a b c =
+  case safeDivide a b of
+    Err msg -> Err msg
+    Ok result -> safeDivide result c

@@ -1,0 +1,17 @@
+type alias Settings =
+    { volume : Int
+    , brightness : Int
+    , muted : Bool
+    }
+
+defaultSettings :: Settings
+defaultSettings = { volume = 50, brightness = 80, muted = False }
+
+mute :: Settings -> Settings
+mute settings = { settings | muted = True, volume = 0 }
+
+raiseBrightness :: Settings -> Settings
+raiseBrightness settings = { settings | brightness = settings.brightness + 10 }
+
+nightMode :: Settings -> Settings
+nightMode settings = raiseBrightness (mute settings)

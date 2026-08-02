@@ -1,0 +1,9 @@
+gcdOf :: Int -> Int -> Int
+gcdOf a b =
+  if b == 0 then
+    a
+  else
+    gcdOf b (mod a b)
+
+lcmOf :: Int -> Int -> Int
+lcmOf a b = div (a * b) (gcdOf a b)

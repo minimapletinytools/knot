@@ -1,0 +1,7 @@
+populations :: Map String Int
+populations =
+  Map.fromList
+    [ ("Tokyo", 37400000)
+    , ("Delhi", 30290000)
+    , ("Shanghai", 27058000)
+    ]

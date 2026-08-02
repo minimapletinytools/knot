@@ -1,0 +1,7 @@
+mapError :: (e -> f) -> Result e a -> Result f a
+mapError f result = case result of
+  Ok a -> Ok a
+  Err e -> Err (f e)
+
+describeFailure :: Result Int a -> Result String a
+describeFailure result = mapError (\code -> "error code " <> show code) result

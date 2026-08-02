@@ -1,0 +1,17 @@
+type Stack a
+    = Empty
+    | Push a (Stack a)
+
+reverseStack :: Stack a -> Stack a
+reverseStack s =
+  let
+      go acc rest = case rest of
+        Empty -> acc
+        Push x t -> go (Push x acc) t
+  in
+  go Empty s
+
+stackLength :: Stack a -> Int
+stackLength s = case s of
+  Empty -> 0
+  Push _ t -> 1 + stackLength t

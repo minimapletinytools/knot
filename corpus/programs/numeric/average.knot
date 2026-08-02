@@ -1,0 +1,7 @@
+average :: List Int -> Float
+average xs =
+  let
+      total = foldl (\acc x -> acc + x) 0 xs
+      count = length xs
+  in
+  fromIntegral total / fromIntegral count

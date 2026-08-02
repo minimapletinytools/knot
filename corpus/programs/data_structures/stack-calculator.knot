@@ -1,0 +1,19 @@
+type Token
+    = Number Int
+    | Plus
+    | Times
+
+applyOp :: Token -> List Int -> List Int
+applyOp tok stack = case tok of
+  Number n -> n : stack
+  Plus -> case stack of
+    a : b : rest -> (a + b) : rest
+    _ -> stack
+  Times -> case stack of
+    a : b : rest -> (a * b) : rest
+    _ -> stack
+
+evalRpn :: List Token -> Maybe Int
+evalRpn tokens = case foldl (\stack tok -> applyOp tok stack) [] tokens of
+  result : _ -> Just result
+  [] -> Nothing

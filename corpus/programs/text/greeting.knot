@@ -1,0 +1,5 @@
+greet :: String -> String
+greet name = "Hello, " <> name <> "!"
+
+greetAll :: List String -> List String
+greetAll names = map greet names

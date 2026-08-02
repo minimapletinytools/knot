@@ -1,0 +1,8 @@
+isEven :: Int -> Bool
+isEven n = mod n 2 == 0
+
+isOdd :: Int -> Bool
+isOdd n = not (isEven n)
+
+splitMinutes :: Int -> (Int, Int)
+splitMinutes totalSeconds = (div totalSeconds 60, mod totalSeconds 60)

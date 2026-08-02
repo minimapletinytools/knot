@@ -1,0 +1,13 @@
+classify :: Maybe Int -> Maybe Int -> String
+classify a b = case a of
+  Nothing -> "first missing"
+  Just x ->
+    case b of
+      Nothing -> "second missing"
+      Just y ->
+        if x == y then
+          "equal"
+        else if x < y then
+          "first smaller"
+        else
+          "first larger"

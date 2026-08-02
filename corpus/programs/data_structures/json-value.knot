@@ -1,0 +1,19 @@
+type JsonValue
+    = JsonNull
+    | JsonBool Bool
+    | JsonNumber Float
+    | JsonString String
+    | JsonArray (List JsonValue)
+
+render :: JsonValue -> String
+render v = case v of
+  JsonNull -> "null"
+  JsonBool b -> if b then "true" else "false"
+  JsonNumber n -> show n
+  JsonString s -> "\"" <> s <> "\""
+  JsonArray items -> "[" <> joinCommas (map render items) <> "]"
+
+joinCommas :: List String -> String
+joinCommas items = case items of
+  [] -> ""
+  h : t -> foldl (\acc s -> acc <> "," <> s) h t

@@ -1,0 +1,11 @@
+-- A realistic first attempt at word counting -- reaches for Map.get/Map.insert
+-- the way anyone coming from Elm's Dict would, before knowing whether they
+-- exist in this language yet.
+countWord :: String -> Map String Int -> Map String Int
+countWord word counts =
+  case Map.get word counts of
+    Just n -> Map.insert word (n + 1) counts
+    Nothing -> Map.insert word 1 counts
+
+countAll :: List String -> Map String Int
+countAll words = foldl (\counts w -> countWord w counts) Map.empty words

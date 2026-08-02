@@ -1,0 +1,21 @@
+type alias Queue a =
+    { front : List a
+    , back : List a
+    }
+
+emptyQueue :: Queue a
+emptyQueue = { front = [], back = [] }
+
+enqueue :: a -> Queue a -> Queue a
+enqueue x q = { q | back = x : q.back }
+
+dequeue :: Queue a -> Maybe (a, Queue a)
+dequeue q = case q.front of
+  h : t -> Just (h, { q | front = t })
+  [] ->
+    case reverseList q.back of
+      [] -> Nothing
+      h : t -> Just (h, { front = t, back = [] })
+
+reverseList :: List a -> List a
+reverseList xs = foldl (\acc x -> x : acc) [] xs
