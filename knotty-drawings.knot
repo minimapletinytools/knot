@@ -31,7 +31,7 @@ type alias GraphicsElement =
     , strokeMiterlimit : Float
     -- compositing
     , clipPath : Maybe (Ref ClipPath)
-    , mask : Maybe (Ref Mask)
+    , mask : Maybe (Ref Mask
     , filter : Maybe (Ref Filter)
     , blendMode : BlendMode
     -- visibility
@@ -196,10 +196,9 @@ type Element
     | PathElement Path
     | GroupElement Group
 
--- Just a list, as discussed — no transform/opacity/filter/etc. of its own;
--- those are either baked into each leaf directly or modeled as a separate
--- operation elsewhere, not stored on the group.
+-- 
 type alias Group =
-    { id : Id
+    { ..GraphicsElement
     , children : List Element
     }
+
