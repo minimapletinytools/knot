@@ -1,0 +1,354 @@
+
+type alias Id = Int
+type alias Ref a = Id   -- reference-by-id to a resource defined elsewhere
+
+-- The absolute minimum: something with an identity, nothing else assumed.
+-- Satisfied by every shape below (they all satisfy the strictly bigger
+-- IsGraphicsElement too) as well as by Group, which doesn't.
+type alias IsElement a = { a | id : Id }
+
+-- The bundled constraint: "this record has at least every shared
+-- graphics-element field." Not a concrete type on its own — every primitive
+-- shape below satisfies it structurally by listing these same fields plus its
+-- own geometry, since knot's records have no spread/inheritance sugar.
+type alias IsGraphicsElement a =
+    { a
+    | id : Id
+    -- transform
+    , transform : Transform
+    -- paint
+    , fill : Paint
+    , stroke : Paint
+    , fillOpacity : Float
+    , strokeOpacity : Float
+    , opacity : Float
+    , fillRule : FillRule
+    -- stroke shape (only meaningful if stroke /= NoPaint, but universal fields)
+    , strokeWidth : Float
+    , strokeLinecap : LineCap
+    , strokeLinejoin : LineJoin
+    , strokeDasharray : List Float
+    , strokeDashoffset : Float
+    , strokeMiterlimit : Float
+    -- compositing
+    , clipPath : Option (Ref ClipPath)
+    , mask : Option (Ref Mask)
+    , filter : Option (Ref Filter)
+    , blendMode : BlendMode
+    -- visibility
+    , visibility : Bool
+    , display : Bool
+    -- metadata
+    , className : List String
+    , title : Option String
+    , desc : Option String
+    }
+
+-- Row-polymorphic constraints, one per field, so a function can require just the
+-- slice of IsGraphicsElement it actually touches instead of the whole bundle.
+
+type alias HasId a = { a | id : Id }
+type alias HasTransform a = { a | transform : Transform }
+
+type alias HasFill a = { a | fill : Paint }
+type alias HasStroke a = { a | stroke : Paint }
+type alias HasFillOpacity a = { a | fillOpacity : Float }
+type alias HasStrokeOpacity a = { a | strokeOpacity : Float }
+type alias HasOpacity a = { a | opacity : Float }
+type alias HasFillRule a = { a | fillRule : FillRule }
+
+type alias HasStrokeWidth a = { a | strokeWidth : Float }
+type alias HasStrokeLinecap a = { a | strokeLinecap : LineCap }
+type alias HasStrokeLinejoin a = { a | strokeLinejoin : LineJoin }
+type alias HasStrokeDasharray a = { a | strokeDasharray : List Float }
+type alias HasStrokeDashoffset a = { a | strokeDashoffset : Float }
+type alias HasStrokeMiterlimit a = { a | strokeMiterlimit : Float }
+
+type alias HasClipPath a = { a | clipPath : Option (Ref ClipPath) }
+type alias HasMask a = { a | mask : Option (Ref Mask) }
+type alias HasFilter a = { a | filter : Option (Ref Filter) }
+type alias HasBlendMode a = { a | blendMode : BlendMode }
+
+type alias HasVisibility a = { a | visibility : Bool }
+type alias HasDisplay a = { a | display : Bool }
+
+type alias HasClassName a = { a | className : List String }
+type alias HasTitle a = { a | title : Option String }
+type alias HasDesc a = { a | desc : Option String }
+
+type Paint
+    = NoPaint
+    | SolidColor Color
+    | PaintRef (Ref PaintServer)   -- gradient or pattern
+
+type FillRule = NonZero | EvenOdd
+type LineCap = Butt | RoundCap | Square
+type LineJoin = Miter | RoundJoin | Bevel
+
+type BlendMode
+    = Normal | Multiply | Screen | Overlay | Darken | Lighten
+    -- ...rest of the CSS blend modes, add as needed
+
+type alias Transform = List TransformOp
+
+type TransformOp
+    = Translate Float Float
+    | Scale Float Float
+    | Rotate Float (Option (Float, Float))  -- angle, optional pivot
+    | SkewX Float
+    | SkewY Float
+
+-- Primitive shapes ------------------------------------------------------
+--
+-- Each one "inherits" IsGraphicsElement purely structurally: it restates every
+-- shared field (knot records don't have a spread/extends operator) plus its own
+-- geometry. Because the field set is a superset, any of these unifies fine
+-- wherever a function asks for `IsGraphicsElement a` or a narrower `Has*`.
+
+type alias Rect =
+    { id : Id
+    , transform : Transform
+    , fill : Paint
+    , stroke : Paint
+    , fillOpacity : Float
+    , strokeOpacity : Float
+    , opacity : Float
+    , fillRule : FillRule
+    , strokeWidth : Float
+    , strokeLinecap : LineCap
+    , strokeLinejoin : LineJoin
+    , strokeDasharray : List Float
+    , strokeDashoffset : Float
+    , strokeMiterlimit : Float
+    , clipPath : Option (Ref ClipPath)
+    , mask : Option (Ref Mask)
+    , filter : Option (Ref Filter)
+    , blendMode : BlendMode
+    , visibility : Bool
+    , display : Bool
+    , className : List String
+    , title : Option String
+    , desc : Option String
+    -- geometry
+    , x : Float
+    , y : Float
+    , width : Float
+    , height : Float
+    , rx : Option Float   -- corner rounding; None = sharp corners
+    , ry : Option Float
+    }
+
+type alias Circle =
+    { id : Id
+    , transform : Transform
+    , fill : Paint
+    , stroke : Paint
+    , fillOpacity : Float
+    , strokeOpacity : Float
+    , opacity : Float
+    , fillRule : FillRule
+    , strokeWidth : Float
+    , strokeLinecap : LineCap
+    , strokeLinejoin : LineJoin
+    , strokeDasharray : List Float
+    , strokeDashoffset : Float
+    , strokeMiterlimit : Float
+    , clipPath : Option (Ref ClipPath)
+    , mask : Option (Ref Mask)
+    , filter : Option (Ref Filter)
+    , blendMode : BlendMode
+    , visibility : Bool
+    , display : Bool
+    , className : List String
+    , title : Option String
+    , desc : Option String
+    -- geometry
+    , cx : Float
+    , cy : Float
+    , r : Float
+    }
+
+type alias Ellipse =
+    { id : Id
+    , transform : Transform
+    , fill : Paint
+    , stroke : Paint
+    , fillOpacity : Float
+    , strokeOpacity : Float
+    , opacity : Float
+    , fillRule : FillRule
+    , strokeWidth : Float
+    , strokeLinecap : LineCap
+    , strokeLinejoin : LineJoin
+    , strokeDasharray : List Float
+    , strokeDashoffset : Float
+    , strokeMiterlimit : Float
+    , clipPath : Option (Ref ClipPath)
+    , mask : Option (Ref Mask)
+    , filter : Option (Ref Filter)
+    , blendMode : BlendMode
+    , visibility : Bool
+    , display : Bool
+    , className : List String
+    , title : Option String
+    , desc : Option String
+    -- geometry
+    , cx : Float
+    , cy : Float
+    , rx : Float
+    , ry : Float
+    }
+
+type alias Line =
+    { id : Id
+    , transform : Transform
+    , fill : Paint
+    , stroke : Paint
+    , fillOpacity : Float
+    , strokeOpacity : Float
+    , opacity : Float
+    , fillRule : FillRule
+    , strokeWidth : Float
+    , strokeLinecap : LineCap
+    , strokeLinejoin : LineJoin
+    , strokeDasharray : List Float
+    , strokeDashoffset : Float
+    , strokeMiterlimit : Float
+    , clipPath : Option (Ref ClipPath)
+    , mask : Option (Ref Mask)
+    , filter : Option (Ref Filter)
+    , blendMode : BlendMode
+    , visibility : Bool
+    , display : Bool
+    , className : List String
+    , title : Option String
+    , desc : Option String
+    -- geometry
+    , x1 : Float
+    , y1 : Float
+    , x2 : Float
+    , y2 : Float
+    }
+
+type alias Point = { x : Float, y : Float }
+
+type alias Polyline =
+    { id : Id
+    , transform : Transform
+    , fill : Paint
+    , stroke : Paint
+    , fillOpacity : Float
+    , strokeOpacity : Float
+    , opacity : Float
+    , fillRule : FillRule
+    , strokeWidth : Float
+    , strokeLinecap : LineCap
+    , strokeLinejoin : LineJoin
+    , strokeDasharray : List Float
+    , strokeDashoffset : Float
+    , strokeMiterlimit : Float
+    , clipPath : Option (Ref ClipPath)
+    , mask : Option (Ref Mask)
+    , filter : Option (Ref Filter)
+    , blendMode : BlendMode
+    , visibility : Bool
+    , display : Bool
+    , className : List String
+    , title : Option String
+    , desc : Option String
+    -- geometry
+    , points : List Point
+    }
+
+type alias Polygon =
+    { id : Id
+    , transform : Transform
+    , fill : Paint
+    , stroke : Paint
+    , fillOpacity : Float
+    , strokeOpacity : Float
+    , opacity : Float
+    , fillRule : FillRule
+    , strokeWidth : Float
+    , strokeLinecap : LineCap
+    , strokeLinejoin : LineJoin
+    , strokeDasharray : List Float
+    , strokeDashoffset : Float
+    , strokeMiterlimit : Float
+    , clipPath : Option (Ref ClipPath)
+    , mask : Option (Ref Mask)
+    , filter : Option (Ref Filter)
+    , blendMode : BlendMode
+    , visibility : Bool
+    , display : Bool
+    , className : List String
+    , title : Option String
+    , desc : Option String
+    -- geometry
+    , points : List Point
+    }
+
+-- Minimal path command set (see §"M/L/C/Z" discussion): every other SVG path
+-- command (H/V/S/T/Q/A and their relative/lowercase forms) is either pure
+-- shorthand for these or convertible to them, so this is all the internal
+-- model needs to represent.
+type PathCommand
+    = MoveTo Float Float
+    | LineTo Float Float
+    | CurveTo Float Float Float Float Float Float   -- x1 y1 x2 y2 x y
+    | ClosePath
+
+type alias Path =
+    { id : Id
+    , transform : Transform
+    , fill : Paint
+    , stroke : Paint
+    , fillOpacity : Float
+    , strokeOpacity : Float
+    , opacity : Float
+    , fillRule : FillRule
+    , strokeWidth : Float
+    , strokeLinecap : LineCap
+    , strokeLinejoin : LineJoin
+    , strokeDasharray : List Float
+    , strokeDashoffset : Float
+    , strokeMiterlimit : Float
+    , clipPath : Option (Ref ClipPath)
+    , mask : Option (Ref Mask)
+    , filter : Option (Ref Filter)
+    , blendMode : BlendMode
+    , visibility : Bool
+    , display : Bool
+    , className : List String
+    , title : Option String
+    , desc : Option String
+    -- geometry
+    , d : List PathCommand
+    }
+
+-- The scene graph: no property cascade (see design discussion — every leaf
+-- shape already carries its own fully resolved paint/transform/etc., so
+-- resolving one never needs a walk up to an ancestor), hierarchy exists only
+-- for logical ordering/grouping. Element must be a closed sum type rather
+-- than `List (IsElement a)` — IsElement a is a type-level function, and a
+-- List needs one concrete element type shared by the whole list, so it can't
+-- hold a Circle and a Rect side by side no matter what `a` is chosen; the
+-- usual ML fix for a heterogeneous collection is a closed ADT enumerating the
+-- variants, same pattern as PathCommand above.
+type Element
+    = CircleElement Circle
+    | RectElement Rect
+    | EllipseElement Ellipse
+    | LineElement Line
+    | PolylineElement Polyline
+    | PolygonElement Polygon
+    | PathElement Path
+    | GroupElement Group
+
+-- Just a list, as discussed — no transform/opacity/filter/etc. of its own;
+-- those are either baked into each leaf directly or modeled as a separate
+-- operation elsewhere, not stored on the group.
+type alias Group =
+    { id : Id
+    , children : List Element
+    }

@@ -1,3 +1,42 @@
+
+
+:: 8/1/2026 knotty-drawings notes
+
+
+type alias 
+
+
+shapes
+
+rect, circle, ellipse, line, polyline, polygon
+
+
+Paint/style (what we've covered)
+
+fill, stroke, fill-opacity, stroke-opacity, opacity, fill-rule, stroke shape properties (stroke-width, stroke-linecap, stroke-linejoin, stroke-dasharray, stroke-dashoffset, stroke-miterlimit)
+Transform
+
+transform — position/rotate/scale/skew. Not "style" exactly, but it's per-object metadata the same way style is.
+Compositing / post-processing (this is the category filters belong to)
+
+filter — reference to a filter chain (blur, shadow, color adjust, etc.)
+clip-path — reference to a clip region
+mask — reference to an alpha mask
+mix-blend-mode, isolation — how it composites with what's underneath
+paint-order — controls whether fill/stroke/markers render in that order or a different one (matters for thick strokes with transparency)
+Markers (path/line/polyline only)
+
+marker-start / marker-mid / marker-end — references to marker defs, e.g. arrowheads at vertices
+Rendering hints (quality/perf tradeoffs, rarely user-facing but real attributes)
+
+shape-rendering (e.g. crispEdges vs geometricPrecision), vector-effect (e.g. non-scaling-stroke — keep stroke width constant under transform)
+
+id
+
+
+-----
+
+
 :: NEXT STEPS
     (support complete spec)
     DONE-language -> source AST converter
@@ -135,6 +174,9 @@ alternatively, the UI can serialize the state directly into the file with specia
 
 :: TODO
 
+-knot compiler todo
+    -change : to :: for records
+    -Option to Maybe
 -UI spec gaps
     -finish pattern matching node stuff
     -figure out how operator precedence is expressed in graph
