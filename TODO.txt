@@ -193,6 +193,9 @@ alternatively, the UI can serialize the state directly into the file with specia
             z = 3 + x (x is an int)
         -so there are actually 2 x's in the runtime. Compiler secretly sees x as x :: (Num a) => (typeclass dict) -> a
         -with that idea, x is actually scretly a boxed node
+    -we probbaly want this
+        Option B — real user-declared structural instances (bigger, new mechanism): a genuine structural key type in InstanceTable (closed shapes only, no open rows), a canonical hash/equality over a resolved Structure, and reusing the existing requires-style machinery for parametric fields. This lets you write the custom body you originally wrote ((<>) a b = { x = a.x + b.x }), not just field-by-field combination.
+    -see record-spread-proposal.md
 
 
 
