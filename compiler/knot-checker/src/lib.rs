@@ -124,6 +124,38 @@
 //!   shaped home fits it — never generalized, never scheme-installed,
 //!   dispatched by `(interface, head)` rather than by name); both are
 //!   documented, narrow follow-ups rather than gaps papered over.
+//!
+//! **Post-gaps-plan audit (2026-08-01)**: closing out the five fixes above
+//! wasn't the same as this crate actually working end to end — two gaps
+//! found via live testing (not by inspection) were more severe than
+//! anything in that plan, in that they broke common-case, not edge-case,
+//! programs:
+//! - **User-defined ADT constructors had no schemes at all** — `type Shape
+//!   = Circle Float` followed by using `Circle` as a value or in a pattern
+//!   anywhere was an `UnboundValue` error, full stop, since nothing but
+//!   `prelude.rs`'s hand-written built-ins (`Some`, `Ok`, ...) ever
+//!   installed a constructor's scheme. Fixed by `constrain::decl::
+//!   seed_user_constructors`, called alongside `constrain_module` (not
+//!   folded into it — a constructor's type needs no unification or
+//!   generalization at all, so it doesn't belong on the `Constraint`/
+//!   `solve.rs` path the way an ordinary binding's does).
+//! - **Type aliases never expanded** — `type alias Point = { x : Float, y :
+//!   Float }` used in a signature built an opaque nominal type that could
+//!   never unify with an actual record literal. Fixed in `knot-canonical`
+//!   (not here): `resolve::alias::expand_aliases` runs as a whole-module
+//!   post-pass after name resolution, substituting every local alias
+//!   reference with its own (cycle-checked, recursively-expanded)
+//!   definition — the right layer for this, since an alias reference is a
+//!   *name* to resolve, not a type-checking judgment.
+//!
+//! Neither called for rearchitecting anything — both were straightforward
+//! missing pieces once found. Still open from the same audit:
+//! `elaborate::elaborate_module`'s `resolve_one` doesn't fall back to
+//! `interface::instance::check_instance`'s structural rules, so it
+//! misreports a valid `Tuple`/`Record` obligation as `NoInstance` (currently
+//! dormant — nothing calls `elaborate_module` in a real pipeline yet); and
+//! Fix #5's own documented `Collection`/`Context`-instance-method gap is a
+//! genuine (if narrow) soundness hole, not just an incompleteness.
 
 pub mod annotation;
 pub mod ast;

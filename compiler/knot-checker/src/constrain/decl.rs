@@ -325,6 +325,120 @@ fn build_declared(sub: &mut Substitution, sig: &CTypeSignature) -> (TypeVarId, D
     )
 }
 
+/// Same walk as `instantiate_rigid`, but for a context that needs genuinely
+/// quantifiable, ordinary flexible variables instead of rigid ones — a
+/// constructor's own type parameters aren't being checked against a body
+/// the way a signature's are, they're just being *given* a type, so there's
+/// nothing for rigidity to protect here. Kept as its own small function
+/// rather than parameterizing `instantiate_rigid` over "how to make a
+/// fresh var": the two are similar, but different enough in *why* they
+/// exist that sharing one implementation would obscure which is which.
+fn instantiate_flexible(
+    sub: &mut Substitution,
+    ty: &CType,
+    vars: &mut HashMap<String, TypeVarId>,
+) -> TypeVarId {
+    match ty {
+        CType::Named(r, args) => {
+            let arg_tys = args
+                .iter()
+                .map(|a| instantiate_flexible(sub, a, vars))
+                .collect();
+            sub.fresh_bound(Structure::App(r.clone(), arg_tys))
+        }
+        CType::Var(name) => *vars
+            .entry(name.clone())
+            .or_insert_with(|| sub.fresh_unbound()),
+        CType::Fn(a, b) => {
+            let a_ty = instantiate_flexible(sub, a, vars);
+            let b_ty = instantiate_flexible(sub, b, vars);
+            sub.fresh_bound(Structure::Fn(a_ty, b_ty))
+        }
+        CType::Tuple(ts) => {
+            let tys = ts
+                .iter()
+                .map(|t| instantiate_flexible(sub, t, vars))
+                .collect();
+            sub.fresh_bound(Structure::Tuple(tys))
+        }
+        CType::Record(fields, ext) => {
+            let field_tys = fields
+                .iter()
+                .map(|(name, t)| (name.clone(), instantiate_flexible(sub, t, vars)))
+                .collect();
+            let ext_ty = ext.as_ref().map(|name| {
+                *vars
+                    .entry(name.clone())
+                    .or_insert_with(|| sub.fresh_unbound())
+            });
+            sub.fresh_bound(Structure::Record(field_tys, ext_ty))
+        }
+        CType::Unit => sub.fresh_bound(Structure::Unit),
+    }
+}
+
+/// Seeds `env` with a `Scheme` for every constructor of every `CDecl::
+/// TypeDecl` in `decls` — e.g. `type Shape = Circle Float` installs
+/// `Circle :: Float -> Shape` under `SchemeKey::TopLevel("Circle")`,
+/// exactly the shape `prelude.rs`'s own `seed_constructors` hand-writes for
+/// built-ins like `Some`/`Ok`, just derived from the real declaration
+/// instead of hardcoded — nothing else in this crate did this at all before
+/// (a real, previously-undocumented gap: without it, *any* use of a
+/// user-defined constructor as a value or in a pattern is an `UnboundValue`
+/// error, since `Ref::TopLevel`-headed `Lookup`/pattern-`Lookup`
+/// constraints have nowhere to resolve against).
+///
+/// Needs no unification or generalization at all: a constructor's own type
+/// is completely determined by its declaration (this language has no
+/// syntax for constraining an ADT's own type parameters, unlike a
+/// function's signature), so this installs a finished `Scheme` directly
+/// rather than routing through `Constraint`/`solve.rs` the way `constrain_
+/// module`'s ordinary bindings do. Every one of the type's own declared
+/// parameters gets its own quantified variable, even one a particular
+/// variant's fields never mention (`type Result e a = Ok a | Err e`'s `Ok`
+/// still needs to be quantified over `e`, or its constructed value's own
+/// type wouldn't actually be `Result e a` in full).
+///
+/// Only *local* declarations are covered, the same limitation `resolve::
+/// alias::expand_aliases` documents for imported type aliases: a real gap
+/// once cross-module linking exists, not something fixable here.
+pub fn seed_user_constructors(
+    sub: &mut Substitution,
+    env: &mut crate::solve::SchemeEnv,
+    decls: &[Spanned<CDecl>],
+) {
+    for d in decls {
+        let CDecl::TypeDecl(type_name, params, variants) = &d.node else {
+            continue;
+        };
+        for (ctor_name, field_types) in variants {
+            let mut vars = HashMap::new();
+            let field_tys: Vec<TypeVarId> = field_types
+                .iter()
+                .map(|t| instantiate_flexible(sub, t, &mut vars))
+                .collect();
+            for p in params {
+                vars.entry(p.clone()).or_insert_with(|| sub.fresh_unbound());
+            }
+            let param_vars: Vec<TypeVarId> = params.iter().map(|p| vars[p]).collect();
+            let result_ty =
+                sub.fresh_bound(Structure::App(Ref::TopLevel(type_name.clone()), param_vars));
+            let ctor_ty = field_tys
+                .iter()
+                .rev()
+                .fold(result_ty, |acc, &f| sub.fresh_bound(Structure::Fn(f, acc)));
+            env.insert(
+                crate::solve::SchemeKey::TopLevel(ctor_name.clone()),
+                crate::ty::Scheme {
+                    vars: vars.into_values().collect(),
+                    constraints: vec![],
+                    ty: ctor_ty,
+                },
+            );
+        }
+    }
+}
+
 /// A group's own header info, before its members' bodies are constrained —
 /// split out from `LetMember` itself only because `LetMember.elaborated_body`
 /// doesn't exist yet at this point (every member's `header_ty` must be bound
@@ -976,5 +1090,72 @@ mod tests {
             sub.resolve_structure(scope.lookup("a").header_ty())
         );
         assert!(matches!(typed.node, TExpr::Let(ref bs, _) if bs.len() == 1));
+    }
+
+    // -- seed_user_constructors --
+
+    #[test]
+    fn a_user_defined_constructor_is_usable_as_a_value_and_in_a_pattern() {
+        let cs = decls(
+            "type Shape = Circle Float\n\
+             area s = case s of\n  Circle r -> r\n\
+             main = area (Circle 5.0)\n",
+        );
+        let mut sub = Substitution::new();
+        let mut env = crate::solve::SchemeEnv::new();
+        seed_user_constructors(&mut sub, &mut env, &cs);
+        let (tree, _members) = constrain_module(&mut sub, &cs);
+        let (_pending, errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn a_polymorphic_constructor_is_generalized_over_every_declared_param() {
+        // Result e a's own Err doesn't mention `a` at all -- it must still
+        // be quantified over it, or `Err "boom"` couldn't be used at two
+        // different `a`s in two different places.
+        let cs = decls(
+            "type MyResult e a = MyOk a | MyErr e\n\
+             useAtInt = case MyErr \"boom\" of\n  MyOk x -> x\n  MyErr _ -> 0\n\
+             useAtBool = case MyErr \"boom\" of\n  MyOk x -> x\n  MyErr _ -> True\n",
+        );
+        let mut sub = Substitution::new();
+        let mut env = crate::solve::SchemeEnv::new();
+        seed_user_constructors(&mut sub, &mut env, &cs);
+        let bool_ty = sub.fresh_bound(Structure::App(Ref::Builtin("Bool".to_string()), vec![]));
+        env.insert(
+            crate::solve::SchemeKey::Builtin("True".to_string()),
+            crate::ty::Scheme::monomorphic(bool_ty),
+        );
+        let (tree, _members) = constrain_module(&mut sub, &cs);
+        let (_pending, errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn a_constructors_scheme_has_the_expected_curried_shape() {
+        let cs = decls("type Box a = Box a\n");
+        let mut sub = Substitution::new();
+        let mut env = crate::solve::SchemeEnv::new();
+        seed_user_constructors(&mut sub, &mut env, &cs);
+        let scheme = env
+            .get(&crate::solve::SchemeKey::TopLevel("Box".to_string()))
+            .expect("Box should have a scheme")
+            .clone();
+        assert_eq!(scheme.vars.len(), 1);
+        match sub.resolve_structure(scheme.ty) {
+            Some(Structure::Fn(field, result)) => {
+                assert_eq!(sub.find(field), sub.find(scheme.vars[0]));
+                match sub.resolve_structure(result) {
+                    Some(Structure::App(r, args)) => {
+                        assert_eq!(r, Ref::TopLevel("Box".to_string()));
+                        assert_eq!(args.len(), 1);
+                        assert_eq!(sub.find(args[0]), sub.find(scheme.vars[0]));
+                    }
+                    other => panic!("expected App(Box, [a]), got {other:?}"),
+                }
+            }
+            other => panic!("expected a Fn shape, got {other:?}"),
+        }
     }
 }
