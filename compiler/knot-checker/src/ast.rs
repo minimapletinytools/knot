@@ -142,5 +142,16 @@ pub struct Dictionary {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ObligationResolution {
     Concrete(Dictionary),
+    /// `interface::instance::check_instance` confirmed this obligation
+    /// genuinely holds, but it's headed by a structural type (`Tuple`/
+    /// `Record`/`Unit`), which has no single named instance to put in a
+    /// `Dictionary`'s own `head` — `List Weird`'s `Eq` fails a `Dictionary`
+    /// exactly the same way, if `Weird` itself is Eq-able, `(Int, Bool)`'s
+    /// `Eq` genuinely holds, there's just no runtime artifact for it yet
+    /// (see `elaborate.rs`'s own doc comment on why dictionary
+    /// *construction* for structural types is separate, future work).
+    /// Never a type error — the type-checking verdict is correct either
+    /// way, this only says elaboration can't go the rest of the way yet.
+    Structural,
     StillAbstract,
 }

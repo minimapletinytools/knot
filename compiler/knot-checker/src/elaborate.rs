@@ -33,7 +33,12 @@
 //! enough here: a genuinely polymorphic binding's own body (`useEq x y = x
 //! == y`, called nowhere at a concrete type in this module) has obligations
 //! that never resolve to anything concrete *in this module* at all — that's
-//! not a `NoInstance` error, it's `StillAbstract`.
+//! not a `NoInstance` error, it's `StillAbstract`; and a structural
+//! obligation `check_instance` confirms but can't be turned into a real
+//! `Dictionary` (the paragraph above) is `Structural`, not an error either
+//! — `resolve_one` checks `check_instance` *before* ever calling
+//! `resolve_dictionary`, specifically so it can tell these two very
+//! different reasons for "no `Dictionary`" apart.
 use std::collections::HashMap;
 
 use knot_syntax::span::Span;
@@ -136,9 +141,14 @@ pub fn elaborate_module(
 /// canonicalized `(interface, ty)` key. `ty` still fully unresolved (a bare
 /// flexible variable, `sub.resolve_structure` returns `None`) means this
 /// obligation belongs to some enclosing binding's own polymorphism —
-/// `StillAbstract`, not an error (see module docs). Anything else goes
-/// through the ordinary `resolve_dictionary`, exactly as `check_pending`
-/// would judge it.
+/// `StillAbstract`, not an error (see module docs). Otherwise the verdict
+/// is whatever `check_instance` says — the same recursive, structural-
+/// aware check `check_pending` uses — checked *before* attempting
+/// `resolve_dictionary`, so a structural obligation `check_instance`
+/// confirms but `resolve_dictionary` can't build a `Dictionary` for
+/// (no `Ref` to key one by — see `ObligationResolution::Structural`'s own
+/// doc comment) is correctly told apart from a genuine `NoInstance`,
+/// rather than the latter incorrectly swallowing the former.
 fn resolve_one(
     sub: &mut Substitution,
     table: &InstanceTable,
@@ -156,11 +166,26 @@ fn resolve_one(
         resolved.insert(key, ObligationResolution::StillAbstract);
         return;
     }
+    if !check_instance(sub, table, interface, ty) {
+        errors.push(TypeError {
+            span,
+            kind: TypeErrorKind::NoInstance {
+                interface: interface.to_string(),
+            },
+        });
+        return;
+    }
+    // check_instance already confirmed this holds, so resolve_dictionary
+    // can only still fail here for one reason: `ty` isn't `Structure::App`-
+    // headed, i.e. it's a verified-but-un-representable structural
+    // obligation, never a real NoInstance.
     match resolve_dictionary(sub, table, interface, ty, span) {
         Ok(d) => {
             resolved.insert(key, ObligationResolution::Concrete(d));
         }
-        Err(e) => errors.push(e),
+        Err(_) => {
+            resolved.insert(key, ObligationResolution::Structural);
+        }
     }
 }
 
@@ -441,5 +466,70 @@ mod tests {
                 head: Ref::Builtin("Int".to_string()),
             }))
         );
+    }
+
+    #[test]
+    fn a_valid_tuple_equality_elaborates_as_structural_not_a_spurious_error() {
+        // Found via live testing during a post-fix audit: check_instance
+        // (Fix #4) correctly accepts (Int, Int)'s own Eq, but resolve_one
+        // used to hand any non-App-headed obligation straight to
+        // resolve_dictionary and treat its Err as a real NoInstance --
+        // wrongly rejecting perfectly valid tuple equality.
+        let mut sub = Substitution::new();
+        let cs = decls("f x y = x == y\nresult = f (1, 3) (2, 4)\n");
+        let (tree, members) = crate::constrain::decl::constrain_module(&mut sub, &cs);
+        let mut env = crate::solve::SchemeEnv::new();
+        let (_pending, errors, obligations) =
+            crate::solve::solve_with_obligations(&mut sub, &mut env, &tree);
+        assert!(errors.is_empty(), "{errors:?}");
+
+        let mut table = InstanceTable::new();
+        table.insert_builtin("Eq", Ref::Builtin("Int".to_string()), vec![]);
+        let (resolved, elab_errors) = elaborate_module(&mut sub, &table, &obligations, &members);
+        assert!(elab_errors.is_empty(), "{elab_errors:?}");
+
+        let result_member = members.iter().find(|m| m.name == "result").unwrap();
+        let f_ref_ty = match &result_member.elaborated_body.node {
+            TExpr::App(inner, _) => match &inner.node {
+                TExpr::App(f_ref, _) => f_ref.ty,
+                other => panic!("expected App(Var(f), (1,3)), got {other:?}"),
+            },
+            other => panic!("expected App(f (1,3), (2,4)), got {other:?}"),
+        };
+        let pairs = obligations
+            .get(&f_ref_ty)
+            .expect("f's reference should have a recorded Eq obligation");
+        let (interface, obligation_ty) = &pairs[0];
+        let key = (interface.clone(), sub.find(*obligation_ty));
+        assert_eq!(resolved.get(&key), Some(&ObligationResolution::Structural));
+    }
+
+    #[test]
+    fn a_genuinely_missing_instance_is_still_a_real_error() {
+        // Guards against `resolve_one`'s new check_instance-first ordering
+        // accidentally swallowing a real NoInstance into Structural too.
+        let mut sub = Substitution::new();
+        let cs = decls("bad = LT + EQ\n");
+        let (tree, members) = crate::constrain::decl::constrain_module(&mut sub, &cs);
+        let mut env = crate::solve::SchemeEnv::new();
+        let ordering_ty =
+            sub.fresh_bound(Structure::App(Ref::Builtin("Ordering".to_string()), vec![]));
+        env.insert(
+            crate::solve::SchemeKey::Builtin("LT".to_string()),
+            crate::ty::Scheme::monomorphic(ordering_ty),
+        );
+        env.insert(
+            crate::solve::SchemeKey::Builtin("EQ".to_string()),
+            crate::ty::Scheme::monomorphic(ordering_ty),
+        );
+        let (_pending, errors, obligations) =
+            crate::solve::solve_with_obligations(&mut sub, &mut env, &tree);
+        assert!(errors.is_empty(), "{errors:?}");
+
+        let table = InstanceTable::new(); // no Num instance for Ordering
+        let (_resolved, elab_errors) = elaborate_module(&mut sub, &table, &obligations, &members);
+        assert!(elab_errors.iter().any(
+            |e| matches!(&e.kind, TypeErrorKind::NoInstance { interface } if interface == "Num")
+        ));
     }
 }

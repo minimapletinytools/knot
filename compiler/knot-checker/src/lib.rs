@@ -149,13 +149,17 @@
 //!   *name* to resolve, not a type-checking judgment.
 //!
 //! Neither called for rearchitecting anything — both were straightforward
-//! missing pieces once found. Still open from the same audit:
-//! `elaborate::elaborate_module`'s `resolve_one` doesn't fall back to
-//! `interface::instance::check_instance`'s structural rules, so it
-//! misreports a valid `Tuple`/`Record` obligation as `NoInstance` (currently
-//! dormant — nothing calls `elaborate_module` in a real pipeline yet); and
-//! Fix #5's own documented `Collection`/`Context`-instance-method gap is a
-//! genuine (if narrow) soundness hole, not just an incompleteness.
+//! missing pieces once found. A third, smaller finding from the same audit
+//! is also fixed now: `elaborate::elaborate_module`'s `resolve_one` used to
+//! hand any non-`Structure::App` obligation straight to `resolve_dictionary`
+//! and treat its `Err` as a real `NoInstance`, misreporting a valid `Tuple`/
+//! `Record` obligation `interface::instance::check_instance` would actually
+//! accept (it was dormant — nothing calls `elaborate_module` in a real
+//! pipeline yet — but a real bug regardless). `resolve_one` now checks
+//! `check_instance` first; a structural obligation it confirms is
+//! `ObligationResolution::Structural`, not an error. Still open: Fix #5's
+//! own documented `Collection`/`Context`-instance-method gap is a genuine
+//! (if narrow) soundness hole, not just an incompleteness.
 
 pub mod annotation;
 pub mod ast;
