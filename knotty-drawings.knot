@@ -1,43 +1,73 @@
 
-type alias Id = Int
-type alias Ref a = Id   -- reference-by-id to a resource defined elsewhere
+type alias Id = String
 
--- The absolute minimum: something with an identity, nothing else assumed.
--- Satisfied by every shape below (they all satisfy the strictly bigger
--- IsGraphicsElement too) as well as by Group, which doesn't.
-type alias IsElement a = { a | id : Id }
+-- The absolute minimum: something that *can* carry a manually-assigned id,
+-- nothing else assumed. Satisfied by every shape below (they all satisfy
+-- the strictly bigger IsGraphicsElement too) as well as by Group.
+type alias IsElement a = { a | id : Maybe Id }
 
 -- The closed field bundle every graphics-element-shaped type has. Kept as
 -- its own alias (rather than only existing as the open IsGraphicsElement
 -- constraint below) specifically so `..GraphicsElement` has something
 -- concrete to spread — see the "Primitive shapes" section.
+--
+-- Inheritance (via Group) note: every field below that's a real inherited
+-- SVG presentation property is `Maybe` — `Nothing` means "resolve from the
+-- nearest ancestor Group that sets it," a genuinely different state from
+-- any concrete value (e.g. `Nothing` on `fill` is not the same as
+-- `Just NoPaint`, which explicitly opts out of inheriting). `opacity` and
+-- `transform` are deliberately *not* in this group despite looking similar:
+-- `opacity` is non-inherited in SVG (it composites the element's own
+-- rendered subtree at that alpha, rather than each descendant resolving its
+-- own opacity from an ancestor), and `transform` doesn't inherit at all --
+-- it composes/accumulates down the tree regardless of whether any given
+-- element sets one, which is a job for whatever walks the tree at render
+-- time, not something this type needs to represent.
 type alias GraphicsElement =
-    { id : Id
-    -- transform
+    { id : Maybe Id   -- manual/stable naming only -- elements are related by
+                       -- real data references internally (an Element value
+                       -- held directly, e.g. in clipPath/mask/filter below),
+                       -- never by id. SVG's own XML format still needs a
+                       -- stable id + url(#id) pair for the *same*
+                       -- relationship, though, so this is where a real
+                       -- serializer synthesizes one for an Element that
+                       -- turns out to be referenced from elsewhere, using
+                       -- this field's value if the author set one
+    -- transform (composes, doesn't inherit -- see module doc above)
     , transform : Transform
-    -- paint
-    , fill : Paint
-    , stroke : Paint
-    , fillOpacity : Float
-    , strokeOpacity : Float
-    , opacity : Float
-    , fillRule : FillRule
-    -- stroke shape (only meaningful if stroke /= NoPaint, but universal fields)
-    , strokeWidth : Float
-    , strokeLinecap : LineCap
-    , strokeLinejoin : LineJoin
-    , strokeDasharray : List Float
-    , strokeDashoffset : Float
-    , strokeMiterlimit : Float
-    -- compositing
-    , clipPath : Maybe (Ref ClipPath)
-    , mask : Maybe (Ref Mask
-    , filter : Maybe (Ref Filter)
+    -- paint (inherited)
+    , fill : Maybe Paint
+    , stroke : Maybe Paint
+    , fillOpacity : Maybe Float
+    , strokeOpacity : Maybe Float
+    , opacity : Float   -- NOT inherited (compositing, not inheritance)
+    , fillRule : Maybe FillRule
+    -- stroke shape (inherited; only meaningful once `stroke` resolves to
+    -- something other than `NoPaint`, but that's still true field-by-field
+    -- here rather than grouped -- see the open TODO on modeling this as one
+    -- `Maybe StrokeStyle` instead)
+    , strokeWidth : Maybe Float
+    , strokeLinecap : Maybe LineCap
+    , strokeLinejoin : Maybe LineJoin
+    , strokeDasharray : Maybe (List Float)
+    , strokeDashoffset : Maybe Float
+    , strokeMiterlimit : Maybe Float
+    -- compositing (not inherited -- each applies per-element). clipPath/mask
+    -- hold their own clipping/masking geometry directly as an Element (often
+    -- a GroupElement wrapping several shapes) -- matches real SVG, where
+    -- <clipPath>/<mask> both contain ordinary drawable content. `filter` is
+    -- flagged as a rougher fit: real SVG <filter> contains filter
+    -- *primitives* (feGaussianBlur, feOffset, ...), not drawable shapes, so
+    -- reusing Element here is a simplification, not a faithful model, until
+    -- a real filter-primitive type exists.
+    , clipPath : Maybe Element
+    , mask : Maybe Element
+    , filter : Maybe Element
     , blendMode : BlendMode
-    -- visibility
-    , visibility : Bool
+    -- visibility ("visibility" is inherited; "display" is not)
+    , visibility : Maybe Bool
     , display : Bool
-    -- metadata
+    -- metadata (never inherited)
     , className : List String
     , title : Maybe String
     , desc : Maybe String
@@ -52,29 +82,29 @@ type alias IsGraphicsElement a = { a | ..GraphicsElement }
 -- Row-polymorphic constraints, one per field, so a function can require just the
 -- slice of IsGraphicsElement it actually touches instead of the whole bundle.
 
-type alias HasId a = { a | id : Id }
+type alias HasId a = { a | id : Maybe Id }
 type alias HasTransform a = { a | transform : Transform }
 
-type alias HasFill a = { a | fill : Paint }
-type alias HasStroke a = { a | stroke : Paint }
-type alias HasFillOpacity a = { a | fillOpacity : Float }
-type alias HasStrokeOpacity a = { a | strokeOpacity : Float }
+type alias HasFill a = { a | fill : Maybe Paint }
+type alias HasStroke a = { a | stroke : Maybe Paint }
+type alias HasFillOpacity a = { a | fillOpacity : Maybe Float }
+type alias HasStrokeOpacity a = { a | strokeOpacity : Maybe Float }
 type alias HasOpacity a = { a | opacity : Float }
-type alias HasFillRule a = { a | fillRule : FillRule }
+type alias HasFillRule a = { a | fillRule : Maybe FillRule }
 
-type alias HasStrokeWidth a = { a | strokeWidth : Float }
-type alias HasStrokeLinecap a = { a | strokeLinecap : LineCap }
-type alias HasStrokeLinejoin a = { a | strokeLinejoin : LineJoin }
-type alias HasStrokeDasharray a = { a | strokeDasharray : List Float }
-type alias HasStrokeDashoffset a = { a | strokeDashoffset : Float }
-type alias HasStrokeMiterlimit a = { a | strokeMiterlimit : Float }
+type alias HasStrokeWidth a = { a | strokeWidth : Maybe Float }
+type alias HasStrokeLinecap a = { a | strokeLinecap : Maybe LineCap }
+type alias HasStrokeLinejoin a = { a | strokeLinejoin : Maybe LineJoin }
+type alias HasStrokeDasharray a = { a | strokeDasharray : Maybe (List Float) }
+type alias HasStrokeDashoffset a = { a | strokeDashoffset : Maybe Float }
+type alias HasStrokeMiterlimit a = { a | strokeMiterlimit : Maybe Float }
 
-type alias HasClipPath a = { a | clipPath : Maybe (Ref ClipPath) }
-type alias HasMask a = { a | mask : Maybe (Ref Mask) }
-type alias HasFilter a = { a | filter : Maybe (Ref Filter) }
+type alias HasClipPath a = { a | clipPath : Maybe Element }
+type alias HasMask a = { a | mask : Maybe Element }
+type alias HasFilter a = { a | filter : Maybe Element }
 type alias HasBlendMode a = { a | blendMode : BlendMode }
 
-type alias HasVisibility a = { a | visibility : Bool }
+type alias HasVisibility a = { a | visibility : Maybe Bool }
 type alias HasDisplay a = { a | display : Bool }
 
 type alias HasClassName a = { a | className : List String }
@@ -84,7 +114,12 @@ type alias HasDesc a = { a | desc : Maybe String }
 type Paint
     = NoPaint
     | SolidColor Color
-    | PaintRef (Ref PaintServer)   -- gradient or pattern
+    -- Gradient or pattern. Same rougher-fit caveat as `filter` above: a real
+    -- SVG <pattern> does contain drawable content (Element fits fine there),
+    -- but <linearGradient>/<radialGradient> hold gradient stops, not
+    -- shapes -- PaintServer doesn't exist as its own type yet to tell those
+    -- apart, so this reuses Element for all of them for now.
+    | PaintRef Element
 
 type FillRule = NonZero | EvenOdd
 type LineCap = Butt | RoundCap | Square
@@ -177,15 +212,18 @@ type alias Path =
     , d : List PathCommand
     }
 
--- The scene graph: no property cascade (see design discussion — every leaf
--- shape already carries its own fully resolved paint/transform/etc., so
--- resolving one never needs a walk up to an ancestor), hierarchy exists only
--- for logical ordering/grouping. Element must be a closed sum type rather
--- than `List (IsElement a)` — IsElement a is a type-level function, and a
--- List needs one concrete element type shared by the whole list, so it can't
--- hold a Circle and a Rect side by side no matter what `a` is chosen; the
--- usual ML fix for a heterogeneous collection is a closed ADT enumerating the
--- variants, same pattern as PathCommand above.
+-- The scene graph. Property inheritance now runs through Group (see
+-- GraphicsElement's own doc comment): resolving a leaf shape's own
+-- inherited fields (fill, strokeWidth, visibility, ...) means walking up
+-- through every enclosing GroupElement until one sets the field (`Just _`)
+-- or the walk runs out (fall back to the SVG-spec default) -- that
+-- resolution logic isn't written yet, this is just the type shape it'll
+-- walk. Element must be a closed sum type rather than `List (IsElement a)`
+-- — IsElement a is a type-level function, and a List needs one concrete
+-- element type shared by the whole list, so it can't hold a Circle and a
+-- Rect side by side no matter what `a` is chosen; the usual ML fix for a
+-- heterogeneous collection is a closed ADT enumerating the variants, same
+-- pattern as PathCommand above.
 type Element
     = CircleElement Circle
     | RectElement Rect
@@ -196,9 +234,14 @@ type Element
     | PathElement Path
     | GroupElement Group
 
--- 
+-- Now spreads GraphicsElement's full bundle rather than just `{ id,
+-- children }` — that's what makes it the inheritance source in the first
+-- place: a child resolves its own `Nothing` fields by looking at exactly
+-- these fields on its nearest enclosing Group.
 type alias Group =
     { ..GraphicsElement
     , children : List Element
     }
 
+emptyGroup :: Group
+emptpGroup = ?
