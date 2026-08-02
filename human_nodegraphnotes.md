@@ -5,8 +5,8 @@ knot - node
 rope - connection
 head - the input end of a knot
 tail - the output of a knot
-loose head - the head of a knot with nothing connecting to it
-loose tail - the tail of a knot with nothing connected to it
+loose head, nub - the head of a knot with nothing connecting to it, 
+loose tail, nub - the tail of a knot with nothing connected to it
 tucks, thimble, eyelet? - connectors
 unravel - pullback function for reverse inference
 bind - captures
@@ -175,7 +175,7 @@ literal nodes contain some special UI input field (num filed string field, dropd
 literal nodes can be "nubbed" into a connector so that a complete node + connection is not shown. All literal nodes are nubbed by default unless they have been let bound to a variable. You can add an annotation to make literal nodes not be nubbed `@no_nub`
 `
 
-visually, a nub portrudes out from the input connector outside fo the node by a half semicircel, and the literal input field is in a pillbox shape with the portruding half semicricle as one of its ends.
+visually, a nubbed input portrudes out from the input connector outside fo the node by a half semicircel, and the literal input field is in a pillbox shape with the portruding half semicricle as one of its ends.
 
 some datatypes may have special literal syntax (e.g. maps, lists, maybe user defined ones) 
 if the input field is one lineable, then it can be nubbed, otherwise nubbing is not supported.

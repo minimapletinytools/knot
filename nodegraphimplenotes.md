@@ -114,17 +114,17 @@ same as hovering over rope, maybe shows some input/output conection specific inf
 
 ## nubbed connections
 
-nubbed inputs don't show the connector anymore, it's covered by the nub pill
+nubbed inputs don't show the connector anymore, it's covered by the nubbed input pill
 
 ### visual states
 
 matches visula language of the connector but the connector is expanded into a pill, the type symbol stays on the left I guess
 
-TODO figure out how to show label and value together in the nub
+TODO figure out how to show label and value together in the nubbed input
 
 ### interaction modes
-- drag off to un nub
-- drag a nubbable node onto the connector to nub
+- drag off to un nub a nubbed input
+- drag a nubbable node onto the connector to nub it
 - right click > delete
 - right click > un nub
 

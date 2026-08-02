@@ -1,4 +1,5 @@
-
+question RE [Pasted text #2 +6 lines]  here I want to set emptyGroup and I just want everything to have non value, does
+  elm have  a syntax for this? I know haskell has the default thingy.
 
 :: 8/1/2026 knotty-drawings notes
 
@@ -18,28 +19,9 @@ TODO
 -----
 
 
-:: NEXT STEPS
-    (support complete spec)
-    DONE-language -> source AST converter
-    DONE-source AST -> canonical AST converter
-    -type analysis + dictionary passing stuff
-    -expression id generation (distinguish between stuff taht got stitched and stuff thats' original matching, cuz stitched stuff can't help with partial evals)
-    -nodegraph UI rendering building blocks
-
-    (only support MVP)
-    -AST -> to nodegraph rendering
-    -language runtime
-        -make sure to do expression identity stuff
-
-    -linter
-    -node graph -> AST mapping
-
 
 :: UPDATE SPEC WITH
 
-- input connectors are called nubs
-    - and you can have input/output/loose nubs
-    - and then you have nubbed inputs which is an input that has been nubbed onto the nub :D
 - node position
     - absolute: 
     - relative(neighbor):
@@ -47,45 +29,6 @@ TODO
         DEFINITE: constraint can not be violtaed
         RECOMMENDATION(n): constraint can be violetd in order of priority
         CACHE: just cached values to save solving time and ensure coherency during rerenders, can be dropped, may not ever get serialized tbh
-
-
-
-::  7/29 unravel notes
-
-
-more unravelling notes
-
-unravels are slipknots if no unravel path within the knot diverges then converges
-
-simple unravel means 1 output creates 1 set of inputs
-
-more complicated means multiple sets of inputs
-
-allow type signatures to be postfix annotated (maybe @@) with runtime checked constraints? or maybe unverified complie time constraints 
-
-UI for an unravel should indicate how many other "bojects" potentioally get affected by tuning it
-
-big issue is that unravels outputs need to be flaggable at a more granular level e.g. 
-
-    fductions returns some struct a b c d e
-    you want to change b and you don't care about what happens a c d e
-
-    this is basically the configuration wen eed to be able to propogate down through teh chain, I don't think there's a nice way around it, the unravel inputs need to be able to indicate which parts of the desired output at the promitive level can be chnaged and ich can't. 
-
-
-considre trace based (sketch n sketch) unravelling as afallabck 
-trace = realized dependecy graph
-
-we can searc hthe realized depndency graph to prove if its a slipknot, except we can't because laziness hides some of the branches. you could always force those branches when attempting to unravel but you could also just attempt to unravel
-
-final output can have a specila unravel that allow syou to add new stuff to it (so you can create new obejcts or features in UI)
-
-Two failure modes — yes, and I'd keep them named as distinct because they need different UX/tooling: (1) is a local failure (this one function's own logic says "no"), (2) is a structural failure (the graph shape created a conflict this particular unravel never even gets a chance to reason about, since it only sees its own inputs/outputs). Case 2 is really a property of the composition, not of any single unravel — worth keeping that framing, because it's exactly what makes it analyzable independently of what any individual unravel's body does (more below).
-
-
-THE UNRAVLE FUNCTION
-
-f :: a -> b
 
 
 :: 7/26/2026 MVP REQS
@@ -154,10 +97,10 @@ alternatively, the UI can serialize the state directly into the file with specia
 
 
 :: TODO
-
+-actually go over type checker implementation details seems to be kinda broken a lot
 -knot compiler todo
-    -change : to :: for records
-    -Option to Maybe
+    DONE-change : to :: for records
+    DONE-Option to Maybe
 -UI spec gaps
     -finish pattern matching node stuff
     -figure out how operator precedence is expressed in graph
@@ -183,6 +126,63 @@ alternatively, the UI can serialize the state directly into the file with specia
 
 
 :: archive
+
+
+
+:: 7/2026 NEXT STEPS
+    (support complete spec)
+    DONE-language -> source AST converter
+    DONE-source AST -> canonical AST converter
+    -type analysis + dictionary passing stuff
+    -expression id generation (distinguish between stuff taht got stitched and stuff thats' original matching, cuz stitched stuff can't help with partial evals)
+    -nodegraph UI rendering building blocks
+
+    (only support MVP)
+    -AST -> to nodegraph rendering
+    -language runtime
+        -make sure to do expression identity stuff
+
+    -linter
+    -node graph -> AST mapping
+
+
+
+::  7/29 unravel notes
+
+
+more unravelling notes
+
+unravels are slipknots if no unravel path within the knot diverges then converges
+
+simple unravel means 1 output creates 1 set of inputs
+
+more complicated means multiple sets of inputs
+
+allow type signatures to be postfix annotated (maybe @@) with runtime checked constraints? or maybe unverified complie time constraints 
+
+UI for an unravel should indicate how many other "bojects" potentioally get affected by tuning it
+
+big issue is that unravels outputs need to be flaggable at a more granular level e.g. 
+
+    fductions returns some struct a b c d e
+    you want to change b and you don't care about what happens a c d e
+
+    this is basically the configuration wen eed to be able to propogate down through teh chain, I don't think there's a nice way around it, the unravel inputs need to be able to indicate which parts of the desired output at the promitive level can be chnaged and ich can't. 
+
+
+considre trace based (sketch n sketch) unravelling as afallabck 
+trace = realized dependecy graph
+
+we can searc hthe realized depndency graph to prove if its a slipknot, except we can't because laziness hides some of the branches. you could always force those branches when attempting to unravel but you could also just attempt to unravel
+
+final output can have a specila unravel that allow syou to add new stuff to it (so you can create new obejcts or features in UI)
+
+Two failure modes — yes, and I'd keep them named as distinct because they need different UX/tooling: (1) is a local failure (this one function's own logic says "no"), (2) is a structural failure (the graph shape created a conflict this particular unravel never even gets a chance to reason about, since it only sees its own inputs/outputs). Case 2 is really a property of the composition, not of any single unravel — worth keeping that framing, because it's exactly what makes it analyzable independently of what any individual unravel's body does (more below).
+
+
+THE UNRAVLE FUNCTION
+
+f :: a -> b
 
 :: 7/24 summary
 # the core products
