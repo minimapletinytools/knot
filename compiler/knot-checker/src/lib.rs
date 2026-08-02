@@ -279,6 +279,60 @@
 //! using `==`, and a `Monoid`-constrained generic combiner using `<>`, for
 //! Fix #12) — see that directory's own README.md for the rest of this
 //! round's findings, several still open.
+//!
+//! **`corpus/programs/`, round 2 (2026-08-02)** — a deeper batch (19 more
+//! fixtures: sorting algorithms, monoid-based reports, layered config via
+//! record spread, a stack-language interpreter, nested generics, multi-
+//! interface constraints) surfaced three more real gaps, two in this crate
+//! and one in `knot-syntax`:
+//! - **`knot-syntax` parser bug (not numbered here, see that crate's own
+//!   `parse/expr.rs`)**: `classify_minus`'s whitespace-only heuristic
+//!   answered `Subtraction` for a `-` with symmetric spacing (`(-40.0)`,
+//!   `[-5, -6]`) even at the very start of an atom, where no left operand
+//!   could possibly exist for it to subtract from — hard parse errors on
+//!   `f (-5)`, `[-1, -2, -3]`, and any parenthesized/bracketed leading
+//!   negative literal. Fixed by only ever treating that heuristic's
+//!   `Subtraction` answer as a real binary operator inside `expr_app`'s own
+//!   trailing-argument loop (the one place a preceding operand genuinely
+//!   exists to back off to), and treating it as negation everywhere else.
+//! - **Fix #13**: a signed binding's own header-type-vs-inferred-type
+//!   `Constraint::Equal` (`constrain::decl::constrain_group_chain`) was
+//!   solved *after* its body's own constraints, not before -- so a nested
+//!   `let` inside the body (e.g. a hand-rolled quicksort's `smaller`/
+//!   `larger`) generalized over a parameter-derived variable that hadn't
+//!   been unified into the signature's rigid type yet, wrongly treating it
+//!   as a fresh, ambient-free, quantifiable variable and dragging its
+//!   interface obligation into the nested binding's own scheme --
+//!   misfiring `AmbiguousConstraint` on perfectly ordinary code. Fixed by
+//!   solving that `Equal` first, so the parameter variable is already
+//!   unioned with the rigid one (and thus correctly `ambient`-visible and
+//!   `given`-covered) by the time the body's own constraints run.
+//! - **Fix #14**: `interface::instance::check_instance`'s recursive
+//!   per-argument checks (a parametric instance's own `requires`, e.g.
+//!   `instance Ord a => Semigroup (Max a)`'s `Ord` requirement on its own
+//!   argument) had no way to resolve a bare *rigid* variable -- `sub::
+//!   resolve_structure` returns `None` for a `Rigid` slot by design, so
+//!   every such recursive step answered `false` unconditionally, no matter
+//!   how thoroughly an enclosing signature/instance context already
+//!   established the interface via `given`. A *concrete* pending obligation
+//!   like `Semigroup (Max a)` (not itself rigid, so never diverted to
+//!   `solve::solve_with_obligations`'s own separate rigid-vs-`given` check)
+//!   still has a rigid `a` buried inside once `check_instance` recurses --
+//!   this broke recursive/self-referential parametric instances too (e.g.
+//!   `instance Show a => Show (Tree a)` calling `show` on child `Tree a`
+//!   nodes). Fixed by threading `given` (now also returned by
+//!   `solve::solve_with_obligations`, alongside `pending`/`errors`/
+//!   `obligations`) through `check_instance`/`check_pending` and
+//!   `elaborate`'s own dictionary-resolution functions, consulting it
+//!   directly for a rigid variable (its values are already closed over
+//!   superclasses by Fix #12, so a plain `contains` suffices).
+//!
+//! Found via real code in `corpus/programs/` (`numeric/clamp-and-abs.knot`'s
+//! `clamp (-40.0) 50.0 raw` for the parser bug; `algorithms/quicksort.knot`
+//! and `multi_interface/generic-function-multi-constraint.knot` for Fix #13;
+//! `monoids/max-min-via-ord.knot` and `multi_interface/recursive-tree-
+//! show.knot` for Fix #14) — see `corpus/programs/README.md` for the rest
+//! of this round's findings.
 
 pub mod annotation;
 pub mod ast;

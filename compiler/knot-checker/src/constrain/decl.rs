@@ -557,21 +557,44 @@ fn constrain_group_chain<R>(
     let mut members = Vec::new();
     for (b, header) in group.iter().zip(headers) {
         scope.push();
+        let mut body_constraints = Vec::new();
         let typed_params: Vec<crate::ast::TypedPattern> = b
             .params
             .iter()
-            .map(|p| constrain_pattern(sub, scope, p, &mut header_constraints))
+            .map(|p| constrain_pattern(sub, scope, p, &mut body_constraints))
             .collect();
-        let typed_body = constrain_expr(sub, scope, b.body, &mut header_constraints);
+        let typed_body = constrain_expr(sub, scope, b.body, &mut body_constraints);
         scope.pop();
         let inferred = typed_params.iter().rev().fold(typed_body.ty, |acc, p| {
             sub.fresh_bound(Structure::Fn(p.ty, acc))
         });
+        // Solve the header/signature <-> inferred-type link *before*
+        // `body_constraints`, not after (Fix #13): with a signature present,
+        // `header.header_ty` is already the rigid type built by
+        // `build_declared`, but each param pattern's own type (`p.ty`, folded
+        // into `inferred` above) is still a fresh, unconnected unbound
+        // variable at this point -- `constrain_pattern` never consults the
+        // signature. If `body_constraints` (which may contain nested `let`s,
+        // per `Expr::Let`'s own recursive use of this same function) were
+        // solved first, as they were before this fix, any such nested `let`
+        // generalizing over a param-derived variable would see it as a
+        // fresh var absent from `ambient` -- since it hasn't been unified
+        // into the signature's rigid structure yet -- and wrongly treat it
+        // as newly quantifiable, dragging along whatever interface
+        // obligation it carried (e.g. `Ord`) into the nested binding's own
+        // scheme and tripping `check_ambiguous` on an ordinary zero-arg
+        // `let` like a hand-rolled quicksort's `smaller`/`larger`. Solving
+        // this `Equal` first unifies the param variable's root with the
+        // rigid one immediately, so by the time `body_constraints` runs it's
+        // already indistinguishable from `header.header_ty` itself: visible
+        // in `ambient`, correctly excluded from generalization, and already
+        // covered by this signature's own `given`.
         header_constraints.push(Constraint::Equal {
             span: b.span,
             expected: header.header_ty,
             actual: inferred,
         });
+        header_constraints.extend(body_constraints);
         // A zero-param binding's own value *is* its body; otherwise it's
         // the params folded into one `Lambda` wrapping that body -- the
         // curried `Fn` chain above, mirrored one layer up in `TExpr` shape.

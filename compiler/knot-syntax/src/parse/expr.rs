@@ -191,6 +191,18 @@ impl<'a> ParseState<'a> {
                 *self = checkpoint;
                 break;
             }
+            // A `-` shaped like binary subtraction (symmetric spacing) can never
+            // start a *new* trailing argument here -- if we let `expr_atom` try
+            // it, there is no argument to produce, only an operator for the
+            // enclosing `expr_binop_prec` to pick up via `peek_binop`. Bail out
+            // before attempting the atom so that case is reached; every other
+            // caller of `expr_atom`/`expr_atom_base` has no such fallback (they
+            // sit at the very start of a (sub)expression, e.g. right after `(`,
+            // `[`, or `=`), so a `-` there is unambiguously negation.
+            if self.peek() == Some(b'-') && self.classify_minus() == MinusKind::Subtraction {
+                *self = checkpoint;
+                break;
+            }
             match self.expr_atom() {
                 Ok(arg) => args.push(arg),
                 Err(err) if err.fatal => return Err(err),
@@ -291,7 +303,15 @@ impl<'a> ParseState<'a> {
                 Ok(Spanned::new(lit.span, Expr::StringLit(lit.node)))
             }
             Some(b'-') => match self.classify_minus() {
-                MinusKind::Negation => {
+                // `Subtraction`-shaped spacing (symmetric, e.g. both absent as in
+                // `(-40.0)`/`[-5]`, or both present) still means negation here:
+                // `expr_atom_base` only ever runs at the start of a (sub)expression
+                // -- right after `(`, `[`, `=`, a binop, etc. -- where there is no
+                // preceding operand for `-` to subtract from. The one place that
+                // spacing pattern legitimately means "stop, this is a binary
+                // operator" is `expr_app`'s trailing-argument loop, which checks
+                // for it *before* ever calling down into here.
+                MinusKind::Negation | MinusKind::Subtraction => {
                     self.bump();
                     let inner = self.expr_atom()?;
                     let span = Span::new(start.offset, inner.span.end);
@@ -306,9 +326,6 @@ impl<'a> ParseState<'a> {
                     Span::new(start.offset, start.offset),
                 )
                 .fatal()),
-                MinusKind::Subtraction => {
-                    Err(ParseError::new(ErrorKind::Expected("an expression"), Span::new(start.offset, start.offset)))
-                }
             },
             Some(b) if b.is_ascii_digit() => {
                 let lit = self.number_literal()?;
@@ -820,6 +837,61 @@ mod tests {
         let mut s = ParseState::new("f- 1");
         let e = s.expr().unwrap_err();
         assert!(e.fatal);
+    }
+
+    #[test]
+    fn negative_literal_immediately_inside_parens() {
+        // "(-40.0)" -- the `-` sits at the very start of a fresh atom (right
+        // after `(`), symmetric-spacing-wise indistinguishable from `a-b`'s
+        // own `-`, but there is no left operand here for it to subtract
+        // from. Used to be a hard "Expected an expression" parse error
+        // (found via `corpus/programs/numeric/clamp-and-abs.knot`).
+        let Expr::Negate(inner) = ex("(-40.0)") else {
+            panic!("expected Negate")
+        };
+        assert_eq!(inner.node, Expr::FloatLit(40.0));
+    }
+
+    #[test]
+    fn negative_literal_as_first_list_element() {
+        // "[-5, -6]" -- same root cause as the parens case above, just after
+        // `[` instead. The second element (after `, `, so genuinely
+        // space-before/no-space-after) already worked before this fix.
+        let Expr::List(elems) = ex("[-5, -6]") else {
+            panic!("expected List")
+        };
+        assert_eq!(elems.len(), 2);
+        assert!(matches!(elems[0].node, Expr::Negate(_)));
+        assert!(matches!(elems[1].node, Expr::Negate(_)));
+    }
+
+    #[test]
+    fn negative_literal_as_a_parenthesized_application_argument() {
+        // "f (-5)" -- an application argument that's itself a parenthesized
+        // negative literal; distinct from `negate_literal_argument`'s bare
+        // `f -1` (no parens at all).
+        let Expr::App(f, arg) = ex("f (-5)") else {
+            panic!("expected App")
+        };
+        assert_eq!(f.node, Expr::Var("f".to_string()));
+        assert!(matches!(arg.node, Expr::Negate(_)));
+    }
+
+    #[test]
+    fn subtraction_still_wins_over_negation_for_a_real_left_operand() {
+        // Fixing the parenthesized/bracketed cases above must not turn `f -
+        // g` (a trailing application argument shaped like subtraction) back
+        // into `f` applied to `(-g)` -- it's still subtraction, resolved by
+        // `expr_app`'s own trailing-argument loop backing off before ever
+        // calling into `expr_atom`.
+        assert_eq!(
+            ex("f - g"),
+            Expr::BinOp(
+                BinOp::Sub,
+                Box::new(Spanned::new(Span::new(0, 1), Expr::Var("f".to_string()))),
+                Box::new(Spanned::new(Span::new(4, 5), Expr::Var("g".to_string())))
+            )
+        );
     }
 
     #[test]

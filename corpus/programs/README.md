@@ -124,40 +124,52 @@ same root causes, different fixtures: `errors/parse-pipeline.knot`-style
 own authoring mistake, not a bug — `addFive :: Int -> Int -> Int`
 genuinely still needs a second argument before the result is a plain `Int`
 a `|>` stage downstream can accept; fixed the fixture, not the checker. The
-other 5 trace back to three distinct root causes, **not yet fixed**:
+other 5 traced back to three distinct root causes, all now fixed:
 
-8. **Unary negation isn't recognized at the very start of a parenthesized
-   or bracketed (sub)expression** — `knot-syntax`'s own `classify_minus`
-   (`parse/expr.rs`) answers `Subtraction` for symmetric spacing (both
-   absent, as in `(-40.0)` or `[-5, -6]`'s first element) regardless of
-   *where* the `-` sits, even immediately after `(` or `[` where no left
-   operand could possibly exist for it to subtract from. Hard "Expected an
-   expression" parse errors on `f (-5)`, `[-1, -2, -3]`, any
-   parenthesized/bracketed leading negative literal. Found via
-   `numeric/clamp-and-abs.knot`'s `clamp (-40.0) 50.0 raw`.
-9. **A signed function's header-vs-inferred-type `Equal` constraint solves
-   *after* its own body, not before** — so a nested `let` inside the body
-   (a hand-rolled quicksort's `smaller`/`larger`, or any similar
-   locally-filtered/derived binding) generalizes over a parameter-derived
-   variable that hasn't been unified into the enclosing signature's rigid
-   type yet, at that point in solving. It looks like a fresh, ambient-free,
-   freely quantifiable variable, so its interface obligation (`Ord`, from
-   `filter`'s own comparison) gets dragged into the *nested* binding's own
-   scheme instead of correctly staying tied to the already-`given`-covered
-   rigid one — misfiring `AmbiguousConstraint` on perfectly ordinary code.
-   Hits `algorithms/quicksort.knot` and
+8. **Fixed (`knot-syntax`, no numbered `Fix #N` — that convention is
+   `knot-checker/src/lib.rs`'s own). Unary negation wasn't recognized at
+   the very start of a parenthesized or bracketed (sub)expression** —
+   `classify_minus`'s whitespace-only heuristic answered `Subtraction` for
+   symmetric spacing (both absent, as in `(-40.0)` or `[-5, -6]`'s first
+   element) regardless of *where* the `-` sat, even immediately after `(`
+   or `[` where no left operand could possibly exist for it to subtract
+   from. Hard "Expected an expression" parse errors on `f (-5)`,
+   `[-1, -2, -3]`, any parenthesized/bracketed leading negative literal.
+   Found via `numeric/clamp-and-abs.knot`'s `clamp (-40.0) 50.0 raw`. Fixed
+   by moving the `Subtraction`-shaped-spacing check into `expr_app`'s own
+   trailing-argument loop (the one place a real preceding operand exists to
+   back off to) and treating that spacing as negation everywhere else.
+9. **Fixed (Fix #13). A signed function's header-vs-inferred-type `Equal`
+   constraint solved *after* its own body, not before** — so a nested
+   `let` inside the body (a hand-rolled quicksort's `smaller`/`larger`, or
+   any similar locally-filtered/derived binding) generalized over a
+   parameter-derived variable that hadn't been unified into the enclosing
+   signature's rigid type yet, at that point in solving. It looked like a
+   fresh, ambient-free, freely quantifiable variable, so its interface
+   obligation (`Ord`, from `filter`'s own comparison) got dragged into the
+   *nested* binding's own scheme instead of correctly staying tied to the
+   already-`given`-covered rigid one — misfiring `AmbiguousConstraint` on
+   perfectly ordinary code. Hit `algorithms/quicksort.knot` and
    `multi_interface/generic-function-multi-constraint.knot` (its own `let
-   biggest = ...` inside `rankAndShow`).
-10. **A parametric instance's own recursive `requires` check has no way to
-    resolve a bare rigid variable** — `interface::instance::check_instance`'s
-    recursion into e.g. `instance Ord a => Semigroup (Max a)`'s own `Ord`
-    requirement on its argument hits a rigid `a` (a signature's or
-    instance's own type variable), which `Substitution::resolve_structure`
-    always answers `None` for by design — so the check answers `false`
-    unconditionally no matter how thoroughly `given` already established
-    the interface, misreporting `NoInstance` for the *outer* interface
-    (`Semigroup`, not `Ord`). This also breaks self-referential parametric
-    instances recursing into their own element type (`instance Show a =>
-    Show (Tree a)` calling `show` on child nodes). Hits
-    `monoids/max-min-via-ord.knot` and
-    `multi_interface/recursive-tree-show.knot`.
+   biggest = ...` inside `rankAndShow`) — both now pass. Fixed in
+   `constrain::decl::constrain_group_chain` by solving the header `Equal`
+   before the body's own constraints.
+10. **Fixed (Fix #14). A parametric instance's own recursive `requires`
+    check had no way to resolve a bare rigid variable** —
+    `interface::instance::check_instance`'s recursion into e.g. `instance
+    Ord a => Semigroup (Max a)`'s own `Ord` requirement on its argument hit
+    a rigid `a` (a signature's or instance's own type variable), which
+    `Substitution::resolve_structure` always answers `None` for by design
+    — so the check answered `false` unconditionally no matter how
+    thoroughly `given` already established the interface, misreporting
+    `NoInstance` for the *outer* interface (`Semigroup`, not `Ord`). This
+    also broke self-referential parametric instances recursing into their
+    own element type (`instance Show a => Show (Tree a)` calling `show` on
+    child nodes). Hit `monoids/max-min-via-ord.knot` and
+    `multi_interface/recursive-tree-show.knot` — both now pass. Fixed by
+    threading `given` (now also returned from `solve::
+    solve_with_obligations`) through `check_instance`/`check_pending` and
+    `elaborate`'s own dictionary-resolution functions.
+
+After all three fixes, 56 of 62 pass; the remaining 6 are exactly the
+Round-1-numbered failures above, unchanged.

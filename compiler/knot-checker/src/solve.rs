@@ -125,24 +125,37 @@ pub fn solve(
     env: &mut SchemeEnv,
     constraint: &Constraint,
 ) -> (Vec<PendingInstance>, Vec<TypeError>) {
-    let (pending, errors, _obligations) = solve_with_obligations(sub, env, constraint);
+    let (pending, errors, _obligations, _given) = solve_with_obligations(sub, env, constraint);
     (pending, errors)
 }
 
-/// Same as `solve`, plus a side-table Fix #3's Stage B
-/// (`elaborate::elaborate_module`) needs: for every `Lookup`/`LookupLocal`
+/// Same as `solve`, plus two extras: a side-table Fix #3's Stage B
+/// (`elaborate::elaborate_module`) needs -- for every `Lookup`/`LookupLocal`
 /// reference resolved along the way, its own `expected` `TypeVarId` (also
 /// that reference's `TExpr::Var`/`TExpr::Ctor` node's own `ty` — see
 /// `ast.rs`'s own doc comment on why that's already a unique key with
 /// nothing extra needed) mapped to exactly the `(interface, TypeVarId)`
-/// pairs its scheme's instantiation produced. Split out from `solve` itself
+/// pairs its scheme's instantiation produced -- and the final `given` map
+/// itself (every rigid variable's own directly-and-transitively-implied
+/// interfaces, per `insert_given_with_superclasses`), which `interface::
+/// instance::check_instance`'s own recursive per-argument checks need too
+/// (Fix #13): a *concrete* pending obligation like `Semigroup (Max a)` still
+/// has a bare rigid `a` buried inside it once `check_instance` recurses into
+/// `Max`'s own `requires`, and that rigid `a` can only ever be resolved by
+/// consulting `given`, never by `sub.resolve_structure` (a `Rigid` slot has
+/// no structure to resolve, by design). Split out from `solve` itself
 /// (rather than always building it) purely so `solve`'s own ~15 existing
-/// callers, which have no use for it, don't have to change at all.
+/// callers, which have no use for either, don't have to change at all.
 pub fn solve_with_obligations(
     sub: &mut Substitution,
     env: &mut SchemeEnv,
     constraint: &Constraint,
-) -> (Vec<PendingInstance>, Vec<TypeError>, ObligationMap) {
+) -> (
+    Vec<PendingInstance>,
+    Vec<TypeError>,
+    ObligationMap,
+    HashMap<TypeVarId, HashSet<String>>,
+) {
     let mut ambient = Vec::new();
     let mut given: HashMap<TypeVarId, HashSet<String>> = HashMap::new();
     let mut local_env: HashMap<TypeVarId, Scheme> = HashMap::new();
@@ -180,7 +193,7 @@ pub fn solve_with_obligations(
             unresolved.push(p);
         }
     }
-    (unresolved, errors, obligations)
+    (unresolved, errors, obligations, given)
 }
 
 /// Records `var` as `given interface`, *and* every superclass `interface`

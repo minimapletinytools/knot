@@ -13,13 +13,11 @@
 //! `Num`. See `ty::Structure::VarApp`'s own doc comment for why that needs
 //! no new machinery beyond the two `Structure` variants themselves.
 //!
-//! Also not seeded: `Eq`/`Ord`/`Show` for `List`/`Maybe`/`Result` are
-//! registered as head-level instances (so `List Int == List Int`-shaped
-//! *concrete* uses resolve), but — per `interface::instance`'s own doc
-//! comment — this table never checks a parametric instance's own element
-//! constraint recursively, so e.g. `List SomeTypeWithNoEqInstance` would
-//! incorrectly be accepted as `Eq`-able. A real gap, inherited from TM6,
-//! not introduced here.
+//! `Eq`/`Ord`/`Show` for `List`/`Maybe`/`Result` are registered with a
+//! `requires` on each own element position, so `interface::instance::
+//! check_instance`'s recursive check (Fix #4) correctly rejects e.g. `List
+//! SomeTypeWithNoEqInstance` rather than inheriting `List`'s own head-level
+//! instance unconditionally.
 
 use knot_canonical::ast::Ref;
 
@@ -508,7 +506,13 @@ mod tests {
         let (tree, _members) = constrain_module(&mut sub, &cs);
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
-        check_pending(&mut sub, &table, pending, &mut errors);
+        check_pending(
+            &mut sub,
+            &table,
+            &std::collections::HashMap::new(),
+            pending,
+            &mut errors,
+        );
         assert!(errors.is_empty(), "{errors:?}");
     }
 
@@ -520,7 +524,13 @@ mod tests {
         let (tree, _members) = constrain_module(&mut sub, &cs);
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
-        check_pending(&mut sub, &table, pending, &mut errors);
+        check_pending(
+            &mut sub,
+            &table,
+            &std::collections::HashMap::new(),
+            pending,
+            &mut errors,
+        );
         assert!(errors.is_empty(), "{errors:?}");
     }
 
@@ -537,7 +547,13 @@ mod tests {
         let (tree, _members) = constrain_module(&mut sub, &cs);
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
-        check_pending(&mut sub, &table, pending, &mut errors);
+        check_pending(
+            &mut sub,
+            &table,
+            &std::collections::HashMap::new(),
+            pending,
+            &mut errors,
+        );
         assert!(errors.is_empty(), "{errors:?}");
 
         let scheme = env
@@ -588,7 +604,13 @@ mod tests {
         let (tree, _members) = constrain_module(&mut sub, &cs);
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
-        check_pending(&mut sub, &table, pending, &mut errors);
+        check_pending(
+            &mut sub,
+            &table,
+            &std::collections::HashMap::new(),
+            pending,
+            &mut errors,
+        );
         assert!(errors.is_empty(), "{errors:?}");
 
         let scheme = env
@@ -619,7 +641,13 @@ mod tests {
         let (tree, _members) = constrain_module(&mut sub, &cs);
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
-        check_pending(&mut sub, &table, pending, &mut errors);
+        check_pending(
+            &mut sub,
+            &table,
+            &std::collections::HashMap::new(),
+            pending,
+            &mut errors,
+        );
         assert!(errors.is_empty(), "{errors:?}");
 
         let n_scheme = env
@@ -658,7 +686,13 @@ mod tests {
         let (tree, _members) = constrain_module(&mut sub, &cs);
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
-        check_pending(&mut sub, &table, pending, &mut errors);
+        check_pending(
+            &mut sub,
+            &table,
+            &std::collections::HashMap::new(),
+            pending,
+            &mut errors,
+        );
         assert!(errors.iter().any(|e| matches!(
             &e.kind,
             crate::error::TypeErrorKind::NoInstance { interface } if interface == "Collection"
@@ -681,7 +715,13 @@ mod tests {
         let (tree, _members) = constrain_module(&mut sub, &cs);
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
-        check_pending(&mut sub, &table, pending, &mut errors);
+        check_pending(
+            &mut sub,
+            &table,
+            &std::collections::HashMap::new(),
+            pending,
+            &mut errors,
+        );
         assert!(errors.is_empty(), "{errors:?}");
 
         let int_ty = app0(&mut sub, "Int");
@@ -717,7 +757,13 @@ mod tests {
         let (tree, _members) = constrain_module(&mut sub, &cs);
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
-        check_pending(&mut sub, &table, pending, &mut errors);
+        check_pending(
+            &mut sub,
+            &table,
+            &std::collections::HashMap::new(),
+            pending,
+            &mut errors,
+        );
         assert!(errors.is_empty(), "{errors:?}");
 
         let scheme = env
@@ -745,7 +791,13 @@ mod tests {
         let (tree, _members) = constrain_module(&mut sub, &cs);
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
-        check_pending(&mut sub, &table, pending, &mut errors);
+        check_pending(
+            &mut sub,
+            &table,
+            &std::collections::HashMap::new(),
+            pending,
+            &mut errors,
+        );
         assert!(errors
             .iter()
             .any(|e| matches!(&e.kind, crate::error::TypeErrorKind::NoInstance { interface } if interface == "Num")));
@@ -759,7 +811,13 @@ mod tests {
         let (tree, _members) = constrain_module(&mut sub, &cs);
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
-        check_pending(&mut sub, &table, pending, &mut errors);
+        check_pending(
+            &mut sub,
+            &table,
+            &std::collections::HashMap::new(),
+            pending,
+            &mut errors,
+        );
         assert!(errors.is_empty(), "{errors:?}");
     }
 
@@ -771,7 +829,13 @@ mod tests {
         let (tree, _members) = constrain_module(&mut sub, &cs);
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
-        check_pending(&mut sub, &table, pending, &mut errors);
+        check_pending(
+            &mut sub,
+            &table,
+            &std::collections::HashMap::new(),
+            pending,
+            &mut errors,
+        );
         assert!(errors.is_empty(), "{errors:?}");
     }
 
@@ -785,7 +849,13 @@ mod tests {
         let (tree, _members) = constrain_module(&mut sub, &cs);
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
-        check_pending(&mut sub, &table, pending, &mut errors);
+        check_pending(
+            &mut sub,
+            &table,
+            &std::collections::HashMap::new(),
+            pending,
+            &mut errors,
+        );
         assert!(errors.is_empty(), "{errors:?}");
     }
 }

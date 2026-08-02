@@ -39,7 +39,7 @@
 //! — `resolve_one` checks `check_instance` *before* ever calling
 //! `resolve_dictionary`, specifically so it can tell these two very
 //! different reasons for "no `Dictionary`" apart.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use knot_syntax::span::Span;
 
@@ -61,12 +61,13 @@ use crate::var::{Substitution, TypeVarId};
 pub fn resolve_dictionary(
     sub: &mut Substitution,
     table: &InstanceTable,
+    given: &HashMap<TypeVarId, HashSet<String>>,
     interface: &str,
     ty: TypeVarId,
     span: Span,
 ) -> Result<Dictionary, TypeError> {
     match sub.resolve_structure(ty) {
-        Some(Structure::App(head, _)) if check_instance(sub, table, interface, ty) => {
+        Some(Structure::App(head, _)) if check_instance(sub, table, given, interface, ty) => {
             Ok(Dictionary {
                 interface: interface.to_string(),
                 head,
@@ -92,12 +93,13 @@ pub fn resolve_dictionary(
 pub fn resolve_pending(
     sub: &mut Substitution,
     table: &InstanceTable,
+    given: &HashMap<TypeVarId, HashSet<String>>,
     pending: Vec<PendingInstance>,
 ) -> (Vec<Dictionary>, Vec<TypeError>) {
     let mut dictionaries = Vec::new();
     let mut errors = Vec::new();
     for p in pending {
-        match resolve_dictionary(sub, table, &p.interface, p.ty, p.span) {
+        match resolve_dictionary(sub, table, given, &p.interface, p.ty, p.span) {
             Ok(d) => dictionaries.push(d),
             Err(e) => errors.push(e),
         }
@@ -116,6 +118,7 @@ pub fn resolve_pending(
 pub fn elaborate_module(
     sub: &mut Substitution,
     table: &InstanceTable,
+    given: &HashMap<TypeVarId, HashSet<String>>,
     obligations: &ObligationMap,
     members: &[LetMember],
 ) -> (
@@ -128,6 +131,7 @@ pub fn elaborate_module(
         walk_expr(
             sub,
             table,
+            given,
             obligations,
             &m.elaborated_body,
             &mut resolved,
@@ -149,9 +153,11 @@ pub fn elaborate_module(
 /// (no `Ref` to key one by — see `ObligationResolution::Structural`'s own
 /// doc comment) is correctly told apart from a genuine `NoInstance`,
 /// rather than the latter incorrectly swallowing the former.
+#[allow(clippy::too_many_arguments)]
 fn resolve_one(
     sub: &mut Substitution,
     table: &InstanceTable,
+    given: &HashMap<TypeVarId, HashSet<String>>,
     interface: &str,
     ty: TypeVarId,
     span: Span,
@@ -166,7 +172,7 @@ fn resolve_one(
         resolved.insert(key, ObligationResolution::StillAbstract);
         return;
     }
-    if !check_instance(sub, table, interface, ty) {
+    if !check_instance(sub, table, given, interface, ty) {
         errors.push(TypeError {
             span,
             kind: TypeErrorKind::NoInstance {
@@ -179,7 +185,7 @@ fn resolve_one(
     // can only still fail here for one reason: `ty` isn't `Structure::App`-
     // headed, i.e. it's a verified-but-un-representable structural
     // obligation, never a real NoInstance.
-    match resolve_dictionary(sub, table, interface, ty, span) {
+    match resolve_dictionary(sub, table, given, interface, ty, span) {
         Ok(d) => {
             resolved.insert(key, ObligationResolution::Concrete(d));
         }
@@ -198,13 +204,14 @@ fn resolve_one(
 fn walk_expr(
     sub: &mut Substitution,
     table: &InstanceTable,
+    given: &HashMap<TypeVarId, HashSet<String>>,
     obligations: &ObligationMap,
     typed: &TypedExpr,
     resolved: &mut HashMap<(String, TypeVarId), ObligationResolution>,
     errors: &mut Vec<TypeError>,
 ) {
     let mut recurse = |e: &TypedExpr, resolved: &mut _, errors: &mut _| {
-        walk_expr(sub, table, obligations, e, resolved, errors)
+        walk_expr(sub, table, given, obligations, e, resolved, errors)
     };
     match &typed.node {
         TExpr::IntLit(_) | TExpr::FloatLit(_) | TExpr::StringLit(_) | TExpr::Unit | TExpr::Hole => {
@@ -212,7 +219,9 @@ fn walk_expr(
         TExpr::Var(_) | TExpr::Ctor(_) => {
             if let Some(pairs) = obligations.get(&typed.ty) {
                 for (interface, ty) in pairs.clone() {
-                    resolve_one(sub, table, &interface, ty, typed.span, resolved, errors);
+                    resolve_one(
+                        sub, table, given, &interface, ty, typed.span, resolved, errors,
+                    );
                 }
             }
         }
@@ -225,13 +234,17 @@ fn walk_expr(
             recurse(l, resolved, errors);
             recurse(r, resolved, errors);
             for (interface, ty) in node_obligations {
-                resolve_one(sub, table, interface, *ty, typed.span, resolved, errors);
+                resolve_one(
+                    sub, table, given, interface, *ty, typed.span, resolved, errors,
+                );
             }
         }
         TExpr::Negate(inner, node_obligations) => {
             recurse(inner, resolved, errors);
             for (interface, ty) in node_obligations {
-                resolve_one(sub, table, interface, *ty, typed.span, resolved, errors);
+                resolve_one(
+                    sub, table, given, interface, *ty, typed.span, resolved, errors,
+                );
             }
         }
         TExpr::If(c, t, e) => {
@@ -307,7 +320,8 @@ mod tests {
         table.insert_builtin("Num", Ref::Builtin("Int".to_string()), vec![]);
         let ty = sub.fresh_bound(Structure::App(Ref::Builtin("Int".to_string()), vec![]));
 
-        let dict = resolve_dictionary(&mut sub, &table, "Num", ty, span()).unwrap();
+        let dict =
+            resolve_dictionary(&mut sub, &table, &HashMap::new(), "Num", ty, span()).unwrap();
         assert_eq!(
             dict,
             Dictionary {
@@ -323,7 +337,8 @@ mod tests {
         let table = InstanceTable::new();
         let ty = sub.fresh_bound(Structure::App(Ref::Builtin("String".to_string()), vec![]));
 
-        let err = resolve_dictionary(&mut sub, &table, "Num", ty, span()).unwrap_err();
+        let err =
+            resolve_dictionary(&mut sub, &table, &HashMap::new(), "Num", ty, span()).unwrap_err();
         assert!(matches!(&err.kind, TypeErrorKind::NoInstance { interface } if interface == "Num"));
     }
 
@@ -333,7 +348,8 @@ mod tests {
         let table = InstanceTable::new();
         let ty = sub.fresh_unbound();
 
-        let err = resolve_dictionary(&mut sub, &table, "Eq", ty, span()).unwrap_err();
+        let err =
+            resolve_dictionary(&mut sub, &table, &HashMap::new(), "Eq", ty, span()).unwrap_err();
         assert!(matches!(&err.kind, TypeErrorKind::NoInstance { .. }));
     }
 
@@ -357,7 +373,7 @@ mod tests {
                 ty: string_ty,
             },
         ];
-        let (dictionaries, errors) = resolve_pending(&mut sub, &table, pending);
+        let (dictionaries, errors) = resolve_pending(&mut sub, &table, &HashMap::new(), pending);
         assert_eq!(dictionaries.len(), 1);
         assert_eq!(errors.len(), 1);
     }
@@ -370,13 +386,14 @@ mod tests {
         let cs = decls("check :: Int -> Int -> Bool\ncheck x y = x == y\n");
         let (tree, members) = crate::constrain::decl::constrain_module(&mut sub, &cs);
         let mut env = crate::solve::SchemeEnv::new();
-        let (_pending, errors, obligations) =
+        let (_pending, errors, obligations, given) =
             crate::solve::solve_with_obligations(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
 
         let mut table = InstanceTable::new();
         table.insert_builtin("Eq", Ref::Builtin("Int".to_string()), vec![]);
-        let (resolved, elab_errors) = elaborate_module(&mut sub, &table, &obligations, &members);
+        let (resolved, elab_errors) =
+            elaborate_module(&mut sub, &table, &given, &obligations, &members);
         assert!(elab_errors.is_empty(), "{elab_errors:?}");
 
         let check_member = members.iter().find(|m| m.name == "check").unwrap();
@@ -402,12 +419,13 @@ mod tests {
         let cs = decls("useEq x y = x == y\n");
         let (tree, members) = crate::constrain::decl::constrain_module(&mut sub, &cs);
         let mut env = crate::solve::SchemeEnv::new();
-        let (_pending, errors, obligations) =
+        let (_pending, errors, obligations, given) =
             crate::solve::solve_with_obligations(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
 
         let table = InstanceTable::new();
-        let (resolved, elab_errors) = elaborate_module(&mut sub, &table, &obligations, &members);
+        let (resolved, elab_errors) =
+            elaborate_module(&mut sub, &table, &given, &obligations, &members);
         assert!(elab_errors.is_empty(), "{elab_errors:?}");
 
         let use_eq_member = members.iter().find(|m| m.name == "useEq").unwrap();
@@ -431,13 +449,14 @@ mod tests {
         let cs = decls("f x y = x == y\nresult = f 1 2\n");
         let (tree, members) = crate::constrain::decl::constrain_module(&mut sub, &cs);
         let mut env = crate::solve::SchemeEnv::new();
-        let (_pending, errors, obligations) =
+        let (_pending, errors, obligations, given) =
             crate::solve::solve_with_obligations(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
 
         let mut table = InstanceTable::new();
         table.insert_builtin("Eq", Ref::Builtin("Int".to_string()), vec![]);
-        let (resolved, elab_errors) = elaborate_module(&mut sub, &table, &obligations, &members);
+        let (resolved, elab_errors) =
+            elaborate_module(&mut sub, &table, &given, &obligations, &members);
         assert!(elab_errors.is_empty(), "{elab_errors:?}");
 
         let result_member = members.iter().find(|m| m.name == "result").unwrap();
@@ -479,13 +498,14 @@ mod tests {
         let cs = decls("f x y = x == y\nresult = f (1, 3) (2, 4)\n");
         let (tree, members) = crate::constrain::decl::constrain_module(&mut sub, &cs);
         let mut env = crate::solve::SchemeEnv::new();
-        let (_pending, errors, obligations) =
+        let (_pending, errors, obligations, given) =
             crate::solve::solve_with_obligations(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
 
         let mut table = InstanceTable::new();
         table.insert_builtin("Eq", Ref::Builtin("Int".to_string()), vec![]);
-        let (resolved, elab_errors) = elaborate_module(&mut sub, &table, &obligations, &members);
+        let (resolved, elab_errors) =
+            elaborate_module(&mut sub, &table, &given, &obligations, &members);
         assert!(elab_errors.is_empty(), "{elab_errors:?}");
 
         let result_member = members.iter().find(|m| m.name == "result").unwrap();
@@ -522,12 +542,13 @@ mod tests {
             crate::solve::SchemeKey::Builtin("EQ".to_string()),
             crate::ty::Scheme::monomorphic(ordering_ty),
         );
-        let (_pending, errors, obligations) =
+        let (_pending, errors, obligations, given) =
             crate::solve::solve_with_obligations(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
 
         let table = InstanceTable::new(); // no Num instance for Ordering
-        let (_resolved, elab_errors) = elaborate_module(&mut sub, &table, &obligations, &members);
+        let (_resolved, elab_errors) =
+            elaborate_module(&mut sub, &table, &given, &obligations, &members);
         assert!(elab_errors.iter().any(
             |e| matches!(&e.kind, TypeErrorKind::NoInstance { interface } if interface == "Num")
         ));

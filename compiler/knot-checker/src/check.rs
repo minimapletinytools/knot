@@ -43,7 +43,7 @@ use knot_syntax::span::Spanned;
 use crate::constrain::decl::{constrain_module, seed_user_constructors};
 use crate::error::TypeError;
 use crate::interface::instance::{build_instance_table, check_pending};
-use crate::solve::solve;
+use crate::solve::solve_with_obligations;
 
 /// Type-checks one already-canonicalized module in full: seeds the real
 /// prelude (built-in values *and* instances), seeds every user-defined
@@ -72,10 +72,11 @@ pub fn check_module(decls: &[Spanned<CDecl>]) -> Vec<TypeError> {
     table.merge_from(prelude_table);
 
     let (tree, _members) = constrain_module(&mut sub, decls);
-    let (pending, solve_errors) = solve(&mut sub, &mut env, &tree);
+    let (pending, solve_errors, _obligations, given) =
+        solve_with_obligations(&mut sub, &mut env, &tree);
     errors.extend(solve_errors);
 
-    check_pending(&mut sub, &table, pending, &mut errors);
+    check_pending(&mut sub, &table, &given, pending, &mut errors);
 
     errors
 }
@@ -182,6 +183,75 @@ mod tests {
             "    Box x -> f x z\n",
             "  filter p b = b\n",
             "  length b = 1\n",
+        ));
+        let errors = check_module(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn a_nested_let_over_a_rigid_ord_constrained_parameter_is_not_ambiguous() {
+        // Fix #13: a hand-rolled quicksort's `smaller`/`larger`, each a
+        // zero-arg `let`-binding built from a comparison against the
+        // enclosing rigid `a`. Used to wrongly fire `AmbiguousConstraint`
+        // because the header-vs-inferred-type `Equal` constraint solved
+        // *after* the body, so `xs`'s pattern variable still looked like a
+        // fresh, unconnected (thus generalizable) variable at the point
+        // `smaller`/`larger` themselves were generalized.
+        let cs = decls(concat!(
+            "quicksort :: Ord a => List a -> List a\n",
+            "quicksort xs = case xs of\n",
+            "  [] -> []\n",
+            "  pivot : rest ->\n",
+            "    let\n",
+            "        smaller = filter (\\x -> x < pivot) rest\n",
+            "        larger = filter (\\x -> x >= pivot) rest\n",
+            "    in\n",
+            "    quicksort smaller <> (pivot : quicksort larger)\n",
+        ));
+        let errors = check_module(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn a_parametric_instances_own_requires_resolves_against_a_rigid_given_argument() {
+        // Fix #14: `Max a`'s own `Semigroup` instance requires `Ord` on its
+        // argument -- when `maximumOf` uses `<>` on `Max a`-typed values
+        // under nothing but `Ord a =>`, `check_instance`'s recursive check
+        // into that argument used to answer `false` unconditionally for the
+        // bare rigid `a` (no `Structure` for a `Rigid` slot to resolve to),
+        // regardless of `given`, misreporting `NoInstance("Semigroup")`.
+        let cs = decls(concat!(
+            "type Max a = Max a\n",
+            "instance Ord a => Semigroup (Max a) where\n",
+            "  (<>) x y = case (x, y) of\n",
+            "    (Max a, Max b) -> if a > b then x else y\n",
+            "unwrapMax :: Max a -> a\n",
+            "unwrapMax m = case m of\n",
+            "  Max a -> a\n",
+            "maximumOf :: Ord a => a -> List a -> a\n",
+            "maximumOf first rest = unwrapMax (foldl (\\acc x -> acc <> Max x) (Max first) rest)\n",
+        ));
+        let errors = check_module(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn a_recursive_parametric_instance_resolves_its_own_element_constraint() {
+        // Same root cause as Fix #14 above, but self-referential: `Show
+        // (Tree a)`'s own body recursively calls `show` on child `Tree a`
+        // nodes, which needs the *same* instance's own table entry to
+        // already resolve against the still-rigid, `given`-only element
+        // type `a` it's defined in terms of.
+        let cs = decls(concat!(
+            "type Tree a = Leaf | Node (Tree a) a (Tree a)\n",
+            "instance Show a => Show (Tree a) where\n",
+            "  show t = case t of\n",
+            "    Leaf -> \".\"\n",
+            "    Node l x r -> \"(\" <> show l <> \" \" <> show x <> \" \" <> show r <> \")\"\n",
+            "sample :: Tree Int\n",
+            "sample = Node (Node Leaf 1 Leaf) 2 (Node Leaf 3 Leaf)\n",
+            "sampleShown :: String\n",
+            "sampleShown = show sample\n",
         ));
         let errors = check_module(&cs);
         assert!(errors.is_empty(), "{errors:?}");

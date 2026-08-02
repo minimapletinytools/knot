@@ -37,7 +37,7 @@
 //! whose head is still unresolved (a genuine kind error, spec §6.3/§6.4) is
 //! never confirmed by anything — see `check_instance`'s own doc comment.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use knot_canonical::ast::{CConstraint, CDecl, CType, Ref};
 use knot_syntax::span::Spanned;
@@ -266,18 +266,35 @@ pub fn build_instance_table(decls: &[Spanned<CDecl>]) -> (InstanceTable, Vec<Typ
 /// constructor yet) answers `false` here too, but see `check_pending`'s own
 /// doc comment on why *reporting* an error still needs to tell that case
 /// apart from a genuine "no."
+///
+/// **A bare rigid variable defers to `given` first** (Fix #13): a *concrete*
+/// obligation like `Semigroup (Max a)` recurses, via `Max`'s own `requires`,
+/// into a check of `Ord` against `a` itself -- and `a`, being a signature's
+/// own rigid variable, has no `Structure` for `sub.resolve_structure` to
+/// ever return (by design, see `var.rs`'s own doc comment), so without this
+/// check every such recursive step answered `false` unconditionally, no
+/// matter how thoroughly the enclosing signature/instance context already
+/// established `Ord a`. `given`'s own values are already closed over
+/// superclasses at insertion time (`insert_given_with_superclasses`), so a
+/// plain `contains` here is enough -- no separate superclass walk needed.
 pub fn check_instance(
     sub: &mut Substitution,
     table: &InstanceTable,
+    given: &HashMap<TypeVarId, HashSet<String>>,
     interface: &str,
     ty: TypeVarId,
 ) -> bool {
+    if sub.is_rigid(ty) {
+        let root = sub.find(ty);
+        return given
+            .get(&root)
+            .is_some_and(|interfaces| interfaces.contains(interface));
+    }
     match sub.resolve_structure(ty) {
         Some(Structure::App(head, args)) => match table.entry(interface, &head) {
-            Some(entry) => entry
-                .requires
-                .iter()
-                .all(|(pos, req_interface)| check_instance(sub, table, req_interface, args[*pos])),
+            Some(entry) => entry.requires.iter().all(|(pos, req_interface)| {
+                check_instance(sub, table, given, req_interface, args[*pos])
+            }),
             None => false,
         },
         Some(Structure::Ctor(head)) => table.has_instance(interface, &head),
@@ -288,10 +305,10 @@ pub fn check_instance(
         // `Num` instance through the recursion.
         Some(Structure::Tuple(elems)) if matches!(interface, "Eq" | "Ord" | "Show") => elems
             .iter()
-            .all(|e| check_instance(sub, table, interface, *e)),
+            .all(|e| check_instance(sub, table, given, interface, *e)),
         Some(Structure::Record(fields, _)) if matches!(interface, "Eq" | "Ord" | "Show") => fields
             .values()
-            .all(|f| check_instance(sub, table, interface, *f)),
+            .all(|f| check_instance(sub, table, given, interface, *f)),
         // One value, trivially all three.
         Some(Structure::Unit) => matches!(interface, "Eq" | "Ord" | "Show"),
         _ => false,
@@ -306,16 +323,21 @@ pub fn check_instance(
 /// concrete head) is left alone instead: that's not this obligation's
 /// fault to report, and for the constructor-variable case specifically
 /// it's a kind error this crate doesn't report yet (see `ty::Structure::
-/// VarApp`'s own doc comment), not a missing-instance one.
+/// VarApp`'s own doc comment), not a missing-instance one. `given` is
+/// `solve::solve_with_obligations`'s own final map, needed so `check_instance`
+/// can resolve a rigid variable buried inside an otherwise-concrete `ty`
+/// (Fix #13) -- pass `&HashMap::new()` for a caller with no rigid variables
+/// in play at all.
 pub fn check_pending(
     sub: &mut Substitution,
     table: &InstanceTable,
+    given: &HashMap<TypeVarId, HashSet<String>>,
     pending: Vec<PendingInstance>,
     errors: &mut Vec<TypeError>,
 ) {
     for p in pending {
         let is_resolved = sub.resolve_structure(p.ty).is_some();
-        if is_resolved && !check_instance(sub, table, &p.interface, p.ty) {
+        if is_resolved && !check_instance(sub, table, given, &p.interface, p.ty) {
             errors.push(TypeError {
                 span: p.span,
                 kind: TypeErrorKind::NoInstance {
@@ -469,7 +491,7 @@ mod tests {
             ty,
         }];
         let mut errors = Vec::new();
-        check_pending(&mut sub, &table, pending, &mut errors);
+        check_pending(&mut sub, &table, &HashMap::new(), pending, &mut errors);
         assert!(errors.iter().any(
             |e| matches!(&e.kind, TypeErrorKind::NoInstance { interface } if interface == "Num")
         ));
@@ -487,7 +509,7 @@ mod tests {
             ty,
         }];
         let mut errors = Vec::new();
-        check_pending(&mut sub, &table, pending, &mut errors);
+        check_pending(&mut sub, &table, &HashMap::new(), pending, &mut errors);
         assert!(errors.is_empty(), "{errors:?}");
     }
 
@@ -503,7 +525,7 @@ mod tests {
             ty,
         }];
         let mut errors = Vec::new();
-        check_pending(&mut sub, &table, pending, &mut errors);
+        check_pending(&mut sub, &table, &HashMap::new(), pending, &mut errors);
         assert!(errors.is_empty(), "{errors:?}");
     }
 
@@ -518,7 +540,7 @@ mod tests {
             ty,
         }];
         let mut errors = Vec::new();
-        check_pending(&mut sub, &table, pending, &mut errors);
+        check_pending(&mut sub, &table, &HashMap::new(), pending, &mut errors);
         assert!(errors.iter().any(
             |e| matches!(&e.kind, TypeErrorKind::NoInstance { interface } if interface == "Collection")
         ));
@@ -538,7 +560,7 @@ mod tests {
             ty,
         }];
         let mut errors = Vec::new();
-        check_pending(&mut sub, &table, pending, &mut errors);
+        check_pending(&mut sub, &table, &HashMap::new(), pending, &mut errors);
         assert!(errors.is_empty());
     }
 
@@ -553,7 +575,7 @@ mod tests {
             ty,
         }];
         let mut errors = Vec::new();
-        check_pending(&mut sub, &table, pending, &mut errors);
+        check_pending(&mut sub, &table, &HashMap::new(), pending, &mut errors);
         assert!(errors.is_empty());
     }
 
@@ -563,7 +585,13 @@ mod tests {
         let table = InstanceTable::new();
         let ty = sub.fresh_bound(Structure::Tuple(vec![]));
         for interface in ["Eq", "Ord", "Show"] {
-            assert!(check_instance(&mut sub, &table, interface, ty));
+            assert!(check_instance(
+                &mut sub,
+                &table,
+                &HashMap::new(),
+                interface,
+                ty
+            ));
         }
     }
 
@@ -573,7 +601,13 @@ mod tests {
         let table = InstanceTable::new();
         let a = sub.fresh_unbound();
         let fn_ty = sub.fresh_bound(Structure::Fn(a, a));
-        assert!(!check_instance(&mut sub, &table, "Eq", fn_ty));
+        assert!(!check_instance(
+            &mut sub,
+            &table,
+            &HashMap::new(),
+            "Eq",
+            fn_ty
+        ));
     }
 
     #[test]
@@ -585,10 +619,22 @@ mod tests {
         let weird_ty = sub.fresh_bound(Structure::App(Ref::Builtin("Weird".to_string()), vec![]));
 
         let ok_pair = sub.fresh_bound(Structure::Tuple(vec![int_ty, int_ty]));
-        assert!(check_instance(&mut sub, &table, "Eq", ok_pair));
+        assert!(check_instance(
+            &mut sub,
+            &table,
+            &HashMap::new(),
+            "Eq",
+            ok_pair
+        ));
 
         let bad_pair = sub.fresh_bound(Structure::Tuple(vec![int_ty, weird_ty]));
-        assert!(!check_instance(&mut sub, &table, "Eq", bad_pair));
+        assert!(!check_instance(
+            &mut sub,
+            &table,
+            &HashMap::new(),
+            "Eq",
+            bad_pair
+        ));
     }
 
     #[test]
@@ -600,7 +646,13 @@ mod tests {
         table.insert_builtin("Num", Ref::Builtin("Int".to_string()), vec![]);
         let int_ty = sub.fresh_bound(Structure::App(Ref::Builtin("Int".to_string()), vec![]));
         let pair = sub.fresh_bound(Structure::Tuple(vec![int_ty, int_ty]));
-        assert!(!check_instance(&mut sub, &table, "Num", pair));
+        assert!(!check_instance(
+            &mut sub,
+            &table,
+            &HashMap::new(),
+            "Num",
+            pair
+        ));
     }
 
     #[test]
@@ -614,12 +666,24 @@ mod tests {
         let mut ok_fields = std::collections::BTreeMap::new();
         ok_fields.insert("x".to_string(), int_ty);
         let ok_record = sub.fresh_bound(Structure::Record(ok_fields, None));
-        assert!(check_instance(&mut sub, &table, "Eq", ok_record));
+        assert!(check_instance(
+            &mut sub,
+            &table,
+            &HashMap::new(),
+            "Eq",
+            ok_record
+        ));
 
         let mut bad_fields = std::collections::BTreeMap::new();
         bad_fields.insert("x".to_string(), weird_ty);
         let bad_record = sub.fresh_bound(Structure::Record(bad_fields, None));
-        assert!(!check_instance(&mut sub, &table, "Eq", bad_record));
+        assert!(!check_instance(
+            &mut sub,
+            &table,
+            &HashMap::new(),
+            "Eq",
+            bad_record
+        ));
     }
 
     #[test]
@@ -645,8 +709,20 @@ mod tests {
             vec![weird_ty],
         ));
 
-        assert!(check_instance(&mut sub, &table, "Eq", list_int));
-        assert!(!check_instance(&mut sub, &table, "Eq", list_weird));
+        assert!(check_instance(
+            &mut sub,
+            &table,
+            &HashMap::new(),
+            "Eq",
+            list_int
+        ));
+        assert!(!check_instance(
+            &mut sub,
+            &table,
+            &HashMap::new(),
+            "Eq",
+            list_weird
+        ));
     }
 
     #[test]
@@ -668,7 +744,13 @@ mod tests {
             Ref::Builtin("List".to_string()),
             vec![list_int],
         ));
-        assert!(check_instance(&mut sub, &table, "Eq", list_list_int));
+        assert!(check_instance(
+            &mut sub,
+            &table,
+            &HashMap::new(),
+            "Eq",
+            list_list_int
+        ));
     }
 
     #[test]
@@ -690,8 +772,20 @@ mod tests {
         // Int itself needs its own seeded Eq for the recursion to succeed.
         let mut table_with_int = table;
         table_with_int.insert_builtin("Eq", Ref::Builtin("Int".to_string()), vec![]);
-        assert!(check_instance(&mut sub, &table_with_int, "Eq", box_int));
-        assert!(!check_instance(&mut sub, &table_with_int, "Eq", box_weird));
+        assert!(check_instance(
+            &mut sub,
+            &table_with_int,
+            &HashMap::new(),
+            "Eq",
+            box_int
+        ));
+        assert!(!check_instance(
+            &mut sub,
+            &table_with_int,
+            &HashMap::new(),
+            "Eq",
+            box_weird
+        ));
     }
 
     // -- end-to-end: TM3 (constrain) + TM5 (solve) + TM6 (this table) --
@@ -722,7 +816,7 @@ mod tests {
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
 
-        check_pending(&mut sub, &table, pending, &mut errors);
+        check_pending(&mut sub, &table, &HashMap::new(), pending, &mut errors);
         assert!(errors.is_empty(), "{errors:?}");
     }
 
@@ -742,7 +836,7 @@ mod tests {
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
 
-        check_pending(&mut sub, &table, pending, &mut errors);
+        check_pending(&mut sub, &table, &HashMap::new(), pending, &mut errors);
         assert!(errors.iter().any(
             |e| matches!(&e.kind, TypeErrorKind::NoInstance { interface } if interface == "Eq")
         ));
