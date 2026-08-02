@@ -1,0 +1,24 @@
+-- expect: one member of a mutually-recursive group has an explicit
+-- constrained signature (Eq a =>), the other has none -- the `given` fact
+-- must be visible to both without leaking into unrelated bindings.
+allSame :: Eq a => a -> List a -> Bool
+allSame x xs =
+    case xs of
+        [] ->
+            True
+
+        y : rest ->
+            if x == y then
+                allSameRest x rest
+
+            else
+                False
+
+
+allSameRest x rest =
+    allSame x rest
+
+
+unrelatedFn :: Int -> Int
+unrelatedFn n =
+    n + 1

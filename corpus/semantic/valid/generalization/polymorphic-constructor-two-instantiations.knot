@@ -1,0 +1,26 @@
+-- expect: a polymorphic constructor (Box a) is generalized over its own
+-- declared param, so it's usable at two different concrete types from two
+-- different top-level bindings in the same module -- one of which also
+-- needs a real Eq instance at that instantiation.
+type Box a
+    = Box a
+
+
+unwrapIntBox :: Box Int -> Int
+unwrapIntBox b =
+    case b of
+        Box x ->
+            x
+
+
+boolBoxesEqual :: Box Bool -> Box Bool -> Bool
+boolBoxesEqual a b =
+    case ( a, b ) of
+        ( Box x, Box y ) ->
+            x == y
+
+
+useBoth =
+    ( unwrapIntBox (Box 5)
+    , boolBoxesEqual (Box True) (Box False)
+    )

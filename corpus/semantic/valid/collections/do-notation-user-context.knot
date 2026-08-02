@@ -1,0 +1,22 @@
+-- expect: `do` notation desugars to `bind`/`pure` against a *user*-defined
+-- Context instance, not just the built-in Option/Result/IO/List ones.
+type Box a
+    = Box a
+
+
+instance Context Box where
+    pure x =
+        Box x
+
+    bind b f =
+        case b of
+            Box x ->
+                f x
+
+
+combineBoxes :: Box Int -> Box Int -> Box Int
+combineBoxes a b =
+    do
+        x <- a
+        y <- b
+        pure (x + y)

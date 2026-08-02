@@ -1,0 +1,14 @@
+-- expect: DOCUMENTED KNOWN GAP (see check::check_module's own doc comment,
+-- Fix #10) -- re-declaring Eq for a builtin type that already has one is
+-- currently accepted, not flagged as a DuplicateInstance, since
+-- build_instance_table's own coherence pass runs before the builtin table
+-- is merged in. This fixture pins down the *current* behavior so a future
+-- change to fix this doesn't silently alter it without this test noticing.
+instance Eq Int where
+    (==) a b =
+        False
+
+
+useIt :: Int -> Int -> Bool
+useIt a b =
+    a == b

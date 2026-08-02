@@ -1,0 +1,22 @@
+-- expect: a type alias used inside an ADT's own variant field expands
+-- before the variant is used, so pattern matching then field access on the
+-- extracted value both type-check.
+type alias Point =
+    { x : Float
+    , y : Float
+    }
+
+
+type Shape
+    = Circle Point
+    | Origin
+
+
+distanceFromOrigin :: Shape -> Float
+distanceFromOrigin shape =
+    case shape of
+        Circle p ->
+            p.x + p.y
+
+        Origin ->
+            0.0

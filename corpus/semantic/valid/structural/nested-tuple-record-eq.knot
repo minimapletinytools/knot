@@ -1,0 +1,13 @@
+-- expect: structural Eq/Ord/Show recursion actually recurses through mixed
+-- nesting (a tuple containing a record containing a tuple), not just one
+-- level deep.
+compareNested :: ( { x : ( Int, Int ) }, { x : ( Int, Int ) } ) -> Bool
+compareNested pair =
+    case pair of
+        ( a, b ) ->
+            a == b
+
+
+showNested :: { x : ( Int, Int ) } -> String
+showNested r =
+    show r

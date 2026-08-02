@@ -1,0 +1,7 @@
+-- expect: a Semigroup instance targeting a literal record type (no alias
+-- involved) is InstanceTargetNotNominal (Fix #9) -- Eq/Ord/Show are the
+-- only interfaces with a structural fallback for Record/Tuple/Unit.
+-- error-kind: InstanceTargetNotNominal
+instance Semigroup { x : Float } where
+    (<>) a b =
+        { x = a.x }

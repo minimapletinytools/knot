@@ -1,0 +1,21 @@
+-- expect: an annotated top-level binding's own SCC/generalization group
+-- membership is unaffected by the annotation attached to it.
+@{
+  nodeId = "isOdd1"
+}
+isOdd :: Int -> Bool
+isOdd n =
+    if n == 0 then
+        False
+
+    else
+        isEven (n - 1)
+
+
+isEven :: Int -> Bool
+isEven n =
+    if n == 0 then
+        True
+
+    else
+        isOdd (n - 1)

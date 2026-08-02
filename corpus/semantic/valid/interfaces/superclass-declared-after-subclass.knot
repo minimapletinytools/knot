@@ -1,0 +1,14 @@
+-- expect: Ord Shape declared before Eq Shape, same module -- coherence
+-- must not depend on declaration order within one module (Fix #8).
+type Shape
+    = Circle Float
+
+
+instance Ord Shape where
+    compare a b =
+        EQ
+
+
+instance Eq Shape where
+    (==) a b =
+        True

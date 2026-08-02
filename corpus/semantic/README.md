@@ -6,13 +6,12 @@ change — see its own fixtures for pure-grammar coverage). This tier exercises
 get accepted/rejected correctly, all the way through canonicalization,
 constraint generation, solving, and instance/obligation checking?
 
-Fixtures/runner don't exist yet — that's §5's checklist. The prerequisite
-entry point they need to run against, `check::check_module`, does now (Fix
-#10, done as part of this same plan). This document is the plan: an
-inventory of every semantic the checker implements, an interaction matrix of
-which pairs are actually likely to break each other (grounded in this
-session's own findings, not guessed), and a checklist of fixtures to write
-against it.
+The runner (`knot-checker/tests/corpus.rs`) and most of the interaction
+matrix's fixtures now exist — see §5's checklist for exactly what's done and
+what's still deferred (and why). This document is both the plan and its own
+running record: an inventory of every semantic the checker implements, an
+interaction matrix of which pairs are actually likely to break each other
+(grounded in live testing throughout, not guessed), and the checklist.
 
 ## 0. Why this tier didn't exist before
 
@@ -202,30 +201,26 @@ corpus/semantic/
   README.md              (this file)
   valid/
     aliases/              (rows 1-3)
-    interfaces/           (rows 4-6, 9-12, 15)
+    interfaces/           (rows 4, 6, 9, 17)
     collections/           (rows 7-8)
-    generalization/        (rows 5, 10)
+    generalization/        (row 5)
     structural/            (row 11)
-    modules/               (row 13)
     misc/                  (rows 14, 16)
   invalid/
-    interfaces/           (row 4 wrong-order case, once fixed — expected
-                            rejection would be a genuinely-missing
-                            superclass, not an ordering artifact)
-    aliases/              (extending a non-record type, conflicting fields —
-                            already unit-tested in knot-canonical, worth a
-                            pipeline-level fixture too)
+    interfaces/           (row 4's missing-superclass regression, row 12)
+    aliases/              (row 3's non-nominal-through-alias case)
 ```
 
-Each fixture: a small realistic `.knot` program plus (for `valid/`) an
-assertion that `check_module` accepts it with zero errors, and (for
-`invalid/`) an assertion of *which* error kind is expected — not just
-pass/fail, mirroring `corpus/syntax/invalid/`'s convention of a leading
-comment stating the expected failure reason.
+Each fixture: a small realistic `.knot` program starting with a `-- expect:`
+comment; `invalid/` fixtures also carry a `-- error-kind: <Name>` tag the
+runner matches against the actual failing error's own `Debug` output by
+prefix (see `knot-checker/tests/corpus.rs`'s own doc comment) — checking the
+exact kind, not just accept/reject, since "did it fail" isn't enough to
+catch the checker failing for the *wrong* reason.
 
 ## 5. Checklist
 
-**Prerequisite (blocks everything below) — done:**
+**Prerequisite — done:**
 - [x] Merge `prelude::seed`'s `InstanceTable` with a module's own
       `build_instance_table` result — `check::check_module(decls: &[Spanned
       <CDecl>]) -> Vec<TypeError>` (`knot-checker/src/check.rs`, Fix #10).
@@ -237,43 +232,70 @@ comment stating the expected failure reason.
       instance) — `TypeErrorKind::InstanceTargetNotNominal` at the
       `instance` declaration site (Fix #9).
 
-**Harness (not yet built):**
-- [ ] `knot-checker/tests/corpus.rs`, mirroring `knot-syntax`'s own —
-      walks `corpus/semantic/valid|invalid`, canonicalizes each fixture
-      (`knot_canonical::canonicalize_decls`) then runs `check::check_module`,
-      asserts accept/reject + (for `invalid/`) the expected error kind via a
-      leading fixture comment. A canonicalization failure on a `valid/`
-      fixture should fail the test the same way a type error would — the
-      corpus is about the whole pipeline, not just `check_module` alone.
+**Harness — done:**
+- [x] `knot-checker/tests/corpus.rs`, mirroring `knot-syntax`'s own — walks
+      `corpus/semantic/valid|invalid`, canonicalizes each fixture then runs
+      `check::check_module`, asserts accept/reject + (for `invalid/`) the
+      expected error kind via the leading `-- error-kind:` tag. Sanity-
+      checked non-vacuous both ways: a deliberately-broken `valid/` fixture
+      body was caught, and a deliberately-wrong `-- error-kind:` tag on an
+      `invalid/` fixture was also caught.
 
 **Fixtures** (one `.knot` file per interaction-matrix row, `valid/` unless
 noted `invalid/`):
-- [ ] Row 1 — alias × extensible record (both directions)
-- [ ] Row 2 — alias × ADT variant × pattern match
-- [ ] Row 3 — alias × instance target (record + tuple)
-- [ ] Row 4 — superclass declared before/after, same module (one `valid/`
-      pair once fixed; keep one genuinely-missing-superclass `invalid/`
-      case for regression)
-- [ ] Row 5 — polymorphic constructor × top-level generalization × Eq use
-- [ ] Row 6 — recursive ADT × Eq/Ord instance × recursive pattern match
-- [ ] Row 7 — Collection instance × concrete use from an ordinary function
-- [ ] Row 8 — Do-notation × user-defined Context instance
-- [ ] Row 9 — mutually recursive group × mixed constrained/unconstrained
-      signatures
-- [ ] Row 10 — StillAbstract × sibling concrete use in the same module
-      (needs `elaborate::elaborate_module`, not `check_module` alone —
-      `check_module` deliberately doesn't classify obligations this way,
-      see Fix #10's own doc comment)
-- [ ] Row 11 — nested Tuple/Record structural Eq/Ord/Show
-- [ ] Row 12 — non-Eq/Ord/Show interface on Record/Tuple: `invalid/`,
-      asserting `TypeErrorKind::InstanceTargetNotNominal` (Fix #9)
-- [ ] Row 13 — qualified import × alias interaction
-- [ ] Row 14 — holes × let × case nesting
-- [ ] Row 15 — confirm operator-as-value is still N/A (pin down as a
-      documented non-goal fixture, or skip if genuinely inapplicable)
-- [ ] Row 16 — annotations × SCC grouping
-- [ ] Row 17 (new) — re-declaring an instance a *builtin* type already has
-      (`instance Eq Int where ...`) — `invalid/` once/if this gets its own
-      diagnostic, otherwise a `valid/` fixture documenting the known gap
-      Fix #10's own doc comment names (silently accepted today, not flagged
-      as a duplicate)
+- [x] Row 1 — alias × extensible record, both directions
+      (`valid/aliases/extensible-record-{concrete,forwarded}.knot`)
+- [x] Row 2 — alias × ADT variant × pattern match
+      (`valid/aliases/adt-variant-alias-expansion.knot`)
+- [x] Row 3 — alias × instance target: split into a `valid/` nominal-alias
+      case (`valid/aliases/instance-target-nominal-alias.knot`) and an
+      `invalid/` record-alias case now that Fix #9 makes the latter a real
+      error, not silently accepted (`invalid/aliases/
+      instance-target-record-alias.knot`)
+- [x] Row 4 — superclass declared before/after, same module
+      (`valid/interfaces/superclass-declared-after-subclass.knot`), plus
+      the genuinely-missing-superclass regression
+      (`invalid/interfaces/missing-superclass.knot`)
+- [x] Row 5 — polymorphic constructor × top-level generalization × Eq use
+      (`valid/generalization/polymorphic-constructor-two-instantiations.knot`)
+- [x] Row 6 — recursive ADT × Eq instance × recursive pattern match
+      (`valid/interfaces/recursive-adt-eq-recursion.knot`)
+- [x] Row 7 — Collection instance × concrete use from an ordinary function
+      (`valid/collections/collection-instance-used-concretely.knot`)
+- [x] Row 8 — Do-notation × user-defined Context instance
+      (`valid/collections/do-notation-user-context.knot`)
+- [x] Row 9 — mutually recursive group × mixed constrained/unconstrained
+      signatures (`valid/interfaces/mutual-recursion-mixed-signatures.knot`)
+- [ ] Row 10 — StillAbstract × sibling concrete use in the same module —
+      **deferred**: needs `elaborate::elaborate_module`, not `check_module`
+      alone (`check_module` deliberately doesn't classify obligations this
+      way, see Fix #10's own doc comment). Revisit once elaboration covers
+      instance methods too (the gap Fix #5 originally flagged).
+- [x] Row 11 — nested Tuple/Record structural Eq/Ord/Show
+      (`valid/structural/nested-tuple-record-eq.knot`)
+- [x] Row 12 — non-Eq/Ord/Show interface on a literal Record (not just
+      through an alias): `invalid/interfaces/non-eq-ord-show-on-record.knot`
+- [ ] Row 13 — qualified import × alias interaction — **deferred**: needs a
+      real module header + imports (`canonicalize_module`, not
+      `canonicalize_decls`), and the one realistic thing to import
+      (`List.map`-style qualified access to a builtin collection method)
+      runs straight into `knot-canonical::prelude`'s own already-documented
+      open question ("is `List.map` the same polymorphic `map` spelled with
+      a qualifier, or a distinct stdlib function?"). Writing a fixture here
+      would either accidentally depend on that question's eventual answer
+      or test something else entirely — better to wait until it's resolved.
+- [x] Row 14 — holes × let × case nesting
+      (`valid/misc/holes-let-case-nesting.knot`)
+- [ ] Row 15 — operator-as-value — **skipped, not deferred**: already
+      confirmed N/A by `knot-syntax`'s own `type_variable_takes_no_arguments`-
+      adjacent grammar facts and `knot-canonical::prelude`'s doc comment on
+      symbolic operators never being expression-referenceable; documented as
+      a non-goal in §1 above rather than given a fixture that would just
+      test the parser rejecting syntax that doesn't exist.
+- [x] Row 16 — annotations × SCC grouping
+      (`valid/misc/annotations-with-mutual-recursion.knot`)
+- [x] Row 17 (new) — re-declaring an instance a *builtin* type already has
+      is currently silently accepted, not flagged as a duplicate (the known
+      gap Fix #10's own doc comment names) — pinned down as `valid/
+      interfaces/redeclare-builtin-instance-known-gap.knot` so a future fix
+      changes this test's expectation deliberately, not by surprise.

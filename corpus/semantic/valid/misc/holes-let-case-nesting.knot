@@ -1,0 +1,17 @@
+-- expect: a hole inside a let-bound pattern discard, inside a case arm,
+-- inside a lambda, doesn't interfere with SCC grouping or generalization.
+process :: Int -> Int
+process n =
+    case n of
+        0 ->
+            0
+
+        _ ->
+            let
+                _ =
+                    n
+
+                double =
+                    \x -> x + x
+            in
+            double n

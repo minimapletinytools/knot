@@ -1,0 +1,28 @@
+-- expect: an extensible-record alias applied to a concrete record argument
+-- resolves to the merged closed record (Fix #7) -- the alias's own
+-- definition, plus a use through a downstream function, both type-check.
+type alias Foo =
+    { name : String
+    }
+
+
+type alias Selectable a =
+    { a
+        | isSelected : Bool
+    }
+
+
+isSelectableSelected :: Selectable a -> Bool
+isSelectableSelected selectable =
+    selectable.isSelected
+
+
+makeSelectableFoo :: Selectable Foo
+makeSelectableFoo =
+    { name = "Bar"
+    , isSelected = True
+    }
+
+
+getMySelectedFlag =
+    isSelectableSelected makeSelectableFoo

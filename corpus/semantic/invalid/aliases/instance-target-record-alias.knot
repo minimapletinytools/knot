@@ -1,0 +1,13 @@
+-- expect: a Semigroup instance targeting a record type *alias* is still
+-- InstanceTargetNotNominal after alias expansion resolves it to a bare
+-- Record shape -- confirms Fix #9's diagnostic fires through the full
+-- alias-expansion pipeline, not just for a literal record written inline.
+-- error-kind: InstanceTargetNotNominal
+type alias Point =
+    { x : Float
+    }
+
+
+instance Semigroup Point where
+    (<>) a b =
+        { x = a.x }

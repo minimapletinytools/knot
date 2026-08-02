@@ -1,0 +1,19 @@
+-- expect: a non-parametric alias to another nominal type expands before
+-- instance-table keying, so the instance target still resolves to a real
+-- Ref (Shape's), not the alias name.
+type Shape
+    = Circle Float
+
+
+type alias MyShape =
+    Shape
+
+
+instance Eq MyShape where
+    (==) a b =
+        True
+
+
+compareShapes :: MyShape -> MyShape -> Bool
+compareShapes a b =
+    a == b

@@ -1,0 +1,21 @@
+-- expect: an alias that just forwards its own row-extension parameter along
+-- (Wrap a = Selectable a) keeps the row genuinely open, not merged.
+type alias Selectable a =
+    { a
+        | isSelected : Bool
+    }
+
+
+type alias Wrap a =
+    Selectable a
+
+
+useWrap :: Wrap a -> Bool
+useWrap w =
+    w.isSelected
+
+
+useAtTwoDifferentRows =
+    ( useWrap { isSelected = True }
+    , useWrap { isSelected = False, extra = 1 }
+    )

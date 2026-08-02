@@ -1,0 +1,40 @@
+-- expect: a user-declared Collection instance is usable through the
+-- built-in polymorphic `map`/`foldl` from an ordinary function -- the only
+-- way Collection is reachable at all (see corpus/semantic/README.md's own
+-- non-goals: a user's own signature can't be generic over "any Collection"
+-- since a type variable can't be applied to an argument in this grammar).
+type Box a
+    = Box a
+
+
+instance Collection Box where
+    map f b =
+        case b of
+            Box x ->
+                Box (f x)
+
+    foldl f z b =
+        case b of
+            Box x ->
+                f z x
+
+    foldr f z b =
+        case b of
+            Box x ->
+                f x z
+
+    filter p b =
+        b
+
+    length b =
+        1
+
+
+doubleBoxedInt :: Box Int -> Box Int
+doubleBoxedInt b =
+    map (\x -> x + x) b
+
+
+sumBoxedInt :: Box Int -> Int
+sumBoxedInt b =
+    foldl (\acc x -> acc + x) 0 b

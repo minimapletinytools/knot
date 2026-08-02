@@ -1,0 +1,28 @@
+-- expect: an Eq instance for a self-recursive ADT can call `==` on its own
+-- sub-fields (same type as the instance itself) from inside its own method
+-- body -- the instance must already be visible to its own recursive use.
+type IntList
+    = Cons Int IntList
+    | Nil
+
+
+instance Eq IntList where
+    (==) a b =
+        case ( a, b ) of
+            ( Nil, Nil ) ->
+                True
+
+            ( Cons x xs, Cons y ys ) ->
+                if x == y then
+                    xs == ys
+
+                else
+                    False
+
+            _ ->
+                False
+
+
+sameList :: IntList -> IntList -> Bool
+sameList a b =
+    a == b

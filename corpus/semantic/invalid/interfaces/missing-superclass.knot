@@ -1,0 +1,10 @@
+-- expect: Ord Shape declared with no Eq Shape anywhere in the module --
+-- a genuinely missing superclass, not an ordering artifact.
+-- error-kind: MissingSuperclassInstance
+type Shape
+    = Circle Float
+
+
+instance Ord Shape where
+    compare a b =
+        EQ
