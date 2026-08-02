@@ -16,6 +16,17 @@
 //! only unsigned bindings need the general `ftv`-difference algorithm
 //! (`solve.rs`, TM5).
 //!
+//! **`constrain_group_chain`/`constrain_bindings` are generic over `R`**
+//! (Fix #3): `finish`'s own return value is threaded straight through,
+//! completely uninspected by this module, alongside the `Constraint` tree
+//! and — new for Fix #3 — a flat `Vec<LetMember>` covering *every* group in
+//! the chain (each member's own `elaborated_body` already filled in). This
+//! is what lets `constrain_module` (whose `finish` has no real body to
+//! report) and `constrain_let_bindings` (whose `finish` needs to hand back
+//! a whole `TypedExpr`) share one implementation: `R` is `TypeVarId` for
+//! the former, `TypedExpr` for the latter, and the shared machinery neither
+//! knows nor cares which.
+//!
 //! **Not yet handled**: `CDecl::Instance` — its methods are real function
 //! bodies needing type-checking too, but checking one against its
 //! interface's own method signature needs `interface/table.rs` (TM6),
@@ -28,6 +39,7 @@ use std::collections::{HashMap, HashSet};
 use knot_canonical::ast::{CDecl, CExpr, CPattern, CType, CTypeSignature, Ref};
 use knot_syntax::span::{Span, Spanned};
 
+use crate::ast::{TExpr, Typed, TypedExpr};
 use crate::constrain::expr::constrain_expr;
 use crate::constrain::pattern::constrain_pattern;
 use crate::constrain::{Constraint, DeclaredScheme, LetMember, LocalScope};
@@ -304,6 +316,18 @@ fn build_declared(sub: &mut Substitution, sig: &CTypeSignature) -> (TypeVarId, D
     )
 }
 
+/// A group's own header info, before its members' bodies are constrained —
+/// split out from `LetMember` itself only because `LetMember.elaborated_body`
+/// doesn't exist yet at this point (every member's `header_ty` must be bound
+/// into `scope` *before* any of their bodies are constrained, so self/mutual
+/// references resolve — see `constrain_group_chain`).
+struct Header {
+    name: String,
+    span: Span,
+    header_ty: TypeVarId,
+    declared: Option<DeclaredScheme>,
+}
+
 /// Splits `bindings` into SCCs and builds one nested `Constraint::Let` per
 /// component, in dependency order. `finish` produces whatever comes after
 /// every group — the rest of the module (just `Constraint::True`), or a
@@ -316,13 +340,13 @@ fn build_declared(sub: &mut Substitution, sig: &CTypeSignature) -> (TypeVarId, D
 /// ever see those names — building `body_con` from an already-finished
 /// `Constraint` value, rather than a continuation still able to run inside
 /// the right scope, made that impossible to get right).
-fn constrain_bindings(
+fn constrain_bindings<R>(
     sub: &mut Substitution,
     scope: &mut LocalScope,
     bindings: Vec<RawBinding>,
     top_level: bool,
-    finish: impl FnOnce(&mut Substitution, &mut LocalScope) -> (TypeVarId, Constraint),
-) -> (TypeVarId, Constraint) {
+    finish: impl FnOnce(&mut Substitution, &mut LocalScope) -> (R, Constraint),
+) -> (R, Constraint, Vec<LetMember>) {
     let names: Vec<String> = bindings.iter().map(|b| b.name.clone()).collect();
     let name_set: HashSet<String> = names.iter().cloned().collect();
 
@@ -352,22 +376,31 @@ fn constrain_bindings(
 /// plus this push-recurse-pop shape together guarantee a group's names stay
 /// visible for exactly as long as they should: every later group, and the
 /// final body, but nothing before or outside this whole chain.
-fn constrain_group_chain(
+///
+/// Returns this chain's own `R` (whatever `finish` produced, passed straight
+/// through untouched), the nested `Constraint::Let` tree, and *every* group's
+/// `LetMember`s flattened into one `Vec` (Fix #3) — collected directly here,
+/// rather than by re-walking the returned `Constraint` tree afterward, since
+/// a body's own constraints can contain unrelated, more-deeply-nested
+/// `Constraint::Let`s (from an inner `let`-expression) that a tree-walk could
+/// not safely tell apart from this chain's own groups.
+fn constrain_group_chain<R>(
     sub: &mut Substitution,
     scope: &mut LocalScope,
     by_name: &HashMap<String, &RawBinding>,
     sccs: &[Vec<String>],
     index: usize,
     top_level: bool,
-    finish: impl FnOnce(&mut Substitution, &mut LocalScope) -> (TypeVarId, Constraint),
-) -> (TypeVarId, Constraint) {
+    finish: impl FnOnce(&mut Substitution, &mut LocalScope) -> (R, Constraint),
+) -> (R, Constraint, Vec<LetMember>) {
     let Some(group_names) = sccs.get(index) else {
-        return finish(sub, scope);
+        let (r, c) = finish(sub, scope);
+        return (r, c, Vec::new());
     };
     let group: Vec<&RawBinding> = group_names.iter().map(|n| by_name[n]).collect();
 
     scope.push();
-    let mut members = Vec::new();
+    let mut headers = Vec::new();
     for b in &group {
         let (header_ty, declared) = match b.signature {
             Some(sig) => {
@@ -377,7 +410,7 @@ fn constrain_group_chain(
             None => (sub.fresh_unbound(), None),
         };
         scope.bind(&b.name, header_ty);
-        members.push(LetMember {
+        headers.push(Header {
             name: b.name.clone(),
             span: b.span,
             header_ty,
@@ -386,22 +419,42 @@ fn constrain_group_chain(
     }
 
     let mut header_constraints = Vec::new();
-    for (b, member) in group.iter().zip(&members) {
+    let mut members = Vec::new();
+    for (b, header) in group.iter().zip(headers) {
         scope.push();
-        let param_tys: Vec<TypeVarId> = b
+        let typed_params: Vec<crate::ast::TypedPattern> = b
             .params
             .iter()
             .map(|p| constrain_pattern(sub, scope, p, &mut header_constraints))
             .collect();
-        let body_ty = constrain_expr(sub, scope, b.body, &mut header_constraints);
+        let typed_body = constrain_expr(sub, scope, b.body, &mut header_constraints);
         scope.pop();
-        let inferred = param_tys.into_iter().rev().fold(body_ty, |acc, param_ty| {
-            sub.fresh_bound(Structure::Fn(param_ty, acc))
+        let inferred = typed_params.iter().rev().fold(typed_body.ty, |acc, p| {
+            sub.fresh_bound(Structure::Fn(p.ty, acc))
         });
         header_constraints.push(Constraint::Equal {
             span: b.span,
-            expected: member.header_ty,
+            expected: header.header_ty,
             actual: inferred,
+        });
+        // A zero-param binding's own value *is* its body; otherwise it's
+        // the params folded into one `Lambda` wrapping that body -- the
+        // curried `Fn` chain above, mirrored one layer up in `TExpr` shape.
+        let elaborated_body = if typed_params.is_empty() {
+            typed_body
+        } else {
+            Typed {
+                span: b.span,
+                ty: header.header_ty,
+                node: TExpr::Lambda(typed_params, Box::new(typed_body)),
+            }
+        };
+        members.push(LetMember {
+            name: header.name,
+            span: header.span,
+            header_ty: header.header_ty,
+            declared: header.declared,
+            elaborated_body,
         });
     }
 
@@ -429,11 +482,14 @@ fn constrain_group_chain(
             scope.promote_to_generalizable(&member.name);
         }
     }
-    let (result_ty, body_con) =
+    let (result, body_con, mut rest_members) =
         constrain_group_chain(sub, scope, by_name, sccs, index + 1, top_level, finish);
     if !top_level {
         scope.pop();
     }
+
+    let mut all_members = members.clone();
+    all_members.append(&mut rest_members);
 
     let whole = Constraint::Let {
         top_level,
@@ -441,15 +497,21 @@ fn constrain_group_chain(
         header_con: Box::new(Constraint::And(header_constraints)),
         body_con: Box::new(body_con),
     };
-    (result_ty, whole)
+    (result, whole, all_members)
 }
 
 /// The whole-module entry point: every `CDecl::Fn` becomes a `RawBinding`;
 /// SCC-split and wrapped in nested `Constraint::Let`s. There's no module
 /// "body" the way a `let...in` has one — solving a module is entirely about
 /// populating the scheme environment these `Let`s build, so the innermost
-/// constraint is trivially `Constraint::True`.
-pub fn constrain_module(sub: &mut Substitution, decls: &[Spanned<CDecl>]) -> Constraint {
+/// constraint is trivially `Constraint::True`. The returned `Vec<LetMember>`
+/// covers every top-level binding, each with its own `elaborated_body`
+/// (Fix #3) already filled in -- a whole module's elaborated form, without
+/// needing a separate `TModule` wrapper type.
+pub fn constrain_module(
+    sub: &mut Substitution,
+    decls: &[Spanned<CDecl>],
+) -> (Constraint, Vec<LetMember>) {
     let bindings: Vec<RawBinding> = decls
         .iter()
         .filter_map(|d| match &d.node {
@@ -464,10 +526,10 @@ pub fn constrain_module(sub: &mut Substitution, decls: &[Spanned<CDecl>]) -> Con
         })
         .collect();
     let mut scope = LocalScope::new();
-    let (_unused, tree) = constrain_bindings(sub, &mut scope, bindings, true, |sub, _| {
+    let (_unused, tree, members) = constrain_bindings(sub, &mut scope, bindings, true, |sub, _| {
         (sub.fresh_unbound(), Constraint::True)
     });
-    tree
+    (tree, members)
 }
 
 /// `CExpr::Let`'s own binding list. Only a plain `Var` pattern can
@@ -479,12 +541,23 @@ pub fn constrain_module(sub: &mut Substitution, decls: &[Spanned<CDecl>]) -> Con
 /// them, which is nonsensical — so those are constrained directly against
 /// the pattern, outside the SCC grouping entirely, each its own trivial
 /// non-recursive step.
+///
+/// Returns the whole `let`-expression, fully elaborated (Fix #3): a flat
+/// `TExpr::Let` combining every `Var`-pattern member's own `elaborated_body`
+/// (recovered from the `Vec<LetMember>` `constrain_bindings` hands back)
+/// with every non-`Var`-pattern binding's typed form, built directly inside
+/// `finish` below. Member order in the result isn't guaranteed to match
+/// source order (`Var`-pattern members, in whatever order their own SCC
+/// chain produced them, come first) -- harmless, since Knot's `let`
+/// bindings are simultaneous/mutually-visible within their own scope, not
+/// sequential statements, and canonicalization already rejects duplicate
+/// names within one `let` block.
 pub fn constrain_let_bindings(
     sub: &mut Substitution,
     scope: &mut LocalScope,
     bindings: &[(Spanned<CPattern>, Spanned<CExpr>)],
-    constrain_body: impl FnOnce(&mut Substitution, &mut LocalScope, &mut Vec<Constraint>) -> TypeVarId,
-) -> (TypeVarId, Constraint) {
+    constrain_body: impl FnOnce(&mut Substitution, &mut LocalScope, &mut Vec<Constraint>) -> TypedExpr,
+) -> (TypedExpr, Constraint) {
     let (var_bindings, other_bindings): (Vec<_>, Vec<_>) = bindings
         .iter()
         .partition(|(p, _)| matches!(p.node, CPattern::Var(_)));
@@ -520,20 +593,48 @@ pub fn constrain_let_bindings(
     // every-binding-sees-every-binding visibility, which would need
     // predeclaring placeholder types for destructured names too — not worth
     // the complexity for how rarely a let block actually needs it.
-    constrain_bindings(sub, scope, raw, false, |sub, scope| {
-        let mut constraints = Vec::new();
-        for (p, e) in &other_bindings {
-            let rhs_ty = constrain_expr(sub, scope, e, &mut constraints);
-            let pat_ty = constrain_pattern(sub, scope, p, &mut constraints);
-            constraints.push(Constraint::Equal {
-                span: p.span,
-                expected: pat_ty,
-                actual: rhs_ty,
-            });
-        }
-        let result_ty = constrain_body(sub, scope, &mut constraints);
-        (result_ty, Constraint::And(constraints))
-    })
+    let (other_result, tree, var_members) =
+        constrain_bindings(sub, scope, raw, false, |sub, scope| {
+            let mut constraints = Vec::new();
+            let mut other_typed = Vec::new();
+            for (p, e) in &other_bindings {
+                let typed_rhs = constrain_expr(sub, scope, e, &mut constraints);
+                let typed_pat = constrain_pattern(sub, scope, p, &mut constraints);
+                constraints.push(Constraint::Equal {
+                    span: p.span,
+                    expected: typed_pat.ty,
+                    actual: typed_rhs.ty,
+                });
+                other_typed.push((typed_pat, typed_rhs));
+            }
+            let typed_body = constrain_body(sub, scope, &mut constraints);
+            ((other_typed, typed_body), Constraint::And(constraints))
+        });
+    let (mut other_typed, typed_body) = other_result;
+
+    let mut all_bindings: Vec<(crate::ast::TypedPattern, TypedExpr)> = var_members
+        .into_iter()
+        .map(|m| {
+            (
+                Typed {
+                    span: m.span,
+                    ty: m.header_ty,
+                    node: crate::ast::TPattern::Var(m.name),
+                },
+                m.elaborated_body,
+            )
+        })
+        .collect();
+    all_bindings.append(&mut other_typed);
+
+    let span = typed_body.span;
+    let ty = typed_body.ty;
+    let elaborated = Typed {
+        span,
+        ty,
+        node: TExpr::Let(all_bindings, Box::new(typed_body)),
+    };
+    (elaborated, tree)
 }
 
 #[cfg(test)]
@@ -570,12 +671,17 @@ mod tests {
     fn single_unsigned_binding_is_its_own_group_with_a_trivial_body() {
         let mut sub = Substitution::new();
         let cs = decls("id x = x\n");
-        let tree = constrain_module(&mut sub, &cs);
+        let (tree, _members) = constrain_module(&mut sub, &cs);
         let (members, _header, body) = as_let(&tree);
         assert_eq!(members.len(), 1);
         assert_eq!(members[0].name, "id");
         assert!(members[0].declared.is_none());
         assert_eq!(*body, Constraint::True);
+        // The elaborated body should be a one-param Lambda wrapping `x`.
+        assert!(matches!(
+            members[0].elaborated_body.node,
+            TExpr::Lambda(ref params, _) if params.len() == 1
+        ));
     }
 
     #[test]
@@ -585,7 +691,7 @@ mod tests {
             "isOdd n = if n == 0 then False else isEven (n - 1)\n\
              isEven n = if n == 0 then True else isOdd (n - 1)\n",
         );
-        let tree = constrain_module(&mut sub, &cs);
+        let (tree, _members) = constrain_module(&mut sub, &cs);
         let (members, _header, body) = as_let(&tree);
         let names: Vec<&str> = members.iter().map(|m| m.name.as_str()).collect();
         assert_eq!(names.len(), 2);
@@ -598,7 +704,7 @@ mod tests {
     fn a_dependency_becomes_the_outer_group_and_its_user_the_inner_one() {
         let mut sub = Substitution::new();
         let cs = decls("helper x = x\nuseHelper y = helper y\n");
-        let tree = constrain_module(&mut sub, &cs);
+        let (tree, all_members) = constrain_module(&mut sub, &cs);
         let (outer_members, _outer_header, inner) = as_let(&tree);
         assert_eq!(outer_members.len(), 1);
         assert_eq!(outer_members[0].name, "helper");
@@ -606,13 +712,16 @@ mod tests {
         assert_eq!(inner_members.len(), 1);
         assert_eq!(inner_members[0].name, "useHelper");
         assert_eq!(*innermost, Constraint::True);
+        // The flattened member list (Fix #3) should carry both.
+        let all_names: Vec<&str> = all_members.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(all_names, vec!["helper", "useHelper"]);
     }
 
     #[test]
     fn signed_binding_gets_rigid_vars_and_given_constraints() {
         let mut sub = Substitution::new();
         let cs = decls("myMax :: Ord a => a -> a -> a\nmyMax x y = x\n");
-        let tree = constrain_module(&mut sub, &cs);
+        let (tree, _members) = constrain_module(&mut sub, &cs);
         let (members, _header, _body) = as_let(&tree);
         assert_eq!(members.len(), 1);
         let declared = members[0].declared.as_ref().expect("myMax has a signature");
@@ -643,7 +752,7 @@ mod tests {
     fn self_recursive_binding_is_a_singleton_group_via_scope_not_lookup() {
         let mut sub = Substitution::new();
         let cs = decls("loop x = loop x\n");
-        let tree = constrain_module(&mut sub, &cs);
+        let (tree, _members) = constrain_module(&mut sub, &cs);
         let (members, header, _body) = as_let(&tree);
         assert_eq!(members.len(), 1);
         // The self-call should resolve monomorphically (no deferred Lookup
@@ -671,9 +780,12 @@ mod tests {
             Spanned::new(span, CPattern::Var("x".to_string())),
             Spanned::new(span, CExpr::IntLit(1)),
         )];
-        let (_ty, tree) = constrain_let_bindings(&mut sub, &mut scope, &bindings, |sub, _, _| {
-            sub.fresh_unbound()
-        });
+        let (_typed, tree) =
+            constrain_let_bindings(&mut sub, &mut scope, &bindings, |sub, _, _| Typed {
+                span,
+                ty: sub.fresh_unbound(),
+                node: TExpr::Unit,
+            });
         match tree {
             Constraint::Let { top_level, .. } => assert!(!top_level),
             other => panic!("expected a Let, got {other:?}"),
@@ -710,7 +822,7 @@ mod tests {
                 ]),
             ),
         )];
-        let (result_ty, tree) =
+        let (typed, tree) =
             constrain_let_bindings(&mut sub, &mut scope, &bindings, |sub, scope, cs| {
                 constrain_expr(
                     sub,
@@ -724,21 +836,20 @@ mod tests {
             });
         // No SCC group at all -- just the accumulated Equal constraints.
         assert!(!matches!(tree, Constraint::Let { .. }));
-        for c in std::iter::once(&tree) {
-            if let Constraint::And(cs) = c {
-                for eq in cs {
-                    if let Constraint::Equal {
-                        expected, actual, ..
-                    } = eq
-                    {
-                        crate::unify::unify(&mut sub, *expected, *actual).unwrap();
-                    }
+        if let Constraint::And(cs) = &tree {
+            for eq in cs {
+                if let Constraint::Equal {
+                    expected, actual, ..
+                } = eq
+                {
+                    crate::unify::unify(&mut sub, *expected, *actual).unwrap();
                 }
             }
         }
         assert_eq!(
-            sub.resolve_structure(result_ty),
+            sub.resolve_structure(typed.ty),
             sub.resolve_structure(scope.lookup("a").header_ty())
         );
+        assert!(matches!(typed.node, TExpr::Let(ref bs, _) if bs.len() == 1));
     }
 }

@@ -21,17 +21,19 @@
 //! against; `annotation::table`/`annotation::sensitivity` derive an
 //! annotation key's expected type (though nothing yet checks a real
 //! annotation *value* against it — see `annotation::table`'s own docs).
-//! `ast.rs`/`elaborate.rs` (TM7) give the target Elaborated-AST shape and a
-//! fully-working dictionary-*resolution* primitive, but not yet a complete
-//! `CExpr` -> `TExpr` tree walk — see `ast.rs`'s own doc comment for
-//! exactly what that still needs. `prelude.rs` (TM8) seeds real
-//! `SchemeEnv`/`InstanceTable` entries for every built-in value/instance in
-//! the spec, `map`/`foldl`/`foldr`/`filter`/`length`/`pure`/`bind` included
-//! (Fix #2). There is still no public `check_module` entry point — that
-//! needs the `ast.rs` tree-walk gap closed first. `exhaustiveness.rs` (TM9,
-//! a stretch goal per the plan) is a fully self-contained pattern-match
-//! usefulness checker (Maranget's algorithm) — a warning-only pass, never
-//! wired into `check_module` at all since it doesn't need to be.
+//! `ast.rs`/`elaborate.rs` (TM7, completed by Fix #3) give the target
+//! Elaborated-AST shape, a fully-working dictionary-*resolution* primitive,
+//! and now a complete `CExpr` -> `TExpr` tree walk too. `prelude.rs` (TM8)
+//! seeds real `SchemeEnv`/`InstanceTable` entries for every built-in
+//! value/instance in the spec, `map`/`foldl`/`foldr`/`filter`/`length`/
+//! `pure`/`bind` included (Fix #2). There is still no public `check_module`
+//! entry point tying generation+solving+elaboration together into one call:
+//! `constrain::decl::constrain_module`, `solve::solve_with_obligations`, and
+//! `elaborate::elaborate_module` (see each's own tests) are the pieces, not
+//! yet wired into one. `exhaustiveness.rs` (TM9, a stretch goal per the
+//! plan) is a fully self-contained pattern-match usefulness checker
+//! (Maranget's algorithm) — a warning-only pass, never wired into
+//! `check_module` at all since it doesn't need to be.
 //!
 //! **Post-TM9**: see `knot-checker-gaps-plan.md` at the repo root for a
 //! full audit of what TM0-TM9 left unsound (beyond the two already-known
@@ -64,13 +66,38 @@
 //!   Int)`'s `Eq` are now correctly rejected instead of silently ignored.
 //!   Dictionary *construction* (as opposed to existence-checking) for
 //!   structural obligations is deliberately still out of scope — see
-//!   `elaborate.rs`'s own doc comment on why that belongs with Fix #3
+//!   `elaborate.rs`'s own doc comment on why that belongs with a future fix
 //!   instead. Skipped one literal step from the gaps plan on inspection:
 //!   `Structure::Tuple`/`Record`'s hardcoded rule is gated to `Eq`/`Ord`/
 //!   `Show` specifically (matching `Unit`'s own case) rather than applying
 //!   to every interface unconditionally — the plan's own code sketch
 //!   omitted that gate, which would have wrongly let e.g. `(Int, Int)`
 //!   inherit a `Num` instance it should never have.
+//! - **Fix #3** (done): `constrain::expr`/`constrain::pattern` now return a
+//!   `Typed<TExpr>`/`Typed<TPattern>` (`ast.rs`) per node instead of a bare
+//!   `TypeVarId` — Stage A of real elaboration. `LetMember.elaborated_body`
+//!   and `constrain_module`/`constrain_let_bindings`'s new return shapes
+//!   thread it through `constrain::decl`. `solve::solve_with_obligations`
+//!   (`solve::solve` itself unchanged, so its ~15 existing callers didn't
+//!   need to) adds a side-table recovering a `Lookup`/`LookupLocal`
+//!   reference's own instantiated obligations, since — unlike `BinOp`/
+//!   `Negate`, which know theirs already at generation time — those aren't
+//!   known until the referenced scheme is instantiated during solving.
+//!   `elaborate::elaborate_module` is Stage B: walks every top-level
+//!   binding's elaborated body and resolves each obligation it finds, via
+//!   the existing `resolve_dictionary`. Found a real gap in the gaps plan's
+//!   own Fix #3 sketch while implementing Stage B: it assumed every
+//!   obligation resolves concretely, but a genuinely polymorphic binding's
+//!   own body (`useEq x y = x == y`, not called anywhere in its own module)
+//!   has obligations that are legitimately never concrete *in that module*
+//!   — absorbed into the binding's own scheme by `generalize` instead of
+//!   left dangling. Reporting that as `NoInstance` would be a real, if
+//!   subtle, false positive on valid polymorphic code — `ast::
+//!   ObligationResolution::StillAbstract` names this case honestly instead.
+//!   Full dictionary-*parameter* codegen for polymorphic bindings (Wadler &
+//!   Blott's transform in full) is real, separate, future work; telling the
+//!   two cases apart correctly, without silently conflating them, is what
+//!   this fix actually commits to.
 
 pub mod annotation;
 pub mod ast;

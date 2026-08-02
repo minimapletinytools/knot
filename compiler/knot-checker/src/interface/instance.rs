@@ -561,7 +561,7 @@ mod tests {
         assert!(table_errors.is_empty(), "{table_errors:?}");
 
         let mut sub = Substitution::new();
-        let tree = crate::constrain::decl::constrain_module(&mut sub, &cs);
+        let (tree, _members) = crate::constrain::decl::constrain_module(&mut sub, &cs);
         let mut env = crate::solve::SchemeEnv::new();
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
@@ -581,7 +581,7 @@ mod tests {
         assert!(table_errors.is_empty(), "{table_errors:?}");
 
         let mut sub = Substitution::new();
-        let tree = crate::constrain::decl::constrain_module(&mut sub, &cs);
+        let (tree, _members) = crate::constrain::decl::constrain_module(&mut sub, &cs);
         let mut env = crate::solve::SchemeEnv::new();
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");

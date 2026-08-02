@@ -1,16 +1,21 @@
 //! Constraint generation over `CExpr` (mirrors Elm's own
 //! `Constrain/Expression.hs`, conceptually). Each function returns the
-//! expression's own inferred type; relating two types is always done by
-//! pushing a `Constraint::Equal`, never by calling `unify` directly — see
-//! `constrain/mod.rs`'s module docs on why generation and solving stay
-//! separate passes.
+//! expression's own inferred type wrapped in a `TypedExpr` (Fix #3's Stage
+//! A — see `ast.rs`'s own doc comment for the full elaboration design);
+//! relating two types is always done by pushing a `Constraint::Equal`,
+//! never by calling `unify` directly — see `constrain/mod.rs`'s module docs
+//! on why generation and solving stay separate passes.
 //!
 //! `BinOp`/`Negate` are handled via a small, closed operator → interface
 //! table (`constrain_binop`/spec §4.8, §6.2): what interface (if any) the
 //! operator needs, and how its operand/result types relate. This only
 //! emits `HasInstance` obligations — it doesn't check whether a resolvable
 //! instance actually exists (that's `interface/table.rs`'s job, TM6);
-//! generation only ever records *what* must hold, never checks it.
+//! generation only ever records *what* must hold, never checks it. The
+//! exact same `(interface, TypeVarId)` pairs also get stashed directly on
+//! the resulting `TExpr::BinOp`/`TExpr::Negate` node (`collect_has_instance`)
+//! — see `ast.rs`'s own doc comment on why this is safe to do eagerly here,
+//! unlike a `Lookup`/`LookupLocal`-resolved reference's own obligations.
 //!
 //! `Let` delegates to `constrain::decl::constrain_let_bindings` (TM4) for
 //! its SCC-based dependency splitting.
@@ -27,12 +32,15 @@
 //!
 //! **Not yet handled**: `Annotated`'s annotation values aren't constrained
 //! here at all (that's TM6's annotation-checking layer, plan §3.5), so this
-//! pass only ever looks straight through to the target expression.
+//! pass only ever looks straight through to the target expression, and its
+//! `TExpr::Annotated` carries the original, un-typechecked `CAnnotation`s
+//! verbatim.
 
 use knot_canonical::ast::{CDoStmt, CExpr, CPattern, Ref};
 use knot_syntax::ast::expr::BinOp;
 use knot_syntax::span::{Span, Spanned};
 
+use crate::ast::{TExpr, Typed, TypedExpr};
 use crate::constrain::pattern::constrain_pattern;
 use crate::constrain::{Constraint, LocalBinding, LocalScope};
 use crate::ty::Structure;
@@ -44,6 +52,21 @@ fn app0(sub: &mut Substitution, name: &str) -> TypeVarId {
 
 fn app1(sub: &mut Substitution, name: &str, arg: TypeVarId) -> TypeVarId {
     sub.fresh_bound(Structure::App(Ref::Builtin(name.to_string()), vec![arg]))
+}
+
+/// Every `Constraint::HasInstance` in `constraints[from..]`, as `(interface,
+/// ty)` pairs — used right after a call that's known to push zero or more
+/// `HasInstance`s (`constrain_binop`, `Negate`) to recover exactly which
+/// ones, for stashing directly on the resulting `TExpr` node (see module
+/// docs).
+fn collect_has_instance(constraints: &[Constraint], from: usize) -> Vec<(String, TypeVarId)> {
+    constraints[from..]
+        .iter()
+        .filter_map(|c| match c {
+            Constraint::HasInstance { interface, ty, .. } => Some((interface.clone(), *ty)),
+            _ => None,
+        })
+        .collect()
 }
 
 /// `left`/`right` must be the same type, and that type needs `interface`.
@@ -232,136 +255,179 @@ pub fn constrain_expr(
     scope: &mut LocalScope,
     expr: &Spanned<CExpr>,
     constraints: &mut Vec<Constraint>,
-) -> TypeVarId {
+) -> TypedExpr {
     let span = expr.span;
+    let wrap = |ty, node| Typed { span, ty, node };
     match &expr.node {
-        CExpr::IntLit(_) => app0(sub, "Int"),
-        CExpr::FloatLit(_) => app0(sub, "Float"),
-        CExpr::StringLit(_) => app0(sub, "String"),
-        CExpr::Unit => sub.fresh_bound(Structure::Unit),
+        CExpr::IntLit(n) => wrap(app0(sub, "Int"), TExpr::IntLit(*n)),
+        CExpr::FloatLit(f) => wrap(app0(sub, "Float"), TExpr::FloatLit(*f)),
+        CExpr::StringLit(s) => wrap(app0(sub, "String"), TExpr::StringLit(s.clone())),
+        CExpr::Unit => wrap(sub.fresh_bound(Structure::Unit), TExpr::Unit),
         // A hole's own type is unconstrained by design (it could be
         // anything) -- that a hole must always be a compile error (spec
         // §12.1) is a separate, later diagnostic concern (recording and
         // always rejecting every hole span seen), not a typing constraint,
         // so it isn't handled here.
-        CExpr::Hole => sub.fresh_unbound(),
-        CExpr::Var(r) | CExpr::Ctor(r) => constrain_name_ref(sub, scope, r, span, constraints),
+        CExpr::Hole => wrap(sub.fresh_unbound(), TExpr::Hole),
+        CExpr::Var(r) => {
+            let ty = constrain_name_ref(sub, scope, r, span, constraints);
+            wrap(ty, TExpr::Var(r.clone()))
+        }
+        CExpr::Ctor(r) => {
+            let ty = constrain_name_ref(sub, scope, r, span, constraints);
+            wrap(ty, TExpr::Ctor(r.clone()))
+        }
         CExpr::Lambda(params, body) => {
             scope.push();
-            let param_tys: Vec<TypeVarId> = params
+            let typed_params: Vec<crate::ast::TypedPattern> = params
                 .iter()
                 .map(|p| constrain_pattern(sub, scope, p, constraints))
                 .collect();
-            let body_ty = constrain_expr(sub, scope, body, constraints);
+            let typed_body = constrain_expr(sub, scope, body, constraints);
             scope.pop();
-            param_tys.into_iter().rev().fold(body_ty, |acc, param_ty| {
-                sub.fresh_bound(Structure::Fn(param_ty, acc))
-            })
+            let ty = typed_params.iter().rev().fold(typed_body.ty, |acc, p| {
+                sub.fresh_bound(Structure::Fn(p.ty, acc))
+            });
+            wrap(ty, TExpr::Lambda(typed_params, Box::new(typed_body)))
         }
         CExpr::App(f, arg) => {
-            let f_ty = constrain_expr(sub, scope, f, constraints);
-            let arg_ty = constrain_expr(sub, scope, arg, constraints);
+            let typed_f = constrain_expr(sub, scope, f, constraints);
+            let typed_arg = constrain_expr(sub, scope, arg, constraints);
             let result_ty = sub.fresh_unbound();
-            let expected_fn_ty = sub.fresh_bound(Structure::Fn(arg_ty, result_ty));
+            let expected_fn_ty = sub.fresh_bound(Structure::Fn(typed_arg.ty, result_ty));
             constraints.push(Constraint::Equal {
                 span,
-                expected: f_ty,
+                expected: typed_f.ty,
                 actual: expected_fn_ty,
             });
-            result_ty
+            wrap(
+                result_ty,
+                TExpr::App(Box::new(typed_f), Box::new(typed_arg)),
+            )
         }
         CExpr::If(cond, then_branch, else_branch) => {
-            let cond_ty = constrain_expr(sub, scope, cond, constraints);
+            let typed_cond = constrain_expr(sub, scope, cond, constraints);
             let bool_ty = app0(sub, "Bool");
             constraints.push(Constraint::Equal {
                 span,
-                expected: cond_ty,
+                expected: typed_cond.ty,
                 actual: bool_ty,
             });
-            let then_ty = constrain_expr(sub, scope, then_branch, constraints);
-            let else_ty = constrain_expr(sub, scope, else_branch, constraints);
+            let typed_then = constrain_expr(sub, scope, then_branch, constraints);
+            let typed_else = constrain_expr(sub, scope, else_branch, constraints);
             constraints.push(Constraint::Equal {
                 span,
-                expected: then_ty,
-                actual: else_ty,
+                expected: typed_then.ty,
+                actual: typed_else.ty,
             });
-            then_ty
+            let ty = typed_then.ty;
+            wrap(
+                ty,
+                TExpr::If(
+                    Box::new(typed_cond),
+                    Box::new(typed_then),
+                    Box::new(typed_else),
+                ),
+            )
         }
         CExpr::Case(scrutinee, arms) => {
-            let scrutinee_ty = constrain_expr(sub, scope, scrutinee, constraints);
+            let typed_scrutinee = constrain_expr(sub, scope, scrutinee, constraints);
             let result_ty = sub.fresh_unbound();
+            let mut typed_arms = Vec::new();
             for (pattern, body) in arms {
                 scope.push();
-                let pattern_ty = constrain_pattern(sub, scope, pattern, constraints);
+                let typed_pattern = constrain_pattern(sub, scope, pattern, constraints);
                 constraints.push(Constraint::Equal {
                     span,
-                    expected: scrutinee_ty,
-                    actual: pattern_ty,
+                    expected: typed_scrutinee.ty,
+                    actual: typed_pattern.ty,
                 });
-                let body_ty = constrain_expr(sub, scope, body, constraints);
+                let typed_body = constrain_expr(sub, scope, body, constraints);
                 constraints.push(Constraint::Equal {
                     span,
                     expected: result_ty,
-                    actual: body_ty,
+                    actual: typed_body.ty,
                 });
                 scope.pop();
+                typed_arms.push((typed_pattern, typed_body));
             }
-            result_ty
+            wrap(
+                result_ty,
+                TExpr::Case(Box::new(typed_scrutinee), typed_arms),
+            )
         }
         CExpr::List(elems) => {
             let elem_ty = sub.fresh_unbound();
+            let mut typed_elems = Vec::new();
             for e in elems {
-                let e_ty = constrain_expr(sub, scope, e, constraints);
+                let typed_e = constrain_expr(sub, scope, e, constraints);
                 constraints.push(Constraint::Equal {
                     span,
                     expected: elem_ty,
-                    actual: e_ty,
+                    actual: typed_e.ty,
                 });
+                typed_elems.push(typed_e);
             }
-            app1(sub, "List", elem_ty)
+            wrap(app1(sub, "List", elem_ty), TExpr::List(typed_elems))
         }
         // Arity <= 3 is already enforced post-parse (`knot-syntax::validate`)
         // -- not re-checked here.
         CExpr::Tuple(elems) => {
-            let elem_tys = elems
+            let typed_elems: Vec<TypedExpr> = elems
                 .iter()
                 .map(|e| constrain_expr(sub, scope, e, constraints))
                 .collect();
-            sub.fresh_bound(Structure::Tuple(elem_tys))
+            let elem_tys = typed_elems.iter().map(|e| e.ty).collect();
+            wrap(
+                sub.fresh_bound(Structure::Tuple(elem_tys)),
+                TExpr::Tuple(typed_elems),
+            )
         }
         // A record literal is always closed -- exactly these fields, spec
         // §4.7 -- unlike `FieldAccess`/`RecordUpdate` below, which only ever
         // need an *open* row (the value being accessed/updated might have
         // more fields than the expression cares about).
         CExpr::Record(fields) => {
-            let field_tys = fields
+            let typed_fields: Vec<(String, TypedExpr)> = fields
                 .iter()
                 .map(|(name, e)| (name.clone(), constrain_expr(sub, scope, e, constraints)))
                 .collect();
-            sub.fresh_bound(Structure::Record(field_tys, None))
+            let field_tys = typed_fields
+                .iter()
+                .map(|(n, e)| (n.clone(), e.ty))
+                .collect();
+            wrap(
+                sub.fresh_bound(Structure::Record(field_tys, None)),
+                TExpr::Record(typed_fields),
+            )
         }
         CExpr::RecordUpdate(base, updates) => {
-            let base_ty = constrain_expr(sub, scope, base, constraints);
-            let update_tys = updates
+            let typed_base = constrain_expr(sub, scope, base, constraints);
+            let typed_updates: Vec<(String, TypedExpr)> = updates
                 .iter()
                 .map(|(name, e)| (name.clone(), constrain_expr(sub, scope, e, constraints)))
                 .collect();
             // `base` only needs to have *at least* the updated fields, at
             // their new types -- the row-polymorphism machinery in
             // `unify::unify_record` figures out the rest, whatever it is.
+            let update_tys = typed_updates
+                .iter()
+                .map(|(n, e)| (n.clone(), e.ty))
+                .collect();
             let rest = sub.fresh_unbound();
             let required = sub.fresh_bound(Structure::Record(update_tys, Some(rest)));
             constraints.push(Constraint::Equal {
                 span,
-                expected: base_ty,
+                expected: typed_base.ty,
                 actual: required,
             });
             // The result has exactly `base`'s own shape -- an update can't
             // add or remove fields, only change values.
-            base_ty
+            let ty = typed_base.ty;
+            wrap(ty, TExpr::RecordUpdate(Box::new(typed_base), typed_updates))
         }
         CExpr::FieldAccess(base, field) => {
-            let base_ty = constrain_expr(sub, scope, base, constraints);
+            let typed_base = constrain_expr(sub, scope, base, constraints);
             let field_ty = sub.fresh_unbound();
             let rest = sub.fresh_unbound();
             let mut required_fields = std::collections::BTreeMap::new();
@@ -369,37 +435,58 @@ pub fn constrain_expr(
             let required = sub.fresh_bound(Structure::Record(required_fields, Some(rest)));
             constraints.push(Constraint::Equal {
                 span,
-                expected: base_ty,
+                expected: typed_base.ty,
                 actual: required,
             });
-            field_ty
+            wrap(
+                field_ty,
+                TExpr::FieldAccess(Box::new(typed_base), field.clone()),
+            )
         }
         // Annotation *values* aren't constrained here at all -- see this
-        // module's doc comment. Just look straight through to the target.
-        CExpr::Annotated(_annotations, target) => constrain_expr(sub, scope, target, constraints),
+        // module's doc comment. Just look straight through to the target,
+        // keeping the original CAnnotations unelaborated.
+        CExpr::Annotated(annotations, target) => {
+            let typed_target = constrain_expr(sub, scope, target, constraints);
+            let ty = typed_target.ty;
+            wrap(
+                ty,
+                TExpr::Annotated(annotations.clone(), Box::new(typed_target)),
+            )
+        }
         CExpr::BinOp(op, l, r) => {
-            let left = constrain_expr(sub, scope, l, constraints);
-            let right = constrain_expr(sub, scope, r, constraints);
-            constrain_binop(sub, *op, span, left, right, constraints)
+            let typed_l = constrain_expr(sub, scope, l, constraints);
+            let typed_r = constrain_expr(sub, scope, r, constraints);
+            let before = constraints.len();
+            let ty = constrain_binop(sub, *op, span, typed_l.ty, typed_r.ty, constraints);
+            let obligations = collect_has_instance(constraints, before);
+            wrap(
+                ty,
+                TExpr::BinOp(*op, Box::new(typed_l), Box::new(typed_r), obligations),
+            )
         }
         CExpr::Negate(e) => {
-            let e_ty = constrain_expr(sub, scope, e, constraints);
+            let typed_e = constrain_expr(sub, scope, e, constraints);
             constraints.push(Constraint::HasInstance {
                 span,
                 interface: "Num".to_string(),
-                ty: e_ty,
+                ty: typed_e.ty,
             });
-            e_ty
+            let ty = typed_e.ty;
+            wrap(
+                ty,
+                TExpr::Negate(Box::new(typed_e), vec![("Num".to_string(), ty)]),
+            )
         }
         CExpr::Let(bindings, body) => {
-            let (result_ty, let_con) = crate::constrain::decl::constrain_let_bindings(
+            let (typed_let, let_con) = crate::constrain::decl::constrain_let_bindings(
                 sub,
                 scope,
                 bindings,
                 |sub, scope, cs| constrain_expr(sub, scope, body, cs),
             );
             constraints.push(let_con);
-            result_ty
+            typed_let
         }
         CExpr::Do(stmts, final_expr) => {
             let desugared = desugar_do(stmts, final_expr);
@@ -496,28 +583,30 @@ mod tests {
         let mut sub = Substitution::new();
         let mut scope = LocalScope::new();
         let mut cs = Vec::new();
-        let int_ty = constrain_expr(&mut sub, &mut scope, &e(CExpr::IntLit(1)), &mut cs);
-        let float_ty = constrain_expr(&mut sub, &mut scope, &e(CExpr::FloatLit(1.0)), &mut cs);
-        let str_ty = constrain_expr(
+        let int_typed = constrain_expr(&mut sub, &mut scope, &e(CExpr::IntLit(1)), &mut cs);
+        let float_typed = constrain_expr(&mut sub, &mut scope, &e(CExpr::FloatLit(1.0)), &mut cs);
+        let str_typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::StringLit("x".to_string())),
             &mut cs,
         );
-        let unit_ty = constrain_expr(&mut sub, &mut scope, &e(CExpr::Unit), &mut cs);
+        let unit_typed = constrain_expr(&mut sub, &mut scope, &e(CExpr::Unit), &mut cs);
         assert_eq!(
-            sub.resolve_structure(int_ty),
+            sub.resolve_structure(int_typed.ty),
             Some(builtin(&mut sub, "Int"))
         );
         assert_eq!(
-            sub.resolve_structure(float_ty),
+            sub.resolve_structure(float_typed.ty),
             Some(builtin(&mut sub, "Float"))
         );
         assert_eq!(
-            sub.resolve_structure(str_ty),
+            sub.resolve_structure(str_typed.ty),
             Some(builtin(&mut sub, "String"))
         );
-        assert_eq!(sub.resolve_structure(unit_ty), Some(Structure::Unit));
+        assert_eq!(sub.resolve_structure(unit_typed.ty), Some(Structure::Unit));
+        assert_eq!(int_typed.node, TExpr::IntLit(1));
+        assert_eq!(unit_typed.node, TExpr::Unit);
     }
 
     #[test]
@@ -525,9 +614,9 @@ mod tests {
         let mut sub = Substitution::new();
         let mut scope = LocalScope::new();
         let mut cs = Vec::new();
-        let ty = constrain_expr(&mut sub, &mut scope, &e(CExpr::Hole), &mut cs);
+        let typed = constrain_expr(&mut sub, &mut scope, &e(CExpr::Hole), &mut cs);
         assert!(cs.is_empty());
-        assert!(sub.resolve_structure(ty).is_none());
+        assert!(sub.resolve_structure(typed.ty).is_none());
     }
 
     #[test]
@@ -538,14 +627,14 @@ mod tests {
         let bound = sub.fresh_unbound();
         scope.bind("x", bound);
         let mut cs = Vec::new();
-        let ty = constrain_expr(
+        let typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::Var(Ref::Local("x".to_string()))),
             &mut cs,
         );
         assert!(cs.is_empty());
-        assert_eq!(ty, bound);
+        assert_eq!(typed.ty, bound);
     }
 
     #[test]
@@ -553,7 +642,7 @@ mod tests {
         let mut sub = Substitution::new();
         let mut scope = LocalScope::new();
         let mut cs = Vec::new();
-        let ty = constrain_expr(
+        let typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::Var(Ref::Builtin("compare".to_string()))),
@@ -563,7 +652,7 @@ mod tests {
         assert!(matches!(
             &cs[0],
             Constraint::Lookup { reference, expected, .. }
-                if *reference == Ref::Builtin("compare".to_string()) && *expected == ty
+                if *reference == Ref::Builtin("compare".to_string()) && *expected == typed.ty
         ));
     }
 
@@ -587,7 +676,7 @@ mod tests {
         let mut scope = LocalScope::new();
         let mut cs = Vec::new();
         // \x y -> x  ::  a -> b -> a
-        let ty = constrain_expr(
+        let typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::Lambda(
@@ -599,7 +688,7 @@ mod tests {
             )),
             &mut cs,
         );
-        match sub.resolve_structure(ty) {
+        match sub.resolve_structure(typed.ty) {
             Some(Structure::Fn(x_ty, rest)) => match sub.resolve_structure(rest) {
                 Some(Structure::Fn(_y_ty, body_ty)) => {
                     assert_eq!(sub.find(x_ty), sub.find(body_ty));
@@ -608,6 +697,7 @@ mod tests {
             },
             other => panic!("expected a Fn shape, got {other:?}"),
         }
+        assert!(matches!(typed.node, TExpr::Lambda(ref params, _) if params.len() == 2));
     }
 
     #[test]
@@ -623,7 +713,7 @@ mod tests {
         scope.bind("arg", arg_ty);
 
         let mut cs = Vec::new();
-        let result = constrain_expr(
+        let typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::App(
@@ -634,7 +724,7 @@ mod tests {
         );
         solve_equalities(&mut sub, cs);
         assert_eq!(
-            sub.resolve_structure(result),
+            sub.resolve_structure(typed.ty),
             Some(builtin(&mut sub, "Bool"))
         );
     }
@@ -647,7 +737,7 @@ mod tests {
         let cond_ty = app0(&mut sub, "Bool");
         scope.bind("cond", cond_ty);
         let mut cs = Vec::new();
-        let ty = constrain_expr(
+        let typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::If(
@@ -658,7 +748,10 @@ mod tests {
             &mut cs,
         );
         solve_equalities(&mut sub, cs);
-        assert_eq!(sub.resolve_structure(ty), Some(builtin(&mut sub, "Int")));
+        assert_eq!(
+            sub.resolve_structure(typed.ty),
+            Some(builtin(&mut sub, "Int"))
+        );
     }
 
     #[test]
@@ -670,7 +763,7 @@ mod tests {
         scope.bind("n", scrutinee_ty);
         let mut cs = Vec::new();
         // case n of 1 -> "one" | _ -> "other"
-        let ty = constrain_expr(
+        let typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::Case(
@@ -689,7 +782,11 @@ mod tests {
             &mut cs,
         );
         solve_equalities(&mut sub, cs);
-        assert_eq!(sub.resolve_structure(ty), Some(builtin(&mut sub, "String")));
+        assert_eq!(
+            sub.resolve_structure(typed.ty),
+            Some(builtin(&mut sub, "String"))
+        );
+        assert!(matches!(typed.node, TExpr::Case(_, ref arms) if arms.len() == 2));
     }
 
     #[test]
@@ -697,14 +794,14 @@ mod tests {
         let mut sub = Substitution::new();
         let mut scope = LocalScope::new();
         let mut cs = Vec::new();
-        let ty = constrain_expr(
+        let typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::List(vec![e(CExpr::IntLit(1)), e(CExpr::IntLit(2))])),
             &mut cs,
         );
         solve_equalities(&mut sub, cs);
-        match sub.resolve_structure(ty) {
+        match sub.resolve_structure(typed.ty) {
             Some(Structure::App(r, args)) if r == Ref::Builtin("List".to_string()) => {
                 assert_eq!(
                     sub.resolve_structure(args[0]),
@@ -720,7 +817,7 @@ mod tests {
         let mut sub = Substitution::new();
         let mut scope = LocalScope::new();
         let mut cs = Vec::new();
-        let ty = constrain_expr(
+        let typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::Tuple(vec![
@@ -729,7 +826,7 @@ mod tests {
             ])),
             &mut cs,
         );
-        match sub.resolve_structure(ty) {
+        match sub.resolve_structure(typed.ty) {
             Some(Structure::Tuple(elems)) => {
                 assert_eq!(
                     sub.resolve_structure(elems[0]),
@@ -749,13 +846,13 @@ mod tests {
         let mut sub = Substitution::new();
         let mut scope = LocalScope::new();
         let mut cs = Vec::new();
-        let ty = constrain_expr(
+        let typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::Record(vec![("x".to_string(), e(CExpr::IntLit(1)))])),
             &mut cs,
         );
-        match sub.resolve_structure(ty) {
+        match sub.resolve_structure(typed.ty) {
             Some(Structure::Record(fields, ext)) => {
                 assert_eq!(ext, None);
                 assert_eq!(
@@ -781,7 +878,7 @@ mod tests {
         scope.bind("base", base_ty);
 
         let mut cs = Vec::new();
-        let ty = constrain_expr(
+        let typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::RecordUpdate(
@@ -792,7 +889,7 @@ mod tests {
         );
         solve_equalities(&mut sub, cs);
         // Result is exactly base's own type.
-        assert_eq!(sub.find(ty), sub.find(base_ty));
+        assert_eq!(sub.find(typed.ty), sub.find(base_ty));
     }
 
     #[test]
@@ -807,7 +904,7 @@ mod tests {
         scope.bind("base", base_ty);
 
         let mut cs = Vec::new();
-        let ty = constrain_expr(
+        let typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::FieldAccess(
@@ -817,7 +914,10 @@ mod tests {
             &mut cs,
         );
         solve_equalities(&mut sub, cs);
-        assert_eq!(sub.resolve_structure(ty), Some(builtin(&mut sub, "Int")));
+        assert_eq!(
+            sub.resolve_structure(typed.ty),
+            Some(builtin(&mut sub, "Int"))
+        );
     }
 
     #[test]
@@ -856,13 +956,16 @@ mod tests {
         let mut sub = Substitution::new();
         let mut scope = LocalScope::new();
         let mut cs = Vec::new();
-        let ty = constrain_expr(
+        let typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::Annotated(vec![], Box::new(e(CExpr::IntLit(1))))),
             &mut cs,
         );
-        assert_eq!(sub.resolve_structure(ty), Some(builtin(&mut sub, "Int")));
+        assert_eq!(
+            sub.resolve_structure(typed.ty),
+            Some(builtin(&mut sub, "Int"))
+        );
     }
 
     fn has_instance(cs: &[Constraint], interface: &str) -> Option<TypeVarId> {
@@ -879,7 +982,7 @@ mod tests {
         let mut sub = Substitution::new();
         let mut scope = LocalScope::new();
         let mut cs = Vec::new();
-        let ty = constrain_expr(
+        let typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::BinOp(
@@ -890,8 +993,18 @@ mod tests {
             &mut cs,
         );
         let num_ty = has_instance(&cs, "Num").expect("Add should require Num");
+        // The TExpr node itself should also carry the same obligation.
+        match &typed.node {
+            TExpr::BinOp(BinOp::Add, _, _, obligations) => {
+                assert_eq!(obligations, &vec![("Num".to_string(), num_ty)]);
+            }
+            other => panic!("expected a TExpr::BinOp(Add, ...), got {other:?}"),
+        }
         solve_equalities(&mut sub, cs);
-        assert_eq!(sub.resolve_structure(ty), Some(builtin(&mut sub, "Int")));
+        assert_eq!(
+            sub.resolve_structure(typed.ty),
+            Some(builtin(&mut sub, "Int"))
+        );
         assert_eq!(
             sub.resolve_structure(num_ty),
             Some(builtin(&mut sub, "Int"))
@@ -984,7 +1097,7 @@ mod tests {
         let mut sub = Substitution::new();
         let mut scope = LocalScope::new();
         let mut cs = Vec::new();
-        let ty = constrain_expr(
+        let typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::BinOp(
@@ -996,7 +1109,10 @@ mod tests {
         );
         assert!(has_instance(&cs, "Eq").is_some());
         solve_equalities(&mut sub, cs);
-        assert_eq!(sub.resolve_structure(ty), Some(builtin(&mut sub, "Bool")));
+        assert_eq!(
+            sub.resolve_structure(typed.ty),
+            Some(builtin(&mut sub, "Bool"))
+        );
     }
 
     #[test]
@@ -1004,7 +1120,7 @@ mod tests {
         let mut sub = Substitution::new();
         let mut scope = LocalScope::new();
         let mut cs = Vec::new();
-        let ty = constrain_expr(
+        let typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::BinOp(
@@ -1016,7 +1132,10 @@ mod tests {
         );
         assert!(has_instance(&cs, "Ord").is_some());
         solve_equalities(&mut sub, cs);
-        assert_eq!(sub.resolve_structure(ty), Some(builtin(&mut sub, "Bool")));
+        assert_eq!(
+            sub.resolve_structure(typed.ty),
+            Some(builtin(&mut sub, "Bool"))
+        );
     }
 
     #[test]
@@ -1024,7 +1143,7 @@ mod tests {
         let mut sub = Substitution::new();
         let mut scope = LocalScope::new();
         let mut cs = Vec::new();
-        let ty = constrain_expr(
+        let typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::BinOp(
@@ -1035,7 +1154,7 @@ mod tests {
             &mut cs,
         );
         solve_equalities(&mut sub, cs);
-        match sub.resolve_structure(ty) {
+        match sub.resolve_structure(typed.ty) {
             Some(Structure::App(r, args)) if r == Ref::Builtin("List".to_string()) => {
                 assert_eq!(
                     sub.resolve_structure(args[0]),
@@ -1051,7 +1170,7 @@ mod tests {
         let mut sub = Substitution::new();
         let mut scope = LocalScope::new();
         let mut cs = Vec::new();
-        let ty = constrain_expr(
+        let typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::BinOp(
@@ -1064,7 +1183,10 @@ mod tests {
         // Both operands are deferred Lookups here (not concrete literals),
         // so just check the two Equal-to-Bool constraints got generated and
         // the result itself is already Bool without needing to solve.
-        assert_eq!(sub.resolve_structure(ty), Some(builtin(&mut sub, "Bool")));
+        assert_eq!(
+            sub.resolve_structure(typed.ty),
+            Some(builtin(&mut sub, "Bool"))
+        );
         let equal_count = cs
             .iter()
             .filter(|c| matches!(c, Constraint::Equal { .. }))
@@ -1083,7 +1205,7 @@ mod tests {
         scope.bind("exp", exp_ty);
 
         let mut cs = Vec::new();
-        let ty = constrain_expr(
+        let typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::BinOp(
@@ -1093,7 +1215,7 @@ mod tests {
             )),
             &mut cs,
         );
-        assert_eq!(ty, base_ty); // base and exponent may differ -- result is base's type
+        assert_eq!(typed.ty, base_ty); // base and exponent may differ -- result is base's type
         let num_ty = has_instance(&cs, "Num").unwrap();
         let integral_ty = has_instance(&cs, "Integral").unwrap();
         assert_eq!(
@@ -1118,7 +1240,7 @@ mod tests {
         scope.bind("f", f_ty);
 
         let mut cs = Vec::new();
-        let ty = constrain_expr(
+        let typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::BinOp(
@@ -1129,7 +1251,10 @@ mod tests {
             &mut cs,
         );
         solve_equalities(&mut sub, cs);
-        assert_eq!(sub.resolve_structure(ty), Some(builtin(&mut sub, "Bool")));
+        assert_eq!(
+            sub.resolve_structure(typed.ty),
+            Some(builtin(&mut sub, "Bool"))
+        );
     }
 
     #[test]
@@ -1146,7 +1271,7 @@ mod tests {
         scope.bind("g", g_ty);
 
         let mut cs = Vec::new();
-        let ty = constrain_expr(
+        let typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::BinOp(
@@ -1157,7 +1282,7 @@ mod tests {
             &mut cs,
         );
         solve_equalities(&mut sub, cs);
-        match sub.resolve_structure(ty) {
+        match sub.resolve_structure(typed.ty) {
             Some(Structure::Fn(a, c)) => {
                 assert_eq!(sub.resolve_structure(a), Some(builtin(&mut sub, "Int")));
                 assert_eq!(sub.resolve_structure(c), Some(builtin(&mut sub, "String")));
@@ -1171,15 +1296,22 @@ mod tests {
         let mut sub = Substitution::new();
         let mut scope = LocalScope::new();
         let mut cs = Vec::new();
-        let ty = constrain_expr(
+        let typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::Negate(Box::new(e(CExpr::IntLit(1))))),
             &mut cs,
         );
         let num_ty = has_instance(&cs, "Num").expect("Negate should require Num");
-        assert_eq!(num_ty, ty);
-        assert_eq!(sub.resolve_structure(ty), Some(builtin(&mut sub, "Int")));
+        assert_eq!(num_ty, typed.ty);
+        assert_eq!(
+            sub.resolve_structure(typed.ty),
+            Some(builtin(&mut sub, "Int"))
+        );
+        assert!(matches!(
+            &typed.node,
+            TExpr::Negate(_, obligations) if obligations == &vec![("Num".to_string(), num_ty)]
+        ));
     }
 
     #[test]
@@ -1188,7 +1320,7 @@ mod tests {
         let mut sub = Substitution::new();
         let mut scope = LocalScope::new();
         let mut cs = Vec::new();
-        let ty = constrain_expr(
+        let typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::Let(
@@ -1202,7 +1334,11 @@ mod tests {
             &mut cs,
         );
         solve_equalities(&mut sub, cs);
-        assert_eq!(sub.resolve_structure(ty), Some(builtin(&mut sub, "Int")));
+        assert_eq!(
+            sub.resolve_structure(typed.ty),
+            Some(builtin(&mut sub, "Int"))
+        );
+        assert!(matches!(typed.node, TExpr::Let(ref bs, _) if bs.len() == 1));
     }
 
     #[test]
@@ -1218,7 +1354,7 @@ mod tests {
         let mut sub = Substitution::new();
         let mut scope = LocalScope::new();
         let mut cs = Vec::new();
-        let ty = constrain_expr(
+        let typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::Let(
@@ -1249,6 +1385,9 @@ mod tests {
             &Constraint::And(cs),
         );
         assert!(errors.is_empty(), "{errors:?}");
-        assert_eq!(sub.resolve_structure(ty), Some(builtin(&mut sub, "Int")));
+        assert_eq!(
+            sub.resolve_structure(typed.ty),
+            Some(builtin(&mut sub, "Int"))
+        );
     }
 }

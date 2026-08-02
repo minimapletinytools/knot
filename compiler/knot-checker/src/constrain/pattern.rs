@@ -1,8 +1,10 @@
 //! Constraint generation over `CPattern` (mirrors Elm's own
 //! `Constrain/Pattern.hs`, conceptually). Each function returns the
-//! pattern's own inferred type — relating that to whatever it's actually
-//! being matched against (a scrutinee, a signature's parameter type, ...) is
-//! the caller's job, via an ordinary `Constraint::Equal`, not this module's.
+//! pattern's own inferred type, wrapped in a `TypedPattern` (Fix #3's Stage
+//! A — see `ast.rs`'s own doc comment) — relating that type to whatever
+//! it's actually being matched against (a scrutinee, a signature's
+//! parameter type, ...) is the caller's job, via an ordinary
+//! `Constraint::Equal`, not this module's.
 //!
 //! Binds pattern variables into `scope` as a side effect, exactly the way
 //! `knot_canonical::resolve::pattern` binds *names* into its own `Env` — this
@@ -15,6 +17,7 @@ use knot_canonical::ast::CPattern;
 use knot_syntax::ast::pattern::PatternLiteral;
 use knot_syntax::span::Spanned;
 
+use crate::ast::{Typed, TypedPattern};
 use crate::constrain::{Constraint, LocalScope};
 use crate::ty::Structure;
 use crate::var::{Substitution, TypeVarId};
@@ -38,68 +41,91 @@ pub fn constrain_pattern(
     scope: &mut LocalScope,
     pattern: &Spanned<CPattern>,
     constraints: &mut Vec<Constraint>,
-) -> TypeVarId {
+) -> TypedPattern {
     let span = pattern.span;
+    let wrap = |ty, node| Typed { span, ty, node };
     match &pattern.node {
         // A named wildcard (`_name`) is a discard exactly like `_` -- spec
         // §12.2/§12.3: the name is a mnemonic for the reader only, never
         // compiler-checked, so it's never bound into scope.
-        CPattern::Wildcard(_) => sub.fresh_unbound(),
+        CPattern::Wildcard(name) => wrap(
+            sub.fresh_unbound(),
+            crate::ast::TPattern::Wildcard(name.clone()),
+        ),
         CPattern::Var(name) => {
             let ty = sub.fresh_unbound();
             scope.bind(name, ty);
-            ty
+            wrap(ty, crate::ast::TPattern::Var(name.clone()))
         }
-        CPattern::Literal(PatternLiteral::Int(_)) => app0(sub, "Int"),
-        CPattern::Literal(PatternLiteral::Str(_)) => app0(sub, "String"),
+        CPattern::Literal(lit @ PatternLiteral::Int(_)) => {
+            wrap(app0(sub, "Int"), crate::ast::TPattern::Literal(lit.clone()))
+        }
+        CPattern::Literal(lit @ PatternLiteral::Str(_)) => wrap(
+            app0(sub, "String"),
+            crate::ast::TPattern::Literal(lit.clone()),
+        ),
         // Arity against the constructor's declared field count is already
         // checked during canonicalization (see `CPattern::Ctor`'s own doc
         // comment in knot-canonical's `ast.rs`) -- `subpatterns.len()` is
         // trusted as correct here, no re-check needed.
         CPattern::Ctor(reference, subpatterns) => {
-            let field_tys: Vec<TypeVarId> = subpatterns
+            let typed_subs: Vec<TypedPattern> = subpatterns
                 .iter()
                 .map(|p| constrain_pattern(sub, scope, p, constraints))
                 .collect();
             let result = sub.fresh_unbound();
-            let curried = field_tys.into_iter().rev().fold(result, |acc, field_ty| {
-                sub.fresh_bound(Structure::Fn(field_ty, acc))
+            let curried = typed_subs.iter().rev().fold(result, |acc, sub_pat| {
+                sub.fresh_bound(Structure::Fn(sub_pat.ty, acc))
             });
             constraints.push(Constraint::Lookup {
                 span,
                 reference: reference.clone(),
                 expected: curried,
             });
-            result
+            wrap(
+                result,
+                crate::ast::TPattern::Ctor(reference.clone(), typed_subs),
+            )
         }
         CPattern::Tuple(subpatterns) => {
-            let elem_tys = subpatterns
+            let typed_subs: Vec<TypedPattern> = subpatterns
                 .iter()
                 .map(|p| constrain_pattern(sub, scope, p, constraints))
                 .collect();
-            sub.fresh_bound(Structure::Tuple(elem_tys))
+            let elem_tys = typed_subs.iter().map(|p| p.ty).collect();
+            wrap(
+                sub.fresh_bound(Structure::Tuple(elem_tys)),
+                crate::ast::TPattern::Tuple(typed_subs),
+            )
         }
         CPattern::Cons(head, tail) => {
-            let head_ty = constrain_pattern(sub, scope, head, constraints);
-            let tail_ty = constrain_pattern(sub, scope, tail, constraints);
-            let list_ty = app1(sub, "List", head_ty);
+            let head_typed = constrain_pattern(sub, scope, head, constraints);
+            let tail_typed = constrain_pattern(sub, scope, tail, constraints);
+            let list_ty = app1(sub, "List", head_typed.ty);
             constraints.push(Constraint::Equal {
                 span,
-                expected: tail_ty,
+                expected: tail_typed.ty,
                 actual: list_ty,
             });
-            list_ty
+            wrap(
+                list_ty,
+                crate::ast::TPattern::Cons(Box::new(head_typed), Box::new(tail_typed)),
+            )
         }
         CPattern::Nil => {
             let elem_ty = sub.fresh_unbound();
-            app1(sub, "List", elem_ty)
+            wrap(app1(sub, "List", elem_ty), crate::ast::TPattern::Nil)
         }
         CPattern::As(inner, name) => {
-            let ty = constrain_pattern(sub, scope, inner, constraints);
-            scope.bind(name, ty);
-            ty
+            let inner_typed = constrain_pattern(sub, scope, inner, constraints);
+            scope.bind(name, inner_typed.ty);
+            let ty = inner_typed.ty;
+            wrap(
+                ty,
+                crate::ast::TPattern::As(Box::new(inner_typed), name.clone()),
+            )
         }
-        CPattern::Unit => sub.fresh_bound(Structure::Unit),
+        CPattern::Unit => wrap(sub.fresh_bound(Structure::Unit), crate::ast::TPattern::Unit),
     }
 }
 
@@ -148,13 +174,14 @@ mod tests {
         let mut scope = LocalScope::new();
         scope.push();
         let mut cs = Vec::new();
-        let ty = constrain_pattern(
+        let typed = constrain_pattern(
             &mut sub,
             &mut scope,
             &p(CPattern::Var("x".to_string())),
             &mut cs,
         );
-        assert_eq!(scope.lookup("x").header_ty(), ty);
+        assert_eq!(scope.lookup("x").header_ty(), typed.ty);
+        assert_eq!(typed.node, crate::ast::TPattern::Var("x".to_string()));
     }
 
     #[test]
@@ -163,27 +190,27 @@ mod tests {
         let mut scope = LocalScope::new();
         scope.push();
         let mut cs = Vec::new();
-        let int_ty = constrain_pattern(
+        let int_typed = constrain_pattern(
             &mut sub,
             &mut scope,
             &p(CPattern::Literal(PatternLiteral::Int(1))),
             &mut cs,
         );
-        let str_ty = constrain_pattern(
+        let str_typed = constrain_pattern(
             &mut sub,
             &mut scope,
             &p(CPattern::Literal(PatternLiteral::Str("x".to_string()))),
             &mut cs,
         );
         assert_eq!(
-            sub.resolve_structure(int_ty),
+            sub.resolve_structure(int_typed.ty),
             Some(Structure::App(
                 knot_canonical::ast::Ref::Builtin("Int".to_string()),
                 vec![]
             ))
         );
         assert_eq!(
-            sub.resolve_structure(str_ty),
+            sub.resolve_structure(str_typed.ty),
             Some(Structure::App(
                 knot_canonical::ast::Ref::Builtin("String".to_string()),
                 vec![]
@@ -198,7 +225,7 @@ mod tests {
         scope.push();
         let mut cs = Vec::new();
         let reference = knot_canonical::ast::Ref::Builtin("Some".to_string());
-        let result = constrain_pattern(
+        let typed = constrain_pattern(
             &mut sub,
             &mut scope,
             &p(CPattern::Ctor(
@@ -218,12 +245,19 @@ mod tests {
                 match sub.resolve_structure(*expected) {
                     Some(Structure::Fn(field, ret)) => {
                         assert_eq!(field, scope.lookup("x").header_ty());
-                        assert_eq!(ret, result);
+                        assert_eq!(ret, typed.ty);
                     }
                     other => panic!("expected a curried Fn shape, got {other:?}"),
                 }
             }
             other => panic!("expected a Lookup constraint, got {other:?}"),
+        }
+        match &typed.node {
+            crate::ast::TPattern::Ctor(r, subs) => {
+                assert_eq!(*r, reference);
+                assert_eq!(subs.len(), 1);
+            }
+            other => panic!("expected a TPattern::Ctor, got {other:?}"),
         }
     }
 
@@ -233,7 +267,7 @@ mod tests {
         let mut scope = LocalScope::new();
         scope.push();
         let mut cs = Vec::new();
-        let ty = constrain_pattern(
+        let typed = constrain_pattern(
             &mut sub,
             &mut scope,
             &p(CPattern::Tuple(vec![
@@ -242,7 +276,7 @@ mod tests {
             ])),
             &mut cs,
         );
-        match sub.resolve_structure(ty) {
+        match sub.resolve_structure(typed.ty) {
             Some(Structure::Tuple(elems)) => {
                 assert_eq!(
                     elems,
@@ -251,6 +285,7 @@ mod tests {
             }
             other => panic!("expected a Tuple shape, got {other:?}"),
         }
+        assert!(matches!(typed.node, crate::ast::TPattern::Tuple(ref subs) if subs.len() == 2));
     }
 
     #[test]
@@ -259,7 +294,7 @@ mod tests {
         let mut scope = LocalScope::new();
         scope.push();
         let mut cs = Vec::new();
-        let ty = constrain_pattern(
+        let typed = constrain_pattern(
             &mut sub,
             &mut scope,
             &p(CPattern::Cons(
@@ -277,7 +312,7 @@ mod tests {
                 crate::unify::unify(&mut sub, expected, actual).unwrap();
             }
         }
-        match sub.resolve_structure(ty) {
+        match sub.resolve_structure(typed.ty) {
             Some(Structure::App(r, args)) => {
                 assert_eq!(r, knot_canonical::ast::Ref::Builtin("List".to_string()));
                 assert_eq!(args.len(), 1);
@@ -292,9 +327,9 @@ mod tests {
         let mut scope = LocalScope::new();
         scope.push();
         let mut cs = Vec::new();
-        let ty = constrain_pattern(&mut sub, &mut scope, &p(CPattern::Nil), &mut cs);
+        let typed = constrain_pattern(&mut sub, &mut scope, &p(CPattern::Nil), &mut cs);
         assert!(matches!(
-            sub.resolve_structure(ty),
+            sub.resolve_structure(typed.ty),
             Some(Structure::App(r, args)) if r == knot_canonical::ast::Ref::Builtin("List".to_string()) && args.len() == 1
         ));
     }
@@ -305,7 +340,7 @@ mod tests {
         let mut scope = LocalScope::new();
         scope.push();
         let mut cs = Vec::new();
-        let ty = constrain_pattern(
+        let typed = constrain_pattern(
             &mut sub,
             &mut scope,
             &p(CPattern::As(
@@ -314,8 +349,8 @@ mod tests {
             )),
             &mut cs,
         );
-        assert_eq!(scope.lookup("x").header_ty(), ty);
-        assert_eq!(scope.lookup("full").header_ty(), ty);
+        assert_eq!(scope.lookup("x").header_ty(), typed.ty);
+        assert_eq!(scope.lookup("full").header_ty(), typed.ty);
     }
 
     #[test]
@@ -324,7 +359,7 @@ mod tests {
         let mut scope = LocalScope::new();
         scope.push();
         let mut cs = Vec::new();
-        let ty = constrain_pattern(&mut sub, &mut scope, &p(CPattern::Unit), &mut cs);
-        assert_eq!(sub.resolve_structure(ty), Some(Structure::Unit));
+        let typed = constrain_pattern(&mut sub, &mut scope, &p(CPattern::Unit), &mut cs);
+        assert_eq!(sub.resolve_structure(typed.ty), Some(Structure::Unit));
     }
 }

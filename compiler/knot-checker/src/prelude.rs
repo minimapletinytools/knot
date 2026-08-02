@@ -494,7 +494,7 @@ mod tests {
         let mut sub = Substitution::new();
         let (mut env, table) = seed(&mut sub);
         let cs = decls("f x y = x + y\nresult = f 1 2\n");
-        let tree = constrain_module(&mut sub, &cs);
+        let (tree, _members) = constrain_module(&mut sub, &cs);
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
         check_pending(&mut sub, &table, pending, &mut errors);
@@ -506,7 +506,7 @@ mod tests {
         let mut sub = Substitution::new();
         let (mut env, table) = seed(&mut sub);
         let cs = decls("isZero n = if n == 0 then True else False\n");
-        let tree = constrain_module(&mut sub, &cs);
+        let (tree, _members) = constrain_module(&mut sub, &cs);
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
         check_pending(&mut sub, &table, pending, &mut errors);
@@ -523,7 +523,7 @@ mod tests {
         // correctly generalized as `Integral a => a -> Float`, not `Int ->
         // Float`; Int just happens to be the only seeded Integral instance.
         let cs = decls("f n = 1.0 + fromIntegral n\n");
-        let tree = constrain_module(&mut sub, &cs);
+        let (tree, _members) = constrain_module(&mut sub, &cs);
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
         check_pending(&mut sub, &table, pending, &mut errors);
@@ -574,7 +574,7 @@ mod tests {
         let mut sub = Substitution::new();
         let (mut env, table) = seed(&mut sub);
         let cs = decls("result = map (\\x -> x + 1) [1, 2, 3]\n");
-        let tree = constrain_module(&mut sub, &cs);
+        let (tree, _members) = constrain_module(&mut sub, &cs);
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
         check_pending(&mut sub, &table, pending, &mut errors);
@@ -605,7 +605,7 @@ mod tests {
             "n = length [1, 2, 3]\n\
              kept = filter (\\x -> x == 0) [1, 2, 3]\n",
         );
-        let tree = constrain_module(&mut sub, &cs);
+        let (tree, _members) = constrain_module(&mut sub, &cs);
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
         check_pending(&mut sub, &table, pending, &mut errors);
@@ -644,7 +644,7 @@ mod tests {
         let mut sub = Substitution::new();
         let (mut env, table) = seed(&mut sub);
         let cs = decls("bad = map (\\x -> x) (Some 1)\n");
-        let tree = constrain_module(&mut sub, &cs);
+        let (tree, _members) = constrain_module(&mut sub, &cs);
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
         check_pending(&mut sub, &table, pending, &mut errors);
@@ -667,7 +667,7 @@ mod tests {
             "overList = map (\\x -> x + 1) [1, 2, 3]\n\
              overListAgain = map (\\x -> x) [True]\n",
         );
-        let tree = constrain_module(&mut sub, &cs);
+        let (tree, _members) = constrain_module(&mut sub, &cs);
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
         check_pending(&mut sub, &table, pending, &mut errors);
@@ -703,7 +703,7 @@ mod tests {
         let mut sub = Substitution::new();
         let (mut env, table) = seed(&mut sub);
         let cs = decls("result = do\n  x <- Some 1\n  y <- Some 2\n  pure (x + y)\n");
-        let tree = constrain_module(&mut sub, &cs);
+        let (tree, _members) = constrain_module(&mut sub, &cs);
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
         check_pending(&mut sub, &table, pending, &mut errors);
@@ -731,7 +731,7 @@ mod tests {
         let (mut env, table) = seed(&mut sub);
         // Ordering has no seeded Num instance.
         let cs = decls("bad = LT + EQ\n");
-        let tree = constrain_module(&mut sub, &cs);
+        let (tree, _members) = constrain_module(&mut sub, &cs);
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
         check_pending(&mut sub, &table, pending, &mut errors);

@@ -112,6 +112,9 @@ pub struct PendingInstance {
     pub ty: TypeVarId,
 }
 
+/// `solve_with_obligations`'s side-table shape — see its own doc comment.
+pub type ObligationMap = HashMap<TypeVarId, Vec<(String, TypeVarId)>>;
+
 /// Entry point: solves `constraint` against `env` (mutated in place with
 /// whatever new top-level schemes it discovers), returning every
 /// still-unresolved (concrete-typed) instance obligation plus every error
@@ -121,11 +124,30 @@ pub fn solve(
     env: &mut SchemeEnv,
     constraint: &Constraint,
 ) -> (Vec<PendingInstance>, Vec<TypeError>) {
+    let (pending, errors, _obligations) = solve_with_obligations(sub, env, constraint);
+    (pending, errors)
+}
+
+/// Same as `solve`, plus a side-table Fix #3's Stage B
+/// (`elaborate::elaborate_module`) needs: for every `Lookup`/`LookupLocal`
+/// reference resolved along the way, its own `expected` `TypeVarId` (also
+/// that reference's `TExpr::Var`/`TExpr::Ctor` node's own `ty` — see
+/// `ast.rs`'s own doc comment on why that's already a unique key with
+/// nothing extra needed) mapped to exactly the `(interface, TypeVarId)`
+/// pairs its scheme's instantiation produced. Split out from `solve` itself
+/// (rather than always building it) purely so `solve`'s own ~15 existing
+/// callers, which have no use for it, don't have to change at all.
+pub fn solve_with_obligations(
+    sub: &mut Substitution,
+    env: &mut SchemeEnv,
+    constraint: &Constraint,
+) -> (Vec<PendingInstance>, Vec<TypeError>, ObligationMap) {
     let mut ambient = Vec::new();
     let mut given: HashMap<TypeVarId, HashSet<String>> = HashMap::new();
     let mut local_env: HashMap<TypeVarId, Scheme> = HashMap::new();
     let mut pending = Vec::new();
     let mut errors = Vec::new();
+    let mut obligations = HashMap::new();
     solve_rec(
         sub,
         env,
@@ -134,6 +156,7 @@ pub fn solve(
         &mut given,
         &mut pending,
         &mut errors,
+        &mut obligations,
         constraint,
     );
 
@@ -156,7 +179,7 @@ pub fn solve(
             unresolved.push(p);
         }
     }
-    (unresolved, errors)
+    (unresolved, errors, obligations)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -168,6 +191,7 @@ fn solve_rec(
     given: &mut HashMap<TypeVarId, HashSet<String>>,
     pending: &mut Vec<PendingInstance>,
     errors: &mut Vec<TypeError>,
+    obligations: &mut ObligationMap,
     constraint: &Constraint,
 ) {
     match constraint {
@@ -208,6 +232,13 @@ fn solve_rec(
                         kind: TypeErrorKind::Unify(e),
                     });
                 }
+                obligations.insert(
+                    *expected,
+                    fresh_constraints
+                        .iter()
+                        .map(|(ty, interface)| (interface.clone(), *ty))
+                        .collect(),
+                );
                 for (ty, interface) in fresh_constraints {
                     pending.push(PendingInstance {
                         span: *span,
@@ -238,6 +269,13 @@ fn solve_rec(
                         kind: TypeErrorKind::Unify(e),
                     });
                 }
+                obligations.insert(
+                    *expected,
+                    fresh_constraints
+                        .iter()
+                        .map(|(ty, interface)| (interface.clone(), *ty))
+                        .collect(),
+                );
                 for (ty, interface) in fresh_constraints {
                     pending.push(PendingInstance {
                         span: *span,
@@ -253,7 +291,17 @@ fn solve_rec(
         },
         Constraint::And(cs) => {
             for c in cs {
-                solve_rec(sub, env, local_env, ambient, given, pending, errors, c);
+                solve_rec(
+                    sub,
+                    env,
+                    local_env,
+                    ambient,
+                    given,
+                    pending,
+                    errors,
+                    obligations,
+                    c,
+                );
             }
         }
         Constraint::Let {
@@ -273,7 +321,15 @@ fn solve_rec(
             }
 
             solve_rec(
-                sub, env, local_env, ambient, given, pending, errors, header_con,
+                sub,
+                env,
+                local_env,
+                ambient,
+                given,
+                pending,
+                errors,
+                obligations,
+                header_con,
             );
 
             // Pop this group's own header_tys *before* generalizing them --
@@ -303,7 +359,15 @@ fn solve_rec(
             }
 
             solve_rec(
-                sub, env, local_env, ambient, given, pending, errors, body_con,
+                sub,
+                env,
+                local_env,
+                ambient,
+                given,
+                pending,
+                errors,
+                obligations,
+                body_con,
             );
         }
     }
@@ -534,7 +598,7 @@ mod tests {
     fn unsigned_binding_is_generalized_over_its_own_free_variable() {
         let mut sub = Substitution::new();
         let cs = decls("id x = x\n");
-        let tree = constrain_module(&mut sub, &cs);
+        let (tree, _members) = constrain_module(&mut sub, &cs);
         let mut env = SchemeEnv::new();
         let (pending, errors) = solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
@@ -552,7 +616,7 @@ mod tests {
     fn let_polymorphism_lets_a_top_level_binding_be_used_at_two_types() {
         let mut sub = Substitution::new();
         let cs = decls("identity x = x\nuseIdentity = (identity 1, identity True)\n");
-        let tree = constrain_module(&mut sub, &cs);
+        let (tree, _members) = constrain_module(&mut sub, &cs);
         let mut env = SchemeEnv::new();
         seed_bool_ctors(&mut sub, &mut env);
         let (pending, errors) = solve(&mut sub, &mut env, &tree);
@@ -589,7 +653,7 @@ mod tests {
         // `local_env` end to end rather than `Lookup`/the global `SchemeEnv`.
         let mut sub = Substitution::new();
         let cs = decls("useIdentity = let id = \\x -> x in (id 1, id True)\n");
-        let tree = constrain_module(&mut sub, &cs);
+        let (tree, _members) = constrain_module(&mut sub, &cs);
         let mut env = SchemeEnv::new();
         seed_bool_ctors(&mut sub, &mut env);
         let (pending, errors) = solve(&mut sub, &mut env, &tree);
@@ -624,7 +688,7 @@ mod tests {
             "isOdd n = if n == 0 then False else isEven (n - 1)\n\
              isEven n = if n == 0 then True else isOdd (n - 1)\n",
         );
-        let tree = constrain_module(&mut sub, &cs);
+        let (tree, _members) = constrain_module(&mut sub, &cs);
         let mut env = SchemeEnv::new();
         seed_bool_ctors(&mut sub, &mut env);
         let (_pending, errors) = solve(&mut sub, &mut env, &tree);
@@ -651,7 +715,7 @@ mod tests {
     fn unsigned_binding_gathers_its_own_dangling_pending_instance_into_its_scheme() {
         let mut sub = Substitution::new();
         let cs = decls("useEq x y = x == y\n");
-        let tree = constrain_module(&mut sub, &cs);
+        let (tree, _members) = constrain_module(&mut sub, &cs);
         let mut env = SchemeEnv::new();
         let (pending, errors) = solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
@@ -668,7 +732,7 @@ mod tests {
     fn signed_binding_uses_its_signature_as_its_scheme_verbatim() {
         let mut sub = Substitution::new();
         let cs = decls("myMax :: Ord a => a -> a -> a\nmyMax x y = x\n");
-        let tree = constrain_module(&mut sub, &cs);
+        let (tree, _members) = constrain_module(&mut sub, &cs);
         let mut env = SchemeEnv::new();
         let (pending, errors) = solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
@@ -687,7 +751,7 @@ mod tests {
         // myMax's signature only grants Ord, but its body needs Num too.
         let mut sub = Substitution::new();
         let cs = decls("myMax :: Ord a => a -> a -> a\nmyMax x y = x + y\n");
-        let tree = constrain_module(&mut sub, &cs);
+        let (tree, _members) = constrain_module(&mut sub, &cs);
         let mut env = SchemeEnv::new();
         let (_pending, errors) = solve(&mut sub, &mut env, &tree);
         assert!(
@@ -719,7 +783,7 @@ mod tests {
         );
 
         let cs = decls("bad = empty\n");
-        let tree = constrain_module(&mut sub, &cs);
+        let (tree, _members) = constrain_module(&mut sub, &cs);
         let (_pending, errors) = solve(&mut sub, &mut env, &tree);
         assert!(
             errors.iter().any(|e| matches!(
@@ -737,7 +801,7 @@ mod tests {
         // scheme for is exactly today's gap, not a bug in this milestone.
         let mut sub = Substitution::new();
         let cs = decls("f = compare\n");
-        let tree = constrain_module(&mut sub, &cs);
+        let (tree, _members) = constrain_module(&mut sub, &cs);
         let mut env = SchemeEnv::new();
         let (_pending, errors) = solve(&mut sub, &mut env, &tree);
         assert!(

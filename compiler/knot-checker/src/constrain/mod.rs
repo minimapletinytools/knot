@@ -128,6 +128,13 @@ pub struct LetMember {
     /// `DeclaredScheme`. `None` means its `Scheme` needs the general
     /// `ftv`-difference `generalize` algorithm instead (plan §4/§5).
     pub declared: Option<DeclaredScheme>,
+    /// This member's own value, fully elaborated (Fix #3's Stage A) — its
+    /// params (if any) folded into one `TExpr::Lambda` wrapping the typed
+    /// body, or just the typed body directly for a zero-param binding. This
+    /// is what a whole-module or `let`-expression's elaborated form is
+    /// ultimately built out of (`constrain::decl`'s own doc comment on how
+    /// `constrain_group_chain` threads it through).
+    pub elaborated_body: crate::ast::TypedExpr,
 }
 
 /// A signature restates a binding's scheme directly rather than leaving
