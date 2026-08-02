@@ -12,13 +12,16 @@
 //! every `CExpr`/`CPattern` shape, `Do` included (desugared to `bind`/`pure`
 //! calls, Fix #2). `constrain::decl` (TM4) does SCC dependency splitting for
 //! `let`/top-level binding groups, builds the resulting nested
-//! `Constraint::Let` tree, and wires real rigid variables up for signed
-//! bindings. `solve.rs` (TM5) walks a `Constraint` tree, actually calling
-//! `unify`, generalizing top-level bindings into the `SchemeEnv`, and
-//! instantiating fresh copies at each `Lookup`. `interface::table`/
-//! `interface::instance` (TM6) hold the closed interface set and the
-//! per-module instance table `solve::PendingInstance`s get checked
-//! against; `annotation::table`/`annotation::sensitivity` derive an
+//! `Constraint::Let` tree, wires real rigid variables up for signed
+//! bindings, and (Fix #5) checks every `CDecl::Instance`'s own methods
+//! against its interface too, not just ordinary `CDecl::Fn`s. `solve.rs`
+//! (TM5) walks a `Constraint` tree, actually calling `unify`, generalizing
+//! top-level bindings into the `SchemeEnv`, and instantiating fresh copies
+//! at each `Lookup`. `interface::table`/`interface::instance` (TM6) hold
+//! the closed interface set (plus, since Fix #5, each interface's own
+//! method *shapes*) and the per-module instance table `solve::
+//! PendingInstance`s get checked against; `annotation::table`/
+//! `annotation::sensitivity` derive an
 //! annotation key's expected type (though nothing yet checks a real
 //! annotation *value* against it — see `annotation::table`'s own docs).
 //! `ast.rs`/`elaborate.rs` (TM7, completed by Fix #3) give the target
@@ -98,6 +101,29 @@
 //!   Blott's transform in full) is real, separate, future work; telling the
 //!   two cases apart correctly, without silently conflating them, is what
 //!   this fix actually commits to.
+//! - **Fix #5** (done, closing out the gaps-plan's original five): instance
+//!   method bodies are real, type-checked function bodies now, not skipped
+//!   entirely — `interface::table::METHODS` restates each of the eight
+//!   ordinary interfaces' own methods symbolically (`MethodShape`, relative
+//!   to `Self`), and `constrain::decl::constrain_instance` instantiates a
+//!   method's shape against its own instance's target (reusing
+//!   `instantiate_rigid`, exactly like a signed top-level binding's `ty`)
+//!   to get a real expected type to check the body against. The instance's
+//!   own declared context becomes `given` facts via a new `Constraint::
+//!   Given` — deliberately *not* reusing `Constraint::Let`'s own
+//!   `declared`/scheme-installation path, since an instance method's
+//!   context is never "dangling" the way `check_ambiguous` cares about (a
+//!   zero-arg `Monoid a => List a`-shaped method would otherwise be
+//!   wrongly flagged ambiguous, even though the instance's own `given` `a`
+//!   is a precondition the dispatch mechanism itself guarantees, not
+//!   something a caller has to separately resolve). `Collection`/`Context`
+//!   methods (`map`, `bind`, ...) aren't covered — their own shapes are
+//!   polymorphic over the constructor itself, needing a `MethodShape`
+//!   variant this fix doesn't add — and an instance method's own
+//!   elaborated body isn't threaded anywhere yet either (no `LetMember`-
+//!   shaped home fits it — never generalized, never scheme-installed,
+//!   dispatched by `(interface, head)` rather than by name); both are
+//!   documented, narrow follow-ups rather than gaps papered over.
 
 pub mod annotation;
 pub mod ast;

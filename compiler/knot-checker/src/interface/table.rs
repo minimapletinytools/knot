@@ -16,9 +16,84 @@
 //! distinction only matters where an obligation actually gets resolved
 //! against a concrete type/constructor (`interface::instance::check_pending`).
 //!
-//! Method *names* aren't modeled here yet — nothing in this crate needs to
-//! know `Eq`'s method is called `(==)` until `elaborate.rs` (TM7) actually
-//! builds a dictionary value to pass around.
+//! **Method *shapes*** (Fix #5, `knot-checker-gaps-plan.md`) — `METHODS`
+//! restates each of the eight ordinary (non-`Collection`/`Context`)
+//! interfaces' own methods symbolically, relative to the interface's own
+//! `Self` type, straight from spec §6/§7. `constrain::decl::
+//! constrain_instance` instantiates a method's shape against whatever
+//! concrete type a specific `instance` targets to get the real expected
+//! type to check that method's body against — the same idea as an ordinary
+//! signed top-level binding's signature, just synthesized instead of
+//! user-written. `Collection`/`Context` are deliberately not covered here:
+//! their own methods (`map`, `bind`, ...) are polymorphic over the
+//! constructor itself (`ty::Structure::VarApp`), needing a `MethodShape`
+//! variant for that too — a real, narrow extension this fix doesn't
+//! attempt, so an `instance Collection MyType where ...`'s methods
+//! silently go unchecked for now (see `constrain_instance`'s own doc
+//! comment).
+
+/// One interface method's shape, relative to the interface's own `Self`
+/// type — instantiated against a real target by `constrain::decl::
+/// instantiate_method_shape`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MethodShape {
+    SelfTy,
+    Fn(&'static MethodShape, &'static MethodShape),
+    Bool,
+    Ordering,
+    StringTy,
+}
+
+use MethodShape::{Bool, Fn, Ordering, SelfTy, StringTy};
+
+/// `(interface, &[(method name, shape)])` — spec §6.1/§6.2's own tables,
+/// restated symbolically. Operator methods are keyed by their bare symbol
+/// (`"=="`, not `"(==)"`) — `knot-syntax::parse::decl::decl_name` already
+/// strips the parens when parsing `(==) a b = ...`.
+pub const METHODS: &[(&str, &[(&str, MethodShape)])] = &[
+    ("Eq", &[("==", Fn(&SelfTy, &Fn(&SelfTy, &Bool)))]),
+    ("Ord", &[("compare", Fn(&SelfTy, &Fn(&SelfTy, &Ordering)))]),
+    ("Show", &[("show", Fn(&SelfTy, &StringTy))]),
+    ("Semigroup", &[("<>", Fn(&SelfTy, &Fn(&SelfTy, &SelfTy)))]),
+    ("Monoid", &[("empty", SelfTy)]),
+    (
+        "Num",
+        &[
+            ("+", Fn(&SelfTy, &Fn(&SelfTy, &SelfTy))),
+            ("-", Fn(&SelfTy, &Fn(&SelfTy, &SelfTy))),
+            ("*", Fn(&SelfTy, &Fn(&SelfTy, &SelfTy))),
+            ("negate", Fn(&SelfTy, &SelfTy)),
+            ("abs", Fn(&SelfTy, &SelfTy)),
+            ("signum", Fn(&SelfTy, &SelfTy)),
+        ],
+    ),
+    (
+        "Fractional",
+        &[
+            ("/", Fn(&SelfTy, &Fn(&SelfTy, &SelfTy))),
+            ("recip", Fn(&SelfTy, &SelfTy)),
+        ],
+    ),
+    (
+        "Integral",
+        &[
+            ("div", Fn(&SelfTy, &Fn(&SelfTy, &SelfTy))),
+            ("mod", Fn(&SelfTy, &Fn(&SelfTy, &SelfTy))),
+        ],
+    ),
+];
+
+/// The shape of `interface`'s own `method`, if both are known — `None` for
+/// an unknown interface, or a method name that doesn't match any of the
+/// interface's own known methods (see `constrain_instance`'s own doc
+/// comment on what happens to those).
+pub fn method_shape(interface: &str, method: &str) -> Option<&'static MethodShape> {
+    METHODS
+        .iter()
+        .find(|(name, _)| *name == interface)
+        .and_then(|(_, methods)| methods.iter().find(|(name, _)| *name == method))
+        .map(|(_, shape)| shape)
+}
 
 pub const INTERFACES: &[(&str, &[&str])] = &[
     ("Eq", &[]),
@@ -83,5 +158,43 @@ mod tests {
         assert_eq!(superclasses("Fractional"), &["Num"]);
         assert_eq!(superclasses("Integral"), &["Num", "Ord"]);
         assert!(superclasses("Eq").is_empty());
+    }
+
+    #[test]
+    fn every_core_interface_method_has_a_shape() {
+        for (interface, methods) in [
+            ("Eq", &["=="] as &[&str]),
+            ("Ord", &["compare"]),
+            ("Show", &["show"]),
+            ("Semigroup", &["<>"]),
+            ("Monoid", &["empty"]),
+            ("Num", &["+", "-", "*", "negate", "abs", "signum"]),
+            ("Fractional", &["/", "recip"]),
+            ("Integral", &["div", "mod"]),
+        ] {
+            for method in methods {
+                assert!(
+                    method_shape(interface, method).is_some(),
+                    "{interface}'s {method} should have a shape"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn monoids_empty_is_a_bare_self_ty_with_no_arguments() {
+        assert_eq!(method_shape("Monoid", "empty"), Some(&SelfTy));
+    }
+
+    #[test]
+    fn unknown_interface_or_method_has_no_shape() {
+        assert!(method_shape("Frobnicable", "==").is_none());
+        assert!(method_shape("Eq", "bogus").is_none());
+    }
+
+    #[test]
+    fn collection_and_context_are_not_covered_by_method_shapes_yet() {
+        assert!(method_shape("Collection", "map").is_none());
+        assert!(method_shape("Context", "bind").is_none());
     }
 }

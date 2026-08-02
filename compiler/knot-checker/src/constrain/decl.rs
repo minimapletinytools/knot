@@ -27,24 +27,33 @@
 //! the former, `TypedExpr` for the latter, and the shared machinery neither
 //! knows nor cares which.
 //!
-//! **Not yet handled**: `CDecl::Instance` — its methods are real function
-//! bodies needing type-checking too, but checking one against its
-//! interface's own method signature needs `interface/table.rs` (TM6),
-//! which doesn't exist yet. `CDecl::TypeAlias`/`CDecl::TypeDecl` need no
-//! constraints at all (purely type-level; their own name references were
-//! already validated during canonicalization).
+//! **`CDecl::Instance` methods are checked too** (Fix #5,
+//! `knot-checker-gaps-plan.md`) — `constrain_instance` treats each method
+//! as a binding whose "signature" is synthesized from `interface::table::
+//! METHODS` instead of user-written, reusing `instantiate_rigid` for the
+//! instance's own target (exactly like a signed top-level binding's `ty`)
+//! and turning the instance's own `constraints` into `given` facts
+//! (`Constraint::Given`) the method bodies get to assume. `CDecl::
+//! TypeAlias`/`CDecl::TypeDecl` still need no constraints at all (purely
+//! type-level; their own name references were already validated during
+//! canonicalization).
 
 use std::collections::{HashMap, HashSet};
 
-use knot_canonical::ast::{CDecl, CExpr, CPattern, CType, CTypeSignature, Ref};
+use knot_canonical::ast::{CDecl, CExpr, CInstanceDecl, CPattern, CType, CTypeSignature, Ref};
 use knot_syntax::span::{Span, Spanned};
 
 use crate::ast::{TExpr, Typed, TypedExpr};
 use crate::constrain::expr::constrain_expr;
 use crate::constrain::pattern::constrain_pattern;
 use crate::constrain::{Constraint, DeclaredScheme, LetMember, LocalScope};
+use crate::interface::table::{method_shape, MethodShape};
 use crate::ty::Structure;
 use crate::var::{Substitution, TypeVarId};
+
+fn app0(sub: &mut Substitution, name: &str) -> TypeVarId {
+    sub.fresh_bound(Structure::App(Ref::Builtin(name.to_string()), vec![]))
+}
 
 /// A binding abstracted over its two possible sources: a top-level `CFnDef`
 /// (always a plain name, with its own optional signature and param list) or
@@ -500,14 +509,114 @@ fn constrain_group_chain<R>(
     (result, whole, all_members)
 }
 
+/// Builds the `Structure` a `MethodShape` describes, substituting `self_ty`
+/// (the instance's own target, already built via `instantiate_rigid`) for
+/// every `MethodShape::SelfTy` — the same "instantiate a type template
+/// against something concrete" idea `instantiate_rigid` itself is, just
+/// over `MethodShape` instead of `CType`.
+fn instantiate_method_shape(
+    sub: &mut Substitution,
+    shape: &MethodShape,
+    self_ty: TypeVarId,
+) -> TypeVarId {
+    match shape {
+        MethodShape::SelfTy => self_ty,
+        MethodShape::Fn(a, b) => {
+            let a_ty = instantiate_method_shape(sub, a, self_ty);
+            let b_ty = instantiate_method_shape(sub, b, self_ty);
+            sub.fresh_bound(Structure::Fn(a_ty, b_ty))
+        }
+        MethodShape::Bool => app0(sub, "Bool"),
+        MethodShape::Ordering => app0(sub, "Ordering"),
+        MethodShape::StringTy => app0(sub, "String"),
+    }
+}
+
+/// Checks every method of `inst` against its interface's own `MethodShape`
+/// (Fix #5) — the target's own type variables become rigid (reusing
+/// `instantiate_rigid`, exactly like an ordinary signed binding's own
+/// `ty`), the instance's own `constraints` become `given` facts
+/// (`Constraint::Given`) the bodies get to assume, and each method's body
+/// is constrained against its shape instantiated with the target
+/// substituted for `Self` — exactly like a signed top-level binding's body
+/// is constrained against its own signature, just without needing
+/// `RawBinding`'s borrowed-signature shape at all (there's no parsed
+/// `CTypeSignature` here to borrow — the "signature" is synthesized).
+///
+/// A method whose name has no entry in `interface::table::METHODS` (an
+/// interface `method_shape` doesn't cover yet — currently just
+/// `Collection`/`Context`, see its own doc comment — or a genuinely bogus
+/// method name) is silently skipped, not type-checked at all: validating
+/// that an instance's method list exactly matches its interface is a
+/// separate, narrower concern this doesn't attempt.
+///
+/// Deliberately doesn't thread an `elaborated_body` out anywhere (unlike
+/// `constrain_group_chain`'s members): `constrain_pattern`/`constrain_expr`
+/// still build one as a normal by-product, but nothing consumes it yet —
+/// an instance method doesn't fit `LetMember`'s shape (it's never
+/// generalized, never installed into a scheme environment, and dispatched
+/// by `(interface, head)` rather than by name), so giving it a proper home
+/// in the elaborated output is real, separate follow-up work, not
+/// something to force into the existing shape as a shortcut.
+fn constrain_instance(sub: &mut Substitution, inst: &CInstanceDecl) -> Constraint {
+    let mut rigids = HashMap::new();
+    let target_ty = instantiate_rigid(sub, &inst.target, &mut rigids);
+    let given: Vec<(TypeVarId, String)> = inst
+        .constraints
+        .iter()
+        .map(|c| {
+            (
+                rigid_var(sub, &mut rigids, &c.type_var),
+                c.interface.clone(),
+            )
+        })
+        .collect();
+
+    let mut method_constraints = Vec::new();
+    for method in &inst.methods {
+        let Some(shape) = method_shape(&inst.interface, &method.name) else {
+            continue;
+        };
+        let expected_ty = instantiate_method_shape(sub, shape, target_ty);
+
+        let mut scope = LocalScope::new();
+        scope.push();
+        let mut constraints = Vec::new();
+        let typed_params: Vec<crate::ast::TypedPattern> = method
+            .params
+            .iter()
+            .map(|p| constrain_pattern(sub, &mut scope, p, &mut constraints))
+            .collect();
+        let typed_body = constrain_expr(sub, &mut scope, &method.body, &mut constraints);
+        scope.pop();
+
+        let inferred = typed_params.iter().rev().fold(typed_body.ty, |acc, p| {
+            sub.fresh_bound(Structure::Fn(p.ty, acc))
+        });
+        constraints.push(Constraint::Equal {
+            span: method.body.span,
+            expected: expected_ty,
+            actual: inferred,
+        });
+        method_constraints.push(Constraint::And(constraints));
+    }
+
+    Constraint::Given {
+        given,
+        body: Box::new(Constraint::And(method_constraints)),
+    }
+}
+
 /// The whole-module entry point: every `CDecl::Fn` becomes a `RawBinding`;
 /// SCC-split and wrapped in nested `Constraint::Let`s. There's no module
 /// "body" the way a `let...in` has one — solving a module is entirely about
 /// populating the scheme environment these `Let`s build, so the innermost
-/// constraint is trivially `Constraint::True`. The returned `Vec<LetMember>`
-/// covers every top-level binding, each with its own `elaborated_body`
-/// (Fix #3) already filled in -- a whole module's elaborated form, without
-/// needing a separate `TModule` wrapper type.
+/// constraint is trivially `Constraint::True`. Every `CDecl::Instance`'s own
+/// methods (Fix #5) are checked too, each producing its own `Constraint::
+/// Given`, combined with the `Fn` chain via `Constraint::And`. The returned
+/// `Vec<LetMember>` covers every top-level `Fn` binding (not instance
+/// methods — see `constrain_instance`'s own doc comment), each with its own
+/// `elaborated_body` (Fix #3) already filled in.
 pub fn constrain_module(
     sub: &mut Substitution,
     decls: &[Spanned<CDecl>],
@@ -529,7 +638,23 @@ pub fn constrain_module(
     let (_unused, tree, members) = constrain_bindings(sub, &mut scope, bindings, true, |sub, _| {
         (sub.fresh_unbound(), Constraint::True)
     });
-    (tree, members)
+
+    let instance_constraints: Vec<Constraint> = decls
+        .iter()
+        .filter_map(|d| match &d.node {
+            CDecl::Instance(inst) => Some(constrain_instance(sub, inst)),
+            _ => None,
+        })
+        .collect();
+
+    let combined = if instance_constraints.is_empty() {
+        tree
+    } else {
+        let mut all = vec![tree];
+        all.extend(instance_constraints);
+        Constraint::And(all)
+    };
+    (combined, members)
 }
 
 /// `CExpr::Let`'s own binding list. Only a plain `Var` pattern can

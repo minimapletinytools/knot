@@ -563,6 +563,15 @@ mod tests {
         let mut sub = Substitution::new();
         let (tree, _members) = crate::constrain::decl::constrain_module(&mut sub, &cs);
         let mut env = crate::solve::SchemeEnv::new();
+        // Fix #5 now actually type-checks `(==) a b = True`'s own body, so
+        // `True` needs to resolve -- TM8 hasn't wired up the real prelude in
+        // this test module, so seed it directly (same as solve.rs's own
+        // tests do).
+        let bool_ty = sub.fresh_bound(Structure::App(Ref::Builtin("Bool".to_string()), vec![]));
+        env.insert(
+            crate::solve::SchemeKey::Builtin("True".to_string()),
+            crate::ty::Scheme::monomorphic(bool_ty),
+        );
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
 
@@ -590,5 +599,125 @@ mod tests {
         assert!(errors.iter().any(
             |e| matches!(&e.kind, TypeErrorKind::NoInstance { interface } if interface == "Eq")
         ));
+    }
+
+    // -- Fix #5: instance method bodies are checked against their interface --
+
+    #[test]
+    fn an_instance_methods_body_returning_the_wrong_type_is_a_real_error() {
+        let cs = decls("type Shape = Circle Float\ninstance Eq Shape where\n  (==) a b = 5\n");
+        let mut sub = Substitution::new();
+        let (tree, _members) = crate::constrain::decl::constrain_module(&mut sub, &cs);
+        let mut env = crate::solve::SchemeEnv::new();
+        let (_pending, errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(&e.kind, TypeErrorKind::Unify(_))),
+            "expected a Unify error (Int where Bool expected), got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn an_instance_methods_correct_body_type_checks_with_no_errors() {
+        let cs = decls("type Shape = Circle Float\ninstance Eq Shape where\n  (==) a b = True\n");
+        let mut sub = Substitution::new();
+        let (tree, _members) = crate::constrain::decl::constrain_module(&mut sub, &cs);
+        let mut env = crate::solve::SchemeEnv::new();
+        let bool_ty = sub.fresh_bound(Structure::App(Ref::Builtin("Bool".to_string()), vec![]));
+        env.insert(
+            crate::solve::SchemeKey::Builtin("True".to_string()),
+            crate::ty::Scheme::monomorphic(bool_ty),
+        );
+        let (_pending, errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    /// `type Box a = Box a`'s own constructor scheme -- user-defined ADT
+    /// constructors (`Ref::TopLevel`, per `knot-canonical::env::
+    /// declare_ctor`/`resolve_ctor`) are never auto-seeded by this crate's
+    /// own machinery (a real, separate, pre-existing gap unrelated to Fix
+    /// #5 -- `prelude.rs`'s own doc comment only ever covers *built-in*
+    /// constructors like `Some`/`Ok`), so a test that actually constructs
+    /// or pattern-matches one has to seed it by hand, same as `prelude.rs`
+    /// itself does for `Some`/`None`/`Ok`/`Err`.
+    fn seed_box_ctor(sub: &mut Substitution, env: &mut crate::solve::SchemeEnv) {
+        let a = sub.fresh_unbound();
+        let box_ref = Ref::TopLevel("Box".to_string());
+        let box_a = sub.fresh_bound(Structure::App(box_ref, vec![a]));
+        let ctor_ty = sub.fresh_bound(Structure::Fn(a, box_a));
+        env.insert(
+            crate::solve::SchemeKey::TopLevel("Box".to_string()),
+            crate::ty::Scheme {
+                vars: vec![a],
+                constraints: vec![],
+                ty: ctor_ty,
+            },
+        );
+    }
+
+    #[test]
+    fn a_parametric_instance_methods_body_may_use_its_own_given_context() {
+        // instance Eq a => Eq (Box a) where (==) (Box x) (Box y) = x == y --
+        // the body's own `x == y` needs `Eq a`, which the instance's own
+        // declared context grants as a `given` fact (Constraint::Given),
+        // not something this method's body has to prove itself.
+        let cs = decls(
+            "type Box a = Box a\n\
+             instance Eq a => Eq (Box a) where\n  (==) (Box x) (Box y) = x == y\n",
+        );
+        let mut sub = Substitution::new();
+        let (tree, _members) = crate::constrain::decl::constrain_module(&mut sub, &cs);
+        let mut env = crate::solve::SchemeEnv::new();
+        seed_box_ctor(&mut sub, &mut env);
+        let (pending, errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        assert!(errors.is_empty(), "{errors:?}");
+        // The inner `x == y`'s Eq obligation should be on the rigid `a`,
+        // satisfied by the instance's own given context -- so nothing
+        // should be left dangling in `pending` either.
+        assert!(pending.is_empty(), "{pending:?}");
+    }
+
+    #[test]
+    fn a_parametric_instance_body_using_more_than_its_context_grants_is_a_rigid_instance_error() {
+        // Same shape as above, but the instance declares no Ord context for
+        // `a`, even though the body needs it.
+        let cs = decls(
+            "type Box a = Box a\n\
+             instance Eq a => Eq (Box a) where\n  (==) (Box x) (Box y) = x < y\n",
+        );
+        let mut sub = Substitution::new();
+        let (tree, _members) = crate::constrain::decl::constrain_module(&mut sub, &cs);
+        let mut env = crate::solve::SchemeEnv::new();
+        seed_box_ctor(&mut sub, &mut env);
+        let (_pending, errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        assert!(
+            errors.iter().any(|e| matches!(
+                &e.kind,
+                TypeErrorKind::NoInstanceForRigid { interface } if interface == "Ord"
+            )),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn an_unknown_method_name_is_silently_skipped_not_type_checked() {
+        // `bogus` isn't one of Eq's own methods -- constrain_instance skips
+        // it rather than erroring (see its own doc comment); the *known*
+        // `==` method alongside it still gets checked normally.
+        let cs = decls(
+            "type Shape = Circle Float\n\
+             instance Eq Shape where\n  (==) a b = True\n  bogus x = x + 1\n",
+        );
+        let mut sub = Substitution::new();
+        let (tree, _members) = crate::constrain::decl::constrain_module(&mut sub, &cs);
+        let mut env = crate::solve::SchemeEnv::new();
+        let bool_ty = sub.fresh_bound(Structure::App(Ref::Builtin("Bool".to_string()), vec![]));
+        env.insert(
+            crate::solve::SchemeKey::Builtin("True".to_string()),
+            crate::ty::Scheme::monomorphic(bool_ty),
+        );
+        let (_pending, errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        assert!(errors.is_empty(), "{errors:?}");
     }
 }

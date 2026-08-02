@@ -565,6 +565,7 @@ mod tests {
                     solve_equalities(sub, vec![*header_con]);
                     solve_equalities(sub, vec![*body_con]);
                 }
+                Constraint::Given { body, .. } => solve_equalities(sub, vec![*body]),
                 Constraint::True
                 | Constraint::HasInstance { .. }
                 | Constraint::Lookup { .. }

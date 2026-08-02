@@ -114,6 +114,22 @@ pub enum Constraint {
         header_con: Box<Constraint>,
         body_con: Box<Constraint>,
     },
+    /// An instance method's own `given` facts (Fix #5) — e.g. `instance Eq a
+    /// => Eq (List a)`'s `Eq a` — registered around `body` exactly the way
+    /// `Constraint::Let`'s own `declared.given` is, but *without* any of
+    /// that variant's scheme-generalization/installation/ambiguous-CAF
+    /// machinery, none of which makes sense for an instance method: its
+    /// `given` facts are never "dangling" in `check_ambiguous`'s sense (a
+    /// CAF-shaped signed binding's own unresolved caller-side obligation) —
+    /// they're preconditions the *interface+target pairing itself* already
+    /// guarantees, discharged by the ordinary dispatch machinery at whatever
+    /// concrete type a real call eventually uses, not by anything this
+    /// method's own "scheme" would need to state. See
+    /// `constrain::decl::constrain_instance`.
+    Given {
+        given: Vec<(TypeVarId, String)>,
+        body: Box<Constraint>,
+    },
 }
 
 /// One binding within a `Constraint::Let` group.

@@ -370,6 +370,25 @@ fn solve_rec(
                 body_con,
             );
         }
+        // An instance method's own `given` facts -- register and recurse,
+        // no generalization/scheme-installation/ambiguity-checking at all
+        // (see this variant's own doc comment on why none of that applies).
+        Constraint::Given { given: facts, body } => {
+            for (var, interface) in facts {
+                given.entry(*var).or_default().insert(interface.clone());
+            }
+            solve_rec(
+                sub,
+                env,
+                local_env,
+                ambient,
+                given,
+                pending,
+                errors,
+                obligations,
+                body,
+            );
+        }
     }
 }
 
