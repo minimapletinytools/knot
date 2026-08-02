@@ -165,7 +165,11 @@ impl<'a> ParseState<'a> {
 
     /// `{ field : Type, ... }`, or extensible `{ r | field : Type, ... }`. Both
     /// start with a lowercase identifier, so the extension form is tried first and
-    /// discarded on failure rather than special-cased with extra lookahead.
+    /// discarded on failure rather than special-cased with extra lookahead. A
+    /// member is either an ordinary field or a spread (`..Name`) — see
+    /// `record_member`; the two are split into separate lists here since
+    /// their relative order in the source never affects the merged result
+    /// (`knot-canonical::resolve::alias`'s own doc comment).
     fn type_record(&mut self) -> Result<Type, ParseError> {
         self.bump(); // '{'
         self.skip_trivia()?;
@@ -187,18 +191,40 @@ impl<'a> ParseState<'a> {
 
         self.skip_trivia()?;
         let mut fields = Vec::new();
+        let mut spreads = Vec::new();
         if self.peek() != Some(b'}') {
-            fields.push(self.record_field()?);
+            self.record_member(&mut fields, &mut spreads)?;
             self.skip_trivia()?;
             while self.peek() == Some(b',') {
                 self.bump();
                 self.skip_trivia()?;
-                fields.push(self.record_field()?);
+                self.record_member(&mut fields, &mut spreads)?;
                 self.skip_trivia()?;
             }
         }
         self.expect_byte(b'}')?;
-        Ok(Type::Record(fields, extension))
+        Ok(Type::Record(fields, spreads, extension))
+    }
+
+    /// One record-literal member: `..Name` (a spread, pushed to `spreads`) or
+    /// `field : Type` (pushed to `fields`) — distinguished by the leading
+    /// `..`, which can never start an ordinary field (those always start
+    /// with a lowercase identifier).
+    fn record_member(
+        &mut self,
+        fields: &mut Vec<(String, Type)>,
+        spreads: &mut Vec<String>,
+    ) -> Result<(), ParseError> {
+        if self.peek() == Some(b'.') && self.peek_at(1) == Some(b'.') {
+            self.bump();
+            self.bump();
+            let name = self.upper_ident_segment()?.node;
+            spreads.push(name);
+            Ok(())
+        } else {
+            fields.push(self.record_field()?);
+            Ok(())
+        }
     }
 
     fn record_field(&mut self) -> Result<(String, Type), ParseError> {
@@ -352,6 +378,7 @@ mod tests {
                     ("x".to_string(), named("Float")),
                     ("y".to_string(), named("Float"))
                 ],
+                Vec::new(),
                 None
             )
         );
@@ -366,9 +393,67 @@ mod tests {
                     ("x".to_string(), named("Float")),
                     ("y".to_string(), named("Float"))
                 ],
+                Vec::new(),
                 Some("r".to_string())
             )
         );
+    }
+
+    #[test]
+    fn record_with_a_single_spread() {
+        assert_eq!(
+            ty("{ ..GraphicsElement, cx : Float }"),
+            Type::Record(
+                vec![("cx".to_string(), named("Float"))],
+                vec!["GraphicsElement".to_string()],
+                None
+            )
+        );
+    }
+
+    #[test]
+    fn record_with_multiple_spreads_and_no_fields() {
+        assert_eq!(
+            ty("{ ..Fills, ..Strokes }"),
+            Type::Record(
+                Vec::new(),
+                vec!["Fills".to_string(), "Strokes".to_string()],
+                None
+            )
+        );
+    }
+
+    #[test]
+    fn spread_interleaved_with_fields_in_any_order() {
+        assert_eq!(
+            ty("{ a : Int, ..Base, b : Bool }"),
+            Type::Record(
+                vec![
+                    ("a".to_string(), named("Int")),
+                    ("b".to_string(), named("Bool"))
+                ],
+                vec!["Base".to_string()],
+                None
+            )
+        );
+    }
+
+    #[test]
+    fn extensible_record_with_a_spread() {
+        assert_eq!(
+            ty("{ a | ..GraphicsElement, label : String }"),
+            Type::Record(
+                vec![("label".to_string(), named("String"))],
+                vec!["GraphicsElement".to_string()],
+                Some("a".to_string())
+            )
+        );
+    }
+
+    #[test]
+    fn spread_requires_an_uppercase_target() {
+        let mut s = ParseState::new("{ ..lowercase }");
+        assert!(s.type_arrow().is_err());
     }
 
     #[test]

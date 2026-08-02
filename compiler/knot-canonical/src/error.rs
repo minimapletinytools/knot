@@ -88,6 +88,38 @@ pub enum CanonErrorKind {
         alias: String,
         field: String,
     },
+    /// A record spread (`{ ..Name, ... }`) names something this crate has
+    /// no field list for at all — an imported alias (no cross-module
+    /// linking yet), a builtin type, or an already-reported unbound name.
+    /// Distinct from `SpreadTargetNotARecord`: this is "can't even look,"
+    /// not "looked, and it isn't one."
+    SpreadTargetNotALocalAlias {
+        name: String,
+    },
+    /// A record spread's target, once resolved to a local `type alias`,
+    /// isn't a record at all after its own alias chain is fully expanded
+    /// (e.g. `type alias Foo = Int`, or an ADT `type` name — those have
+    /// variants, not a field list, so they can never be spread either).
+    SpreadTargetNotARecord {
+        name: String,
+    },
+    /// A record spread's target alias is still "open" in some way there's
+    /// nothing concrete yet to splice — either it declares its own type
+    /// parameters (spread syntax takes no arguments, so nothing could fill
+    /// them), or its own record body still has an unresolved row-extension
+    /// variable.
+    SpreadTargetNotClosed {
+        name: String,
+    },
+    /// A record spread's own fields collide with an explicit field already
+    /// in the same record literal, or with another spread's fields —
+    /// always a hard error, never resolved by shadowing or ordering.
+    /// `name` is the *spread's own target* whose field collided, so a
+    /// literal with several spreads can tell which one is at fault.
+    SpreadFieldConflict {
+        name: String,
+        field: String,
+    },
     Custom(String),
 }
 

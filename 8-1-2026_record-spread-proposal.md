@@ -1,9 +1,26 @@
 # Proposal: record spread (`..Name`) for reusing a closed record's fields
 
-Status: proposal / not implemented. Motivated by `knotty-drawings.knot`, where seven
-primitive shape types (`Rect`, `Circle`, `Ellipse`, `Line`, `Polyline`, `Polygon`,
-`Path`) each need every field of a shared `GraphicsElement` bundle plus their own
-geometry, and today that means hand-duplicating ~23 fields per shape.
+Status: implemented (2026-08-02), not yet applied to `knotty-drawings.knot` itself —
+that file still hand-duplicates every shared field per shape; converting it to use
+`..GraphicsElement` is a separate follow-up, not done as part of landing the feature.
+Motivated by `knotty-drawings.knot`, where seven primitive shape types (`Rect`,
+`Circle`, `Ellipse`, `Line`, `Polyline`, `Polygon`, `Path`) each need every field of a
+shared `GraphicsElement` bundle plus their own geometry, and today that means
+hand-duplicating ~23 fields per shape.
+
+Implementation notes: §8's open question is resolved — spreading the same target
+twice in one literal (`{ ..A, ..A, x : T }`) is a no-op on the repeat, not a
+self-conflict. Lives entirely in `knot-syntax` (grammar/AST: `Type::Record` gains a
+`Vec<String>` of spread target names) and `knot-canonical` (`CType::Record` gains the
+resolved `Vec<Ref>` counterpart; `resolve::alias::expand_aliases` — already a
+whole-module alias-expansion pass — resolves every spread the same way it resolves an
+ordinary alias reference, via the same topological dependency ordering, just merging
+fields into the surrounding record instead of substituting a whole type occurrence).
+Four new `CanonErrorKind` variants (`SpreadTargetNotALocalAlias`/
+`SpreadTargetNotARecord`/`SpreadTargetNotClosed`/`SpreadFieldConflict`) cover the ways
+a spread can fail. Never touches `unify.rs` or the interface/instance table, exactly
+as designed in §4 — `CType::Record`'s own `spreads` list is always empty by the time
+anything outside this expansion pass sees it.
 
 ## 1. The gap this fills
 

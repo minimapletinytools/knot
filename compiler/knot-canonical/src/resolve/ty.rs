@@ -44,10 +44,17 @@ pub fn resolve_type(env: &Env, ty: &Type, span: Span, errors: &mut Vec<CanonErro
                 .map(|t| resolve_type(env, t, span, errors))
                 .collect(),
         ),
-        Type::Record(fields, ext) => CType::Record(
+        Type::Record(fields, spreads, ext) => CType::Record(
             fields
                 .iter()
                 .map(|(name, t)| (name.clone(), resolve_type(env, t, span, errors)))
+                .collect(),
+            spreads
+                .iter()
+                .map(|name| match env.resolve_type(name) {
+                    Ok(r) => r,
+                    Err(kind) => unresolved_to_ref(kind, name, NameKind::Type, span, errors),
+                })
                 .collect(),
             ext.clone(),
         ),
@@ -109,7 +116,7 @@ pub fn collect_type_vars(ty: &Type, out: &mut HashSet<String>) {
                 collect_type_vars(t, out);
             }
         }
-        Type::Record(fields, ext) => {
+        Type::Record(fields, _spreads, ext) => {
             for (_, t) in fields {
                 collect_type_vars(t, out);
             }

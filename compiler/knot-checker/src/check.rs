@@ -114,6 +114,27 @@ mod tests {
     }
 
     #[test]
+    fn a_record_spread_type_checks_end_to_end_through_the_real_pipeline() {
+        // The knotty-drawings.knot motivating case, in miniature: a shared
+        // fields alias spread into two otherwise-unrelated shape aliases,
+        // plus the still-open constraint version spreading the same thing.
+        let cs = decls(
+            "type alias GraphicsElement = { id : Int, fill : String }\n\
+             type alias IsGraphicsElement a = { a | ..GraphicsElement }\n\
+             type alias Circle = { ..GraphicsElement, cx : Float, cy : Float, r : Float }\n\
+             type alias Rect = { ..GraphicsElement, x : Float, y : Float }\n\
+             describe :: IsGraphicsElement a -> String\n\
+             describe shape = shape.fill\n\
+             circleArea :: Circle -> Float\n\
+             circleArea c = c.r\n\
+             useDescribe :: Circle -> String\n\
+             useDescribe c = describe c\n",
+        );
+        let errors = check_module(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
     fn a_genuinely_missing_instance_is_still_reported() {
         let cs = decls(
             "type Shape = Circle Float\n\

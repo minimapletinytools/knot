@@ -280,7 +280,12 @@ fn instantiate_rigid(
                 .collect();
             sub.fresh_bound(Structure::Tuple(tys))
         }
-        CType::Record(fields, ext) => {
+        CType::Record(fields, spreads, ext) => {
+            debug_assert!(
+                spreads.is_empty(),
+                "canonicalization always resolves every record spread away \
+                 before knot-checker ever sees a CType"
+            );
             let field_tys = fields
                 .iter()
                 .map(|(name, t)| (name.clone(), instantiate_rigid(sub, t, rigids)))
@@ -363,7 +368,12 @@ fn instantiate_flexible(
                 .collect();
             sub.fresh_bound(Structure::Tuple(tys))
         }
-        CType::Record(fields, ext) => {
+        CType::Record(fields, spreads, ext) => {
+            debug_assert!(
+                spreads.is_empty(),
+                "canonicalization always resolves every record spread away \
+                 before knot-checker ever sees a CType"
+            );
             let field_tys = fields
                 .iter()
                 .map(|(name, t)| (name.clone(), instantiate_flexible(sub, t, vars)))

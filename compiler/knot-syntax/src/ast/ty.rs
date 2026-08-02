@@ -8,8 +8,11 @@ pub enum Type {
     Fn(Box<Type>, Box<Type>),
     /// Arity is checked post-parse (≤ 3) — see `validate.rs`.
     Tuple(Vec<Type>),
-    /// Fields plus an optional extension row variable, e.g. `{ r | x : Float }`.
-    Record(Vec<(String, Type)>, Option<String>),
+    /// Fields, spread record-alias targets (`{ ..Name, x : Float }` — see
+    /// `knot-canonical::resolve::alias`'s own doc comment on why these are
+    /// resolved there, not here), and an optional extension row variable,
+    /// e.g. `{ r | x : Float }`.
+    Record(Vec<(String, Type)>, Vec<String>, Option<String>),
     Unit,
 }
 

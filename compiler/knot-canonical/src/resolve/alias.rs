@@ -22,8 +22,22 @@
 //! there's nothing to substitute in for one; it's left as an opaque nominal
 //! reference, same as it was before this pass existed. A real gap once
 //! cross-module linking exists, not one this pass can close on its own.
+//!
+//! **Record spreads** (`{ ..Name, field : Type }`, the record-spread
+//! proposal) reuse this same pass rather than needing their own: a spread
+//! target is just another alias reference (`collect_alias_refs` records it
+//! as a dependency edge exactly like an ordinary one, so `topo_order`
+//! always processes it first), except it merges its own fields into the
+//! *surrounding* record instead of replacing a whole type occurrence — see
+//! `resolve_spreads`. A spread target must be closed (no declared params,
+//! no open row of its own — spread syntax takes no arguments, so there's
+//! nothing to make it concrete with) and must resolve to an actual record;
+//! `SpreadTargetNotALocalAlias`/`SpreadTargetNotARecord`/
+//! `SpreadTargetNotClosed`/`SpreadFieldConflict` cover the ways that can
+//! fail. `CType::Record`'s own `spreads` list is always empty by the time
+//! `expand_aliases` returns — see that field's own doc comment on `ast.rs`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use knot_syntax::span::{Span, Spanned};
 
@@ -40,7 +54,11 @@ struct AliasDef {
 }
 
 /// Expands every local type alias reference in `decls` in place. A no-op
-/// (not even a wasted pass) when the module declares no aliases at all.
+/// (not even a wasted pass) when the module declares no aliases at all —
+/// *and* uses no spread either: a spread with zero aliases in the whole
+/// module is unconditionally invalid (there's nothing it could possibly
+/// name), but that's still a real error to report, not something this fast
+/// path may silently skip.
 pub fn expand_aliases(decls: &mut [Spanned<CDecl>], errors: &mut Vec<CanonError>) {
     let mut raw: HashMap<String, (Span, AliasDef)> = HashMap::new();
     for d in decls.iter() {
@@ -57,7 +75,7 @@ pub fn expand_aliases(decls: &mut [Spanned<CDecl>], errors: &mut Vec<CanonError>
             );
         }
     }
-    if raw.is_empty() {
+    if raw.is_empty() && !decls.iter().any(|d| decl_has_spread(&d.node)) {
         return;
     }
 
@@ -99,10 +117,50 @@ pub fn expand_aliases(decls: &mut [Spanned<CDecl>], errors: &mut Vec<CanonError>
     }
 }
 
+/// True if `decl` contains a record spread (`{ ..Name, ... }`) anywhere —
+/// `expand_aliases`'s own fast-path guard needs this so a module with zero
+/// `type alias` declarations but a stray spread still gets a real error
+/// instead of silently keeping an unresolved `spreads` entry (see that
+/// function's own doc comment).
+fn decl_has_spread(decl: &CDecl) -> bool {
+    match decl {
+        CDecl::Fn(fndef) => fndef_has_spread(fndef),
+        CDecl::TypeAlias(_, _, ty) => ty_has_spread(ty),
+        CDecl::TypeDecl(_, _, variants) => variants
+            .iter()
+            .any(|(_, args)| args.iter().any(ty_has_spread)),
+        CDecl::Instance(inst) => {
+            ty_has_spread(&inst.target) || inst.methods.iter().any(fndef_has_spread)
+        }
+    }
+}
+
+fn fndef_has_spread(fndef: &CFnDef) -> bool {
+    fndef
+        .signature
+        .as_ref()
+        .is_some_and(|sig| ty_has_spread(&sig.node.ty))
+}
+
+fn ty_has_spread(ty: &CType) -> bool {
+    match ty {
+        CType::Record(fields, spreads, _) => {
+            !spreads.is_empty() || fields.iter().any(|(_, t)| ty_has_spread(t))
+        }
+        CType::Named(_, args) | CType::Tuple(args) => args.iter().any(ty_has_spread),
+        CType::Fn(a, b) => ty_has_spread(a) || ty_has_spread(b),
+        CType::Var(_) | CType::Unit => false,
+    }
+}
+
 /// Every known alias name `ty` refers to, one level of `Named` at a time —
 /// the dependency edges `topo_order` needs. Doesn't need to recurse into an
 /// already-*found* alias's own body (that's `topo_order`'s own job, walking
 /// the dependency graph itself); this only ever looks at `ty`'s own shape.
+/// A record spread is exactly the same kind of dependency edge as an
+/// ordinary alias reference (`resolve_spreads` needs its target's own body
+/// already fully expanded, same as `substitute` needs for an inlined
+/// reference), so it's collected here too.
 fn collect_alias_refs(ty: &CType, defs: &HashMap<String, AliasDef>, out: &mut Vec<String>) {
     match ty {
         CType::Named(Ref::TopLevel(name), args) => {
@@ -128,9 +186,16 @@ fn collect_alias_refs(ty: &CType, defs: &HashMap<String, AliasDef>, out: &mut Ve
                 collect_alias_refs(t, defs, out);
             }
         }
-        CType::Record(fields, _) => {
+        CType::Record(fields, spreads, _) => {
             for (_, t) in fields {
                 collect_alias_refs(t, defs, out);
+            }
+            for spread_ref in spreads {
+                if let Ref::TopLevel(name) = spread_ref {
+                    if defs.contains_key(name) {
+                        out.push(name.clone());
+                    }
+                }
             }
         }
     }
@@ -234,7 +299,12 @@ fn substitute_vars(
                 .map(|t| substitute_vars(t, mapping, alias_name, errors, span))
                 .collect(),
         ),
-        CType::Record(fields, ext) => {
+        CType::Record(fields, spreads, ext) => {
+            debug_assert!(
+                spreads.is_empty(),
+                "substitute_vars only ever runs on an alias body substitute() \
+                 already fully expanded, so its own spreads are already resolved"
+            );
             let own_fields: Vec<(String, CType)> = fields
                 .iter()
                 .map(|(n, t)| {
@@ -278,12 +348,16 @@ fn substitute_record_ext(
     span: Span,
 ) -> CType {
     let Some(name) = ext else {
-        return CType::Record(own_fields, None);
+        return CType::Record(own_fields, Vec::new(), None);
     };
     match mapping.get(name) {
-        None => CType::Record(own_fields, Some(name.clone())),
-        Some(CType::Var(other)) => CType::Record(own_fields, Some(other.clone())),
-        Some(CType::Record(other_fields, other_ext)) => {
+        None => CType::Record(own_fields, Vec::new(), Some(name.clone())),
+        Some(CType::Var(other)) => CType::Record(own_fields, Vec::new(), Some(other.clone())),
+        Some(CType::Record(other_fields, other_spreads, other_ext)) => {
+            debug_assert!(
+                other_spreads.is_empty(),
+                "a substituted-in record argument is already fully alias-expanded"
+            );
             let mut merged = own_fields;
             for (field_name, field_ty) in other_fields {
                 if merged.iter().any(|(n, _)| n == field_name) {
@@ -298,7 +372,7 @@ fn substitute_record_ext(
                     merged.push((field_name.clone(), field_ty.clone()));
                 }
             }
-            CType::Record(merged, other_ext.clone())
+            CType::Record(merged, Vec::new(), other_ext.clone())
         }
         Some(_) => {
             errors.push(CanonError::new(
@@ -308,7 +382,7 @@ fn substitute_record_ext(
                 },
                 span,
             ));
-            CType::Record(own_fields, Some(name.clone()))
+            CType::Record(own_fields, Vec::new(), Some(name.clone()))
         }
     }
 }
@@ -364,13 +438,112 @@ fn substitute(
                 .map(|t| substitute(t, expanded, errors, span))
                 .collect(),
         ),
-        CType::Record(fields, ext) => CType::Record(
-            fields
+        CType::Record(fields, spreads, ext) => {
+            let own_fields: Vec<(String, CType)> = fields
                 .iter()
                 .map(|(n, t)| (n.clone(), substitute(t, expanded, errors, span)))
-                .collect(),
-            ext.clone(),
-        ),
+                .collect();
+            let merged = resolve_spreads(own_fields, spreads, expanded, errors, span);
+            CType::Record(merged, Vec::new(), ext.clone())
+        }
+    }
+}
+
+/// Merges every spread target's own (already fully expanded) fields into
+/// `own_fields`, in `spreads` order. Each target is looked up in `expanded`
+/// directly by name — spread syntax takes no arguments, so there's never a
+/// `mapping` to build the way an ordinary alias *reference* needs one — and
+/// is guaranteed to already be present with its own `spreads` list empty,
+/// since `collect_alias_refs` records a spread as a dependency edge exactly
+/// like an ordinary alias reference, so `topo_order` always processes a
+/// spread's target before whatever spreads it.
+fn resolve_spreads(
+    mut own_fields: Vec<(String, CType)>,
+    spreads: &[Ref],
+    expanded: &HashMap<String, AliasDef>,
+    errors: &mut Vec<CanonError>,
+    span: Span,
+) -> Vec<(String, CType)> {
+    // Spreading the exact same target twice in one literal (`{ ..A, ..A,
+    // x : Float }`) is a no-op on the repeat, not a self-conflict --
+    // per the proposal's own §8, which flagged this as worth deciding
+    // explicitly rather than leaving implicit.
+    let mut already_spread: HashSet<&str> = HashSet::new();
+    for spread_ref in spreads {
+        let Ref::TopLevel(name) = spread_ref else {
+            // `Ref::Unresolved` already has its own error from name
+            // resolution; anything else (Builtin/Imported) has no local
+            // field list to look at at all.
+            if !matches!(spread_ref, Ref::Unresolved(_)) {
+                errors.push(CanonError::new(
+                    CanonErrorKind::SpreadTargetNotALocalAlias {
+                        name: ref_name(spread_ref),
+                    },
+                    span,
+                ));
+            }
+            continue;
+        };
+        if !already_spread.insert(name.as_str()) {
+            continue;
+        }
+        let Some(def) = expanded.get(name) else {
+            // A real `Ref::TopLevel` that isn't a `type alias` at all --
+            // an ADT `type` name, which has variants, not a field list.
+            errors.push(CanonError::new(
+                CanonErrorKind::SpreadTargetNotARecord { name: name.clone() },
+                span,
+            ));
+            continue;
+        };
+        if !def.params.is_empty() {
+            errors.push(CanonError::new(
+                CanonErrorKind::SpreadTargetNotClosed { name: name.clone() },
+                span,
+            ));
+            continue;
+        }
+        match &def.body {
+            CType::Record(target_fields, target_spreads, None) => {
+                debug_assert!(
+                    target_spreads.is_empty(),
+                    "a spread target's own spreads are already resolved by topo order"
+                );
+                for (field_name, field_ty) in target_fields {
+                    if own_fields.iter().any(|(n, _)| n == field_name) {
+                        errors.push(CanonError::new(
+                            CanonErrorKind::SpreadFieldConflict {
+                                name: name.clone(),
+                                field: field_name.clone(),
+                            },
+                            span,
+                        ));
+                    } else {
+                        own_fields.push((field_name.clone(), field_ty.clone()));
+                    }
+                }
+            }
+            CType::Record(_, _, Some(_)) => {
+                errors.push(CanonError::new(
+                    CanonErrorKind::SpreadTargetNotClosed { name: name.clone() },
+                    span,
+                ));
+            }
+            _ => {
+                errors.push(CanonError::new(
+                    CanonErrorKind::SpreadTargetNotARecord { name: name.clone() },
+                    span,
+                ));
+            }
+        }
+    }
+    own_fields
+}
+
+fn ref_name(r: &Ref) -> String {
+    match r {
+        Ref::TopLevel(n) | Ref::Builtin(n) | Ref::Unresolved(n) | Ref::Local(n) => n.clone(),
+        Ref::Imported { name, .. } => name.clone(),
     }
 }
 
@@ -553,7 +726,8 @@ mod tests {
         let ty = fn_sig_ty(&cs, "useSelectableFoo");
         match ty {
             CType::Fn(a, _) => match *a {
-                CType::Record(fields, ext) => {
+                CType::Record(fields, spreads, ext) => {
+                    assert!(spreads.is_empty());
                     assert_eq!(ext, None, "merged result should be closed");
                     assert!(fields.iter().any(|(n, t)| n == "isSelected"
                         && matches!(t, CType::Named(Ref::Builtin(b), _) if b == "Bool")));
@@ -580,7 +754,8 @@ mod tests {
         let ty = fn_sig_ty(&cs, "useWrap");
         match ty {
             CType::Fn(a, _) => match *a {
-                CType::Record(fields, ext) => {
+                CType::Record(fields, spreads, ext) => {
+                    assert!(spreads.is_empty());
                     assert!(ext.is_some(), "row should still be open");
                     assert_eq!(fields.len(), 1);
                 }
@@ -636,5 +811,307 @@ mod tests {
             })
             .unwrap();
         assert!(matches!(target, CType::Tuple(_)));
+    }
+
+    // -- record spread (`{ ..Name, field : Type }`) --
+
+    #[test]
+    fn a_single_spread_merges_the_targets_fields() {
+        let cs = decls(
+            "type alias GraphicsElement = { id : Int, fill : String }\n\
+             type alias Circle = { ..GraphicsElement, cx : Float, cy : Float }\n\
+             useCircle :: Circle -> Float\n\
+             useCircle c = c.cx\n",
+        );
+        let ty = fn_sig_ty(&cs, "useCircle");
+        match ty {
+            CType::Fn(a, _) => match *a {
+                CType::Record(fields, spreads, ext) => {
+                    assert!(spreads.is_empty());
+                    assert_eq!(ext, None);
+                    let names: Vec<&str> = fields.iter().map(|(n, _)| n.as_str()).collect();
+                    assert_eq!(names.len(), 4, "{names:?}");
+                    for expected in ["id", "fill", "cx", "cy"] {
+                        assert!(names.contains(&expected), "missing {expected}: {names:?}");
+                    }
+                }
+                other => panic!("expected a merged Record, got {other:?}"),
+            },
+            other => panic!("expected a Fn shape, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn multiple_spreads_in_one_literal_all_merge() {
+        let cs = decls(
+            "type alias Fills = { fill : String }\n\
+             type alias Strokes = { stroke : String }\n\
+             type alias Combined = { ..Fills, ..Strokes, extra : Int }\n\
+             useCombined :: Combined -> Int\n\
+             useCombined c = c.extra\n",
+        );
+        let ty = fn_sig_ty(&cs, "useCombined");
+        match ty {
+            CType::Fn(a, _) => match *a {
+                CType::Record(fields, spreads, _) => {
+                    assert!(spreads.is_empty());
+                    let names: Vec<&str> = fields.iter().map(|(n, _)| n.as_str()).collect();
+                    assert_eq!(names.len(), 3, "{names:?}");
+                    for expected in ["fill", "stroke", "extra"] {
+                        assert!(names.contains(&expected), "missing {expected}: {names:?}");
+                    }
+                }
+                other => panic!("expected a merged Record, got {other:?}"),
+            },
+            other => panic!("expected a Fn shape, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn spreading_the_same_target_twice_is_a_no_op_not_a_conflict() {
+        // Proposal §8's own open question, resolved: `{ ..A, ..A, x : T }`
+        // must not self-conflict on A's own fields the second time.
+        let cs = decls(
+            "type alias A = { x : Int }\n\
+             type alias Combined = { ..A, ..A, y : Bool }\n\
+             useCombined :: Combined -> Int\n\
+             useCombined c = c.x\n",
+        );
+        let ty = fn_sig_ty(&cs, "useCombined");
+        match ty {
+            CType::Fn(a, _) => match *a {
+                CType::Record(fields, spreads, _) => {
+                    assert!(spreads.is_empty());
+                    let names: Vec<&str> = fields.iter().map(|(n, _)| n.as_str()).collect();
+                    assert_eq!(names.len(), 2, "{names:?}");
+                    assert!(names.contains(&"x"));
+                    assert!(names.contains(&"y"));
+                }
+                other => panic!("expected a merged Record, got {other:?}"),
+            },
+            other => panic!("expected a Fn shape, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_spread_composes_with_the_records_own_open_extension_variable() {
+        // { a | ..GraphicsElement, label : String } -- the spread's own
+        // fields merge in, but the row stays open on `a`.
+        let cs = decls(
+            "type alias GraphicsElement = { id : Int }\n\
+             type alias Named a = { a | ..GraphicsElement, label : String }\n\
+             useNamed :: Named a -> String\n\
+             useNamed n = n.label\n",
+        );
+        let ty = fn_sig_ty(&cs, "useNamed");
+        match ty {
+            CType::Fn(a, _) => match *a {
+                CType::Record(fields, spreads, ext) => {
+                    assert!(spreads.is_empty());
+                    assert!(ext.is_some(), "row should still be open");
+                    let names: Vec<&str> = fields.iter().map(|(n, _)| n.as_str()).collect();
+                    assert_eq!(names.len(), 2, "{names:?}");
+                    assert!(names.contains(&"id"));
+                    assert!(names.contains(&"label"));
+                }
+                other => panic!("expected an open, spread-merged Record, got {other:?}"),
+            },
+            other => panic!("expected a Fn shape, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_spread_transitively_pulls_in_a_spread_of_a_spread() {
+        // Circle spreads GraphicsElement, which itself spreads Base --
+        // Circle should end up with fields from all three.
+        let cs = decls(
+            "type alias Base = { id : Int }\n\
+             type alias GraphicsElement = { ..Base, fill : String }\n\
+             type alias Circle = { ..GraphicsElement, cx : Float }\n\
+             useCircle :: Circle -> Float\n\
+             useCircle c = c.cx\n",
+        );
+        let ty = fn_sig_ty(&cs, "useCircle");
+        match ty {
+            CType::Fn(a, _) => match *a {
+                CType::Record(fields, spreads, _) => {
+                    assert!(spreads.is_empty());
+                    let names: Vec<&str> = fields.iter().map(|(n, _)| n.as_str()).collect();
+                    assert_eq!(names.len(), 3, "{names:?}");
+                    for expected in ["id", "fill", "cx"] {
+                        assert!(names.contains(&expected), "missing {expected}: {names:?}");
+                    }
+                }
+                other => panic!("expected a merged Record, got {other:?}"),
+            },
+            other => panic!("expected a Fn shape, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_spread_used_directly_in_a_function_signature_still_expands() {
+        // No enclosing `type alias` at all -- confirms this doesn't only
+        // work when a spread happens to sit inside an alias body.
+        let cs = decls(
+            "type alias GraphicsElement = { id : Int }\n\
+             useIt :: { ..GraphicsElement, cx : Float } -> Float\n\
+             useIt r = r.cx\n",
+        );
+        let ty = fn_sig_ty(&cs, "useIt");
+        match ty {
+            CType::Fn(a, _) => match *a {
+                CType::Record(fields, spreads, _) => {
+                    assert!(spreads.is_empty());
+                    assert_eq!(fields.len(), 2);
+                }
+                other => panic!("expected a merged Record, got {other:?}"),
+            },
+            other => panic!("expected a Fn shape, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn conflicting_field_between_spread_and_explicit_field_is_reported() {
+        let mut state = knot_syntax::ParseState::new(
+            "type alias GraphicsElement = { id : Int }\n\
+             type alias Circle = { ..GraphicsElement, id : Float }\n\
+             useCircle :: Circle -> Float\n\
+             useCircle c = c.id\n",
+        );
+        let raw = state.parse_decls().unwrap();
+        let (_cdecls, errors) = resolve_decls(&raw);
+        assert!(errors.iter().any(|e| matches!(
+            &e.kind,
+            CanonErrorKind::SpreadFieldConflict { name, field }
+                if name == "GraphicsElement" && field == "id"
+        )));
+    }
+
+    #[test]
+    fn conflicting_field_between_two_spreads_is_reported() {
+        let mut state = knot_syntax::ParseState::new(
+            "type alias A = { x : Int }\n\
+             type alias B = { x : Float }\n\
+             type alias Combined = { ..A, ..B }\n\
+             useCombined :: Combined -> Int\n\
+             useCombined c = 1\n",
+        );
+        let raw = state.parse_decls().unwrap();
+        let (_cdecls, errors) = resolve_decls(&raw);
+        assert!(errors.iter().any(|e| matches!(
+            &e.kind,
+            CanonErrorKind::SpreadFieldConflict { name, field }
+                if name == "B" && field == "x"
+        )));
+    }
+
+    #[test]
+    fn spreading_a_parametric_alias_is_not_closed() {
+        let mut state = knot_syntax::ParseState::new(
+            "type alias Pair a = { x : a }\n\
+             type alias Bad = { ..Pair, y : Int }\n\
+             useBad :: Bad -> Int\n\
+             useBad b = b.y\n",
+        );
+        let raw = state.parse_decls().unwrap();
+        let (_cdecls, errors) = resolve_decls(&raw);
+        assert!(errors.iter().any(|e| matches!(
+            &e.kind,
+            CanonErrorKind::SpreadTargetNotClosed { name } if name == "Pair"
+        )));
+    }
+
+    #[test]
+    fn spreading_an_alias_with_its_own_open_row_is_not_closed() {
+        let mut state = knot_syntax::ParseState::new(
+            "type alias Selectable a = { a | isSelected : Bool }\n\
+             type alias Bad = { ..Selectable, y : Int }\n\
+             useBad :: Bad -> Int\n\
+             useBad b = b.y\n",
+        );
+        let raw = state.parse_decls().unwrap();
+        let (_cdecls, errors) = resolve_decls(&raw);
+        assert!(errors.iter().any(|e| matches!(
+            &e.kind,
+            CanonErrorKind::SpreadTargetNotClosed { name } if name == "Selectable"
+        )));
+    }
+
+    #[test]
+    fn spreading_a_non_record_alias_is_reported() {
+        let mut state = knot_syntax::ParseState::new(
+            "type alias NotARecord = Int\n\
+             type alias Bad = { ..NotARecord, y : Int }\n\
+             useBad :: Bad -> Int\n\
+             useBad b = b.y\n",
+        );
+        let raw = state.parse_decls().unwrap();
+        let (_cdecls, errors) = resolve_decls(&raw);
+        assert!(errors.iter().any(|e| matches!(
+            &e.kind,
+            CanonErrorKind::SpreadTargetNotARecord { name } if name == "NotARecord"
+        )));
+    }
+
+    #[test]
+    fn spreading_an_adt_type_name_is_reported() {
+        // Shape has variants, not a field list -- structurally not a
+        // record no matter how you look at it.
+        let mut state = knot_syntax::ParseState::new(
+            "type Shape = Circle Float\n\
+             type alias Bad = { ..Shape, y : Int }\n\
+             useBad :: Bad -> Int\n\
+             useBad b = b.y\n",
+        );
+        let raw = state.parse_decls().unwrap();
+        let (_cdecls, errors) = resolve_decls(&raw);
+        assert!(errors.iter().any(|e| matches!(
+            &e.kind,
+            CanonErrorKind::SpreadTargetNotARecord { name } if name == "Shape"
+        )));
+    }
+
+    #[test]
+    fn spreading_a_builtin_type_is_reported() {
+        let mut state = knot_syntax::ParseState::new(
+            "type alias Bad = { ..Int, y : Int }\n\
+             useBad :: Bad -> Int\n\
+             useBad b = b.y\n",
+        );
+        let raw = state.parse_decls().unwrap();
+        let (_cdecls, errors) = resolve_decls(&raw);
+        assert!(errors.iter().any(|e| matches!(
+            &e.kind,
+            CanonErrorKind::SpreadTargetNotALocalAlias { name } if name == "Int"
+        )));
+    }
+
+    #[test]
+    fn a_self_spread_is_a_cyclic_error_not_an_infinite_loop() {
+        let mut state = knot_syntax::ParseState::new("type alias A = { ..A, x : Int }\n");
+        let raw = state.parse_decls().unwrap();
+        let (_cdecls, errors) = resolve_decls(&raw);
+        assert!(errors
+            .iter()
+            .any(|e| matches!(&e.kind, CanonErrorKind::CyclicTypeAlias(name) if name == "A")));
+    }
+
+    #[test]
+    fn a_stray_spread_with_zero_aliases_in_the_module_is_still_an_error() {
+        // Regression test for expand_aliases's own early-return: with no
+        // `type alias` declarations at all (so `raw.is_empty()`), the old
+        // fast path would return before ever looking at this spread,
+        // silently leaving it unresolved instead of reporting it. `Int`
+        // resolves fine as an ordinary name (no *name-resolution* error) --
+        // the only way this can fail is `expand_aliases`'s own spread
+        // handling actually running.
+        let mut state =
+            knot_syntax::ParseState::new("useBad :: { ..Int, y : Int } -> Int\nuseBad b = b.y\n");
+        let raw = state.parse_decls().unwrap();
+        let (_cdecls, errors) = resolve_decls(&raw);
+        assert!(errors.iter().any(|e| matches!(
+            &e.kind,
+            CanonErrorKind::SpreadTargetNotALocalAlias { name } if name == "Int"
+        )));
     }
 }

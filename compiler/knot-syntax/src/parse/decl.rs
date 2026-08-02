@@ -382,7 +382,7 @@ mod tests {
         };
         assert_eq!(name, "Point");
         assert!(params.is_empty());
-        assert!(matches!(ty, Type::Record(_, None)));
+        assert!(matches!(ty, Type::Record(_, _, None)));
     }
 
     #[test]

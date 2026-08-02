@@ -109,7 +109,7 @@ fn check_type_tuple_arity(ty: &Type, span: Span, errors: &mut Vec<ValidationErro
             check_type_tuple_arity(a, span, errors);
             check_type_tuple_arity(b, span, errors);
         }
-        Type::Record(fields, _) => {
+        Type::Record(fields, _spreads, _ext) => {
             for (_, t) in fields {
                 check_type_tuple_arity(t, span, errors);
             }

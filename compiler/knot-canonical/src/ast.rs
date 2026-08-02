@@ -105,7 +105,14 @@ pub enum CType {
     Var(String),
     Fn(Box<CType>, Box<CType>),
     Tuple(Vec<CType>),
-    Record(Vec<(String, CType)>, Option<String>),
+    /// Fields, unresolved spread targets (`{ ..Name, ... }`), and an
+    /// optional extension row variable. The spread list is a transient,
+    /// resolution-only detail: `resolve::alias::expand_aliases` eliminates
+    /// every entry (merging each target's own fields into the first list)
+    /// before canonicalization finishes, so it's always empty by the time
+    /// anything outside `knot-canonical` — or anything in this crate past
+    /// that pass — ever inspects a `CType::Record`.
+    Record(Vec<(String, CType)>, Vec<Ref>, Option<String>),
     Unit,
 }
 
