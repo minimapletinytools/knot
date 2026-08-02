@@ -383,7 +383,7 @@ fn instantiate_flexible(
 /// TypeDecl` in `decls` — e.g. `type Shape = Circle Float` installs
 /// `Circle :: Float -> Shape` under `SchemeKey::TopLevel("Circle")`,
 /// exactly the shape `prelude.rs`'s own `seed_constructors` hand-writes for
-/// built-ins like `Some`/`Ok`, just derived from the real declaration
+/// built-ins like `Just`/`Ok`, just derived from the real declaration
 /// instead of hardcoded — nothing else in this crate did this at all before
 /// (a real, previously-undocumented gap: without it, *any* use of a
 /// user-defined constructor as a value or in a pattern is an `UnboundValue`

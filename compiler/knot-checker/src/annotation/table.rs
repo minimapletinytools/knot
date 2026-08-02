@@ -43,8 +43,8 @@ pub fn fixed_expected_type(sub: &mut Substitution, key: &str) -> Option<TypeVarI
 /// `unravel`'s expected type (plan §3.5's derivation rule), given the
 /// annotated binding's own already-built function type `f_ty` — a curried
 /// chain of `Structure::Fn`s ending in a non-function `Out`. Builds
-/// `Sensitivity Out -> UnravelInput A -> UnravelInput B -> ... -> Option
-/// (A, B, ...)`, collapsing the result to a bare `Option A` for a single
+/// `Sensitivity Out -> UnravelInput A -> UnravelInput B -> ... -> Maybe
+/// (A, B, ...)`, collapsing the result to a bare `Maybe A` for a single
 /// parameter (matching how a 1-element grouping isn't a real tuple in Knot,
 /// spec §3.8). `None` if `f_ty` isn't a function at all (arity 0 — nothing
 /// to unravel), or has more than 3 parameters: spec's tuple-arity cap means
@@ -78,14 +78,14 @@ pub fn derive_unravel_type(sub: &mut Substitution, f_ty: TypeVarId) -> Option<Ty
     } else {
         sub.fresh_bound(Structure::Tuple(params))
     };
-    let option_result = sub.fresh_bound(Structure::App(
-        Ref::Builtin("Option".to_string()),
+    let maybe_result = sub.fresh_bound(Structure::App(
+        Ref::Builtin("Maybe".to_string()),
         vec![result],
     ));
     let chain = unravel_inputs
         .into_iter()
         .rev()
-        .fold(option_result, |acc, input| {
+        .fold(maybe_result, |acc, input| {
             sub.fresh_bound(Structure::Fn(input, acc))
         });
     Some(sub.fresh_bound(Structure::Fn(sensitivity_out, chain)))
@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     fn derives_the_single_parameter_shape() {
-        // f :: Int -> Bool  =>  unravel :: Sensitivity Bool -> UnravelInput Int -> Option Int
+        // f :: Int -> Bool  =>  unravel :: Sensitivity Bool -> UnravelInput Int -> Maybe Int
         let mut sub = Substitution::new();
         let int_ty = app0(&mut sub, "Int");
         let bool_ty = app0(&mut sub, "Bool");
@@ -147,18 +147,18 @@ mod tests {
                     Some(Structure::App(r, args)) if r == Ref::Builtin("Sensitivity".to_string()) && args == vec![bool_ty]
                 ));
                 match sub.resolve_structure(rest) {
-                    Some(Structure::Fn(unravel_input, option_result)) => {
+                    Some(Structure::Fn(unravel_input, maybe_result)) => {
                         assert!(matches!(
                             sub.resolve_structure(unravel_input),
                             Some(Structure::App(r, args))
                                 if r == Ref::Builtin("UnravelInput".to_string()) && args == vec![int_ty]
                         ));
                         assert!(matches!(
-                            sub.resolve_structure(option_result),
-                            Some(Structure::App(r, args)) if r == Ref::Builtin("Option".to_string()) && args == vec![int_ty]
+                            sub.resolve_structure(maybe_result),
+                            Some(Structure::App(r, args)) if r == Ref::Builtin("Maybe".to_string()) && args == vec![int_ty]
                         ));
                     }
-                    other => panic!("expected UnravelInput Int -> Option Int, got {other:?}"),
+                    other => panic!("expected UnravelInput Int -> Maybe Int, got {other:?}"),
                 }
             }
             other => panic!("expected a Fn shape, got {other:?}"),
@@ -167,7 +167,7 @@ mod tests {
 
     #[test]
     fn derives_the_multi_parameter_tuple_shape() {
-        // f :: A -> B -> C  =>  Sensitivity C -> UnravelInput A -> UnravelInput B -> Option (A, B)
+        // f :: A -> B -> C  =>  Sensitivity C -> UnravelInput A -> UnravelInput B -> Maybe (A, B)
         let mut sub = Substitution::new();
         let a = app0(&mut sub, "Int");
         let b = app0(&mut sub, "Bool");
@@ -182,17 +182,17 @@ mod tests {
         let Some(Structure::Fn(_input_a, rest2)) = sub.resolve_structure(rest1) else {
             panic!("expected a second Fn arrow")
         };
-        let Some(Structure::Fn(_input_b, option_result)) = sub.resolve_structure(rest2) else {
+        let Some(Structure::Fn(_input_b, maybe_result)) = sub.resolve_structure(rest2) else {
             panic!("expected a third Fn arrow")
         };
-        match sub.resolve_structure(option_result) {
-            Some(Structure::App(r, args)) if r == Ref::Builtin("Option".to_string()) => {
+        match sub.resolve_structure(maybe_result) {
+            Some(Structure::App(r, args)) if r == Ref::Builtin("Maybe".to_string()) => {
                 match sub.resolve_structure(args[0]) {
                     Some(Structure::Tuple(elems)) => assert_eq!(elems.len(), 2),
                     other => panic!("expected a Tuple(A, B), got {other:?}"),
                 }
             }
-            other => panic!("expected Option (A, B), got {other:?}"),
+            other => panic!("expected Maybe (A, B), got {other:?}"),
         }
     }
 

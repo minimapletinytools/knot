@@ -146,7 +146,7 @@ mod tests {
     #[test]
     fn sensitivity_resolves_as_an_opaque_builtin_stub() {
         // Sensitivity is a stub for now (knot-type-checker-plan.md §3.5/§4) --
-        // an ordinary arity-1 built-in head at this stage, same as `Option`.
+        // an ordinary arity-1 built-in head at this stage, same as `Maybe`.
         let env = Env::for_decls();
         let mut errors = Vec::new();
         let ty = Type::Named("Sensitivity".to_string(), vec![Type::Var("a".to_string())]);

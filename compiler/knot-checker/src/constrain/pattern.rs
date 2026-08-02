@@ -224,7 +224,7 @@ mod tests {
         let mut scope = LocalScope::new();
         scope.push();
         let mut cs = Vec::new();
-        let reference = knot_canonical::ast::Ref::Builtin("Some".to_string());
+        let reference = knot_canonical::ast::Ref::Builtin("Just".to_string());
         let typed = constrain_pattern(
             &mut sub,
             &mut scope,

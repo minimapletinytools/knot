@@ -23,7 +23,7 @@ use knot_syntax::span::Spanned;
 /// them — `Ref::TopLevel("Circle")` and `Ref::TopLevel("Rectangle")` both
 /// map to the same `[(Circle, 1), (Rectangle, 2)]` list for a `type Shape =
 /// Circle Float | Rectangle Float Float`. Built-in enum-shaped types
-/// (`Bool`, `Option`, `Result`, `Ordering`) are seeded up front; `List`
+/// (`Bool`, `Maybe`, `Result`, `Ordering`) are seeded up front; `List`
 /// isn't — its patterns are `CPattern::Cons`/`CPattern::Nil`, a distinct
 /// pattern shape entirely, not `CPattern::Ctor`, so it's handled directly
 /// in `head_kind`/`complete_signature` instead of through this table.
@@ -37,7 +37,7 @@ impl CtorTable {
             by_ctor: HashMap::new(),
         };
         table.add_group(&[("True", 0), ("False", 0)]);
-        table.add_group(&[("Some", 1), ("None", 0)]);
+        table.add_group(&[("Just", 1), ("Nothing", 0)]);
         table.add_group(&[("Ok", 1), ("Err", 1)]);
         table.add_group(&[("LT", 0), ("EQ", 0), ("GT", 0)]);
         table
@@ -360,11 +360,12 @@ mod tests {
     #[test]
     fn nested_constructor_patterns_are_handled() {
         let ctors = CtorTable::new();
-        let missing_some_false = arm_patterns("f x = case x of\n  None -> 0\n  Some True -> 1\n");
-        assert!(!is_exhaustive(&ctors, &missing_some_false));
+        let missing_just_false =
+            arm_patterns("f x = case x of\n  Nothing -> 0\n  Just True -> 1\n");
+        assert!(!is_exhaustive(&ctors, &missing_just_false));
 
         let complete =
-            arm_patterns("f x = case x of\n  None -> 0\n  Some True -> 1\n  Some False -> 2\n");
+            arm_patterns("f x = case x of\n  Nothing -> 0\n  Just True -> 1\n  Just False -> 2\n");
         assert!(is_exhaustive(&ctors, &complete));
     }
 

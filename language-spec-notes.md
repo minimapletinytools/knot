@@ -97,9 +97,9 @@ type Shape
   | Rectangle Float Float
   | Triangle Float Float Float
 
-type Option a
-  = Some a
-  | None
+type Maybe a
+  = Just a
+  | Nothing
 
 type Result e a
   = Ok a
@@ -112,7 +112,7 @@ type Result e a
 |--------------|-------------------------------------------|
 | `List a`     | Ordered sequence                          |
 | `Map k v`    | Key-value map (`k` must implement `Ord`)  |
-| `Option a`   | Nullable / missing value                  |
+| `Maybe a`    | Nullable / missing value                  |
 | `Result e a` | Success or failure with a typed error     |
 
 ### 3.8 Tuple Types
@@ -330,7 +330,7 @@ pure :: a -> f a
 bind :: f a -> (a -> f b) -> f b   -- also exposed as (>>=)
 ```
 
-Built-in instances: `Option`, `Result`, `IO`, `List`.
+Built-in instances: `Maybe`, `Result`, `IO`, `List`.
 
 ---
 
@@ -339,7 +339,7 @@ Built-in instances: `Option`, `Result`, `IO`, `List`.
 | Type         | Purpose                                      |
 |--------------|----------------------------------------------|
 | `IO a`       | Side effects (file I/O, printer comms, etc.) |
-| `Option a`   | Nullable / missing values                    |
+| `Maybe a`    | Nullable / missing values                    |
 | `Result e a` | Fallible computations with typed errors      |
 
 Do-notation desugars to `bind`/`>>=` and `pure`:
@@ -622,10 +622,10 @@ open, see §13.
 *product* shapes: record and tuple, where the set of fields is fixed and statically known.
 It does not (yet) cover *sum* shapes — any multi-constructor `type` (§3.5), including
 `List` (`Nil | Cons a (List a)` — `:`/`[]` are surface sugar over an ordinary recursive ADT
-here, exactly as in Haskell/Elm, not a structurally distinct case), `Option`, `Result`, or a
+here, exactly as in Haskell/Elm, not a structurally distinct case), `Maybe`, `Result`, or a
 user's own `type Shape = Circle Float | Rectangle Float Float`. Recursing `Sensitivity` into
 a sum type would mean letting a constraint change *which constructor* is active (`Cons h t`
-becoming `Nil`, `Some x` becoming `None`) — a change to the value's shape, not just to a
+becoming `Nil`, `Just x` becoming `Nothing`) — a change to the value's shape, not just to a
 field within a fixed shape — and that's a genuinely harder, unsolved problem, not merely an
 unimplemented case of the rule above. Until it's designed, `Sensitivity` of any sum type
 (built-in or user-defined, `List` included) falls to the same scalar leaf case as any other

@@ -2,7 +2,7 @@ use crate::ast::Name;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
-    /// `Int`, `List a`, `Map k v`, `Option a`, ...
+    /// `Int`, `List a`, `Map k v`, `Maybe a`, ...
     Named(Name, Vec<Type>),
     Var(String),
     Fn(Box<Type>, Box<Type>),

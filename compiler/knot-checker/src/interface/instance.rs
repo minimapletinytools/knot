@@ -785,9 +785,9 @@ mod tests {
     /// declare_ctor`/`resolve_ctor`) are never auto-seeded by this crate's
     /// own machinery (a real, separate, pre-existing gap unrelated to Fix
     /// #5 -- `prelude.rs`'s own doc comment only ever covers *built-in*
-    /// constructors like `Some`/`Ok`), so a test that actually constructs
+    /// constructors like `Just`/`Ok`), so a test that actually constructs
     /// or pattern-matches one has to seed it by hand, same as `prelude.rs`
-    /// itself does for `Some`/`None`/`Ok`/`Err`.
+    /// itself does for `Just`/`Nothing`/`Ok`/`Err`.
     fn seed_box_ctor(sub: &mut Substitution, env: &mut crate::solve::SchemeEnv) {
         let a = sub.fresh_unbound();
         let box_ref = Ref::TopLevel("Box".to_string());

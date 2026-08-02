@@ -1,7 +1,7 @@
 //! The always-in-scope environment every module starts with, before its own
 //! imports or declarations are considered — built-in types, their constructors,
 //! the closed interface set, and closed-interface method names. Nothing here
-//! needs an `import`, matching how `List a`/`Option a`/etc. are usable as types
+//! needs an `import`, matching how `List a`/`Maybe a`/etc. are usable as types
 //! without importing anything (spec §3.6), and how Haskell's Prelude auto-exports
 //! typeclass methods.
 //!
@@ -21,7 +21,7 @@
 /// recursive type-level function (spec §9.6) that expands into a matching
 /// record/tuple shape rather than a normal nominal type. None of that
 /// expansion is implemented yet: for now `knot-checker` treats it exactly
-/// like `Option` or any other one-argument built-in — two `Sensitivity a`
+/// like `Maybe` or any other one-argument built-in — two `Sensitivity a`
 /// unify iff their `a`s do, with no introspection into `a`'s own shape.
 ///
 /// `UnravelInput` is here for the same reason `knot-checker`'s
@@ -44,7 +44,7 @@ pub const BUILTIN_TYPES: &[&str] = &[
     "Unit",
     "List",
     "Map",
-    "Option",
+    "Maybe",
     "Result",
     "IO",
     "Ordering",
@@ -56,8 +56,8 @@ pub const BUILTIN_TYPES: &[&str] = &[
 pub const BUILTIN_CONSTRUCTORS: &[(&str, usize, &str)] = &[
     ("True", 0, "Bool"),
     ("False", 0, "Bool"),
-    ("Some", 1, "Option"),
-    ("None", 0, "Option"),
+    ("Just", 1, "Maybe"),
+    ("Nothing", 0, "Maybe"),
     ("Ok", 1, "Result"),
     ("Err", 1, "Result"),
     ("LT", 0, "Ordering"),

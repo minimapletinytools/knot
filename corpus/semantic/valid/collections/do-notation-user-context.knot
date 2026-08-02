@@ -1,5 +1,5 @@
 -- expect: `do` notation desugars to `bind`/`pure` against a *user*-defined
--- Context instance, not just the built-in Option/Result/IO/List ones.
+-- Context instance, not just the built-in Maybe/Result/IO/List ones.
 type Box a
     = Box a
 

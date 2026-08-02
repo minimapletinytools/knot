@@ -4,8 +4,8 @@ names = ["a", "b", "c"]
 scores :: Map String Int
 scores = Map.fromList [ ("a", 1) ]
 
-maybeAge :: Option Int
-maybeAge = Some 30
+maybeAge :: Maybe Int
+maybeAge = Just 30
 
 parsed :: Result String Int
 parsed = Ok 42

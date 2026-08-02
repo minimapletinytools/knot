@@ -13,7 +13,7 @@
 //! `Num`. See `ty::Structure::VarApp`'s own doc comment for why that needs
 //! no new machinery beyond the two `Structure` variants themselves.
 //!
-//! Also not seeded: `Eq`/`Ord`/`Show` for `List`/`Option`/`Result` are
+//! Also not seeded: `Eq`/`Ord`/`Show` for `List`/`Maybe`/`Result` are
 //! registered as head-level instances (so `List Int == List Int`-shaped
 //! *concrete* uses resolve), but — per `interface::instance`'s own doc
 //! comment — this table never checks a parametric instance's own element
@@ -96,7 +96,7 @@ fn seed_instances(table: &mut InstanceTable) {
     // recursive now (Fix #4): `List Weird`'s `Eq` correctly fails unless
     // `Weird` itself has one, instead of the container's own instance
     // being unconditional.
-    for container in ["List", "Option"] {
+    for container in ["List", "Maybe"] {
         for interface in ["Eq", "Ord", "Show"] {
             table.insert_builtin(
                 interface,
@@ -115,7 +115,7 @@ fn seed_instances(table: &mut InstanceTable) {
         );
     }
 
-    // spec §6.3/§6.4: Collection (List, Map), Context (Option, Result, IO,
+    // spec §6.3/§6.4: Collection (List, Map), Context (Maybe, Result, IO,
     // List) -- keyed by the constructor's own `Ref`, exactly like every
     // other instance here; no `requires` of their own (the obligation is
     // on the bare constructor variable itself, not on some argument
@@ -123,7 +123,7 @@ fn seed_instances(table: &mut InstanceTable) {
     // `Structure::Ctor` case).
     table.insert_builtin("Collection", Ref::Builtin("List".to_string()), vec![]);
     table.insert_builtin("Collection", Ref::Builtin("Map".to_string()), vec![]);
-    for context in ["Option", "Result", "IO", "List"] {
+    for context in ["Maybe", "Result", "IO", "List"] {
         table.insert_builtin("Context", Ref::Builtin(context.to_string()), vec![]);
     }
 }
@@ -409,13 +409,13 @@ fn seed_constructors(
         Scheme::monomorphic(ordering_ty),
     );
 
-    // Some :: a -> Option a
+    // Just :: a -> Maybe a
     {
         let a = sub.fresh_unbound();
-        let option_a = sub.fresh_bound(Structure::App(Ref::Builtin("Option".to_string()), vec![a]));
-        let ty = sub.fresh_bound(Structure::Fn(a, option_a));
+        let maybe_a = sub.fresh_bound(Structure::App(Ref::Builtin("Maybe".to_string()), vec![a]));
+        let ty = sub.fresh_bound(Structure::Fn(a, maybe_a));
         env.insert(
-            SchemeKey::Builtin("Some".to_string()),
+            SchemeKey::Builtin("Just".to_string()),
             Scheme {
                 vars: vec![a],
                 constraints: vec![],
@@ -423,16 +423,16 @@ fn seed_constructors(
             },
         );
     }
-    // None :: Option a
+    // Nothing :: Maybe a
     {
         let a = sub.fresh_unbound();
-        let option_a = sub.fresh_bound(Structure::App(Ref::Builtin("Option".to_string()), vec![a]));
+        let maybe_a = sub.fresh_bound(Structure::App(Ref::Builtin("Maybe".to_string()), vec![a]));
         env.insert(
-            SchemeKey::Builtin("None".to_string()),
+            SchemeKey::Builtin("Nothing".to_string()),
             Scheme {
                 vars: vec![a],
                 constraints: vec![],
-                ty: option_a,
+                ty: maybe_a,
             },
         );
     }
@@ -638,12 +638,12 @@ mod tests {
 
     #[test]
     fn map_over_a_non_collection_constructor_is_a_no_instance_error() {
-        // Option is a Context, not a Collection (spec §6.3/§6.4) -- map's f
-        // still happily unifies structurally with Option (unify doesn't
+        // Maybe is a Context, not a Collection (spec §6.3/§6.4) -- map's f
+        // still happily unifies structurally with Maybe (unify doesn't
         // check instances), but check_pending must reject it.
         let mut sub = Substitution::new();
         let (mut env, table) = seed(&mut sub);
-        let cs = decls("bad = map (\\x -> x) (Some 1)\n");
+        let cs = decls("bad = map (\\x -> x) (Just 1)\n");
         let (tree, _members) = constrain_module(&mut sub, &cs);
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
@@ -702,7 +702,7 @@ mod tests {
     fn do_notation_desugars_to_bind_and_pure_and_type_checks() {
         let mut sub = Substitution::new();
         let (mut env, table) = seed(&mut sub);
-        let cs = decls("result = do\n  x <- Some 1\n  y <- Some 2\n  pure (x + y)\n");
+        let cs = decls("result = do\n  x <- Just 1\n  y <- Just 2\n  pure (x + y)\n");
         let (tree, _members) = constrain_module(&mut sub, &cs);
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
@@ -714,14 +714,14 @@ mod tests {
             .unwrap()
             .clone();
         match resolved_head(&mut sub, scheme.ty) {
-            Some((r, args)) if r == Ref::Builtin("Option".to_string()) => {
+            Some((r, args)) if r == Ref::Builtin("Maybe".to_string()) => {
                 let int_ty = app0(&mut sub, "Int");
                 assert_eq!(
                     sub.resolve_structure(args[0]),
                     sub.resolve_structure(int_ty)
                 );
             }
-            other => panic!("expected Option Int, got {other:?}"),
+            other => panic!("expected Maybe Int, got {other:?}"),
         }
     }
 

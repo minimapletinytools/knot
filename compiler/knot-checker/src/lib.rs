@@ -52,7 +52,7 @@
 //!   constructor signatures — `ty::Structure::Ctor`/`VarApp`,
 //!   `Substitution::fresh_ctor_unbound`, and two new `Collection`/`Context`
 //!   interfaces (`interface::table`, seeded in `prelude.rs` for `List`/
-//!   `Map`/`Option`/`Result`/`IO`) are the whole of it — deliberately *not*
+//!   `Map`/`Maybe`/`Result`/`IO`) are the whole of it — deliberately *not*
 //!   general kind polymorphism, just enough closed-set machinery for these
 //!   seven built-ins (see `ty::Structure::VarApp`'s own doc comment). `Do`
 //!   (`constrain::expr::desugar_do`) is real now too, since it falls
@@ -133,7 +133,7 @@
 //! - **User-defined ADT constructors had no schemes at all** — `type Shape
 //!   = Circle Float` followed by using `Circle` as a value or in a pattern
 //!   anywhere was an `UnboundValue` error, full stop, since nothing but
-//!   `prelude.rs`'s hand-written built-ins (`Some`, `Ok`, ...) ever
+//!   `prelude.rs`'s hand-written built-ins (`Just`, `Ok`, ...) ever
 //!   installed a constructor's scheme. Fixed by `constrain::decl::
 //!   seed_user_constructors`, called alongside `constrain_module` (not
 //!   folded into it — a constructor's type needs no unification or

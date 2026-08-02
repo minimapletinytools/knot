@@ -63,7 +63,7 @@ Grouped by area. Each has an ID (`S#`) used in the interaction matrix below.
 - `S6` ADTs (multi-variant, polymorphic params, self-recursive)
 - `S7` Constructors as values & in patterns (arity checking, generalization
   over unused type params)
-- `S8` Built-in generic containers: `List`, `Map`, `Option`, `Result`, `IO`
+- `S8` Built-in generic containers: `List`, `Map`, `Maybe`, `Result`, `IO`
 
 **Binding / control flow**
 - `S9` Lambda / currying / partial application

@@ -1,7 +1,7 @@
 //! `Sensitivity`'s own type-level expansion (spec §9.6) — currently a stub,
 //! per this session's explicit decision (2026-08-01): no recursion into
 //! record/tuple shape yet, just an ordinary opaque one-argument type,
-//! exactly like `Option`. `sensitivity_of` is the single seam
+//! exactly like `Maybe`. `sensitivity_of` is the single seam
 //! `annotation::table`'s `unravel` derivation calls through, so upgrading
 //! this later — recursing into `Structure::Record`/`Structure::Tuple`, per
 //! the design already written up in `knot-type-checker-plan.md` §3.5/§4 —
@@ -14,7 +14,7 @@ use crate::var::{Substitution, TypeVarId};
 
 /// `Sensitivity T`, stubbed: always just wraps `ty` opaquely, with zero
 /// introspection into its shape — two `Sensitivity a` unify iff their `a`s
-/// do, exactly like `Option`. See module docs for what upgrading this to
+/// do, exactly like `Maybe`. See module docs for what upgrading this to
 /// the real (record/tuple-recursive) behavior would involve.
 pub fn sensitivity_of(sub: &mut Substitution, ty: TypeVarId) -> TypeVarId {
     sub.fresh_bound(Structure::App(

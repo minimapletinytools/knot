@@ -16,7 +16,7 @@ pub enum Structure {
     /// `Int`, `List a`, `Map k v`, `Sensitivity a`, ... — every named type,
     /// built-in or user-defined, shares this one variant. `Sensitivity` gets
     /// no special case here: per the type-checker plan §3.5/§4's "stub" note,
-    /// two `Sensitivity a` unify iff their `a`s do, exactly like `Option` —
+    /// two `Sensitivity a` unify iff their `a`s do, exactly like `Maybe` —
     /// the eventual recursive expansion (spec §9.6) is a distinct, later
     /// piece of machinery that hasn't been built yet, not a variant of this
     /// enum.

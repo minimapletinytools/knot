@@ -212,10 +212,10 @@ mod tests {
         let mut env = Env::for_decls();
         env.push_scope();
         let mut errors = Vec::new();
-        // `Some` takes exactly 1 field; giving it 2 is a structural error that
+        // `Just` takes exactly 1 field; giving it 2 is a structural error that
         // needs no type information to catch.
         let pat = sp(Pattern::Ctor(
-            "Some".to_string(),
+            "Just".to_string(),
             vec![
                 sp(Pattern::Var("a".to_string())),
                 sp(Pattern::Var("b".to_string())),

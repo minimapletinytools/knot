@@ -322,7 +322,7 @@ impl<'a> Env<'a> {
         }
     }
 
-    /// Constructors used as *values* (e.g. `Some` applied like a function) and
+    /// Constructors used as *values* (e.g. `Just` applied like a function) and
     /// constructors used in pattern position share the same namespace/table.
     pub fn resolve_ctor(&self, name: &str) -> Result<(Ref, Option<CtorInfo>), UnresolvedKind> {
         if let Some((qualifier, unqualified)) = Self::split_qualified(name) {

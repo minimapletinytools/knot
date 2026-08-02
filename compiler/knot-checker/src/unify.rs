@@ -356,9 +356,9 @@ mod tests {
         let a = sub.fresh_unbound();
         let list_a = app1(&mut sub, "List", a);
         let b = sub.fresh_unbound();
-        let option_b = app1(&mut sub, "Option", b);
+        let maybe_b = app1(&mut sub, "Maybe", b);
         assert!(matches!(
-            unify(&mut sub, list_a, option_b),
+            unify(&mut sub, list_a, maybe_b),
             Err(UnifyError::Mismatch { .. })
         ));
     }
@@ -501,9 +501,9 @@ mod tests {
         let b = sub.fresh_unbound();
         let fb = sub.fresh_bound(Structure::VarApp(f, vec![b]));
         let bool_ty = app0(&mut sub, "Bool");
-        let option_bool = app1(&mut sub, "Option", bool_ty);
+        let maybe_bool = app1(&mut sub, "Maybe", bool_ty);
         assert!(matches!(
-            unify(&mut sub, fb, option_bool),
+            unify(&mut sub, fb, maybe_bool),
             Err(UnifyError::Mismatch { .. })
         ));
     }
