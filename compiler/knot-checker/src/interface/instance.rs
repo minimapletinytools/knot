@@ -720,4 +720,81 @@ mod tests {
         let (_pending, errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");
     }
+
+    // -- Collection/Context instance methods (closing Fix #5's own gap) --
+
+    fn seed_box_ctor_local(sub: &mut Substitution, env: &mut crate::solve::SchemeEnv) {
+        crate::constrain::decl::seed_user_constructors(sub, env, &decls("type Box a = Box a\n"));
+    }
+
+    #[test]
+    fn a_collection_instances_methods_are_checked_against_their_real_shapes() {
+        let cs = decls(concat!(
+            "type Box a = Box a\n",
+            "instance Collection Box where\n",
+            "  map f b =\n",
+            "    case b of\n",
+            "      Box x -> Box (f x)\n",
+            "  foldl f z b =\n",
+            "    case b of\n",
+            "      Box x -> f z x\n",
+            "  foldr f z b =\n",
+            "    case b of\n",
+            "      Box x -> f x z\n",
+            "  filter f b = b\n",
+            "  length b = 1\n",
+        ));
+        let mut sub = Substitution::new();
+        let (tree, _members) = crate::constrain::decl::constrain_module(&mut sub, &cs);
+        let mut env = crate::solve::SchemeEnv::new();
+        seed_box_ctor_local(&mut sub, &mut env);
+        let (_pending, errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn a_context_instances_methods_are_checked_against_their_real_shapes() {
+        let cs = decls(concat!(
+            "type Box a = Box a\n",
+            "instance Context Box where\n",
+            "  pure x = Box x\n",
+            "  bind b f =\n",
+            "    case b of\n",
+            "      Box x -> f x\n",
+        ));
+        let mut sub = Substitution::new();
+        let (tree, _members) = crate::constrain::decl::constrain_module(&mut sub, &cs);
+        let mut env = crate::solve::SchemeEnv::new();
+        seed_box_ctor_local(&mut sub, &mut env);
+        let (_pending, errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn a_collection_instances_wrong_shaped_method_body_is_a_real_error() {
+        // map must return `Box b`, not an Int.
+        let cs = decls("type Box a = Box a\ninstance Collection Box where\n  map f b = 5\n");
+        let mut sub = Substitution::new();
+        let (tree, _members) = crate::constrain::decl::constrain_module(&mut sub, &cs);
+        let mut env = crate::solve::SchemeEnv::new();
+        seed_box_ctor_local(&mut sub, &mut env);
+        let (_pending, errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(&e.kind, TypeErrorKind::Unify(_))),
+            "expected a Unify error, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn an_unknown_collection_method_name_is_silently_skipped() {
+        let cs = decls("type Box a = Box a\ninstance Collection Box where\n  bogus x = x\n");
+        let mut sub = Substitution::new();
+        let (tree, _members) = crate::constrain::decl::constrain_module(&mut sub, &cs);
+        let mut env = crate::solve::SchemeEnv::new();
+        seed_box_ctor_local(&mut sub, &mut env);
+        let (_pending, errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
 }

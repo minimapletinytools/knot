@@ -157,9 +157,27 @@
 //! accept (it was dormant — nothing calls `elaborate_module` in a real
 //! pipeline yet — but a real bug regardless). `resolve_one` now checks
 //! `check_instance` first; a structural obligation it confirms is
-//! `ObligationResolution::Structural`, not an error. Still open: Fix #5's
-//! own documented `Collection`/`Context`-instance-method gap is a genuine
-//! (if narrow) soundness hole, not just an incompleteness.
+//! `ObligationResolution::Structural`, not an error.
+//! - **Fix #6** (done): closes Fix #5's own documented gap — `Collection`/
+//!   `Context` instance methods (`map`, `bind`, ...) are now real,
+//!   type-checked bodies too. `interface::table::CtorMethodShape`/
+//!   `CTOR_METHODS` restate `map`/`foldl`/`foldr`/`filter`/`length`/`pure`/
+//!   `bind`'s own shapes (spec §6.3/§6.4), as a genuinely separate type from
+//!   `MethodShape` rather than an extension of it — `Self` here is a type
+//!   *constructor*, only ever appearing applied (`SelfApp`), and a method
+//!   can introduce its own extra type variables (`map`'s `a`/`b`) that
+//!   `MethodShape` has no way to express. `constrain::decl::
+//!   constrain_instance` now dispatches `Collection`/`Context` targets to a
+//!   new `constrain_ctor_instance`, sharing the actual body-checking logic
+//!   (`constrain_method_body_against`) with the ordinary-interface path.
+//!   Found a second, unrelated gap while writing this fix's own tests (live
+//!   testing again, not inspection): `knot-canonical::prelude::
+//!   BUILTIN_INTERFACES` had never been updated when Fix #2 added
+//!   `Collection`/`Context` to this crate's own interface table, so
+//!   `instance Collection MyType where ...` was rejected at canonicalization
+//!   with `UnknownInterface` before ever reaching this crate at all — fixed
+//!   there, not here, since `BUILTIN_INTERFACES` is `knot-canonical`'s own
+//!   closed list.
 
 pub mod annotation;
 pub mod ast;

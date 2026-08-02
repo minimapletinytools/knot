@@ -66,8 +66,15 @@ pub const BUILTIN_CONSTRUCTORS: &[(&str, usize, &str)] = &[
 ];
 
 /// The closed interface set — fixed at `Eq`, `Ord`, `Show`, `Semigroup`,
-/// `Monoid`, `Num`, `Fractional`, `Integral` (spec §2.3/§7); no user-defined
-/// interface can ever add to this list.
+/// `Monoid`, `Num`, `Fractional`, `Integral` (spec §2.3/§7), plus
+/// `Collection`/`Context` (spec §6.3/§6.4); no user-defined interface can
+/// ever add to this list. `Collection`/`Context` were missing here for a
+/// while after `knot-checker`'s own `interface::table` gained them (Fix #2)
+/// — found via live testing (`instance Collection MyType where ...` was
+/// rejected at canonicalization with `UnknownInterface`, before ever
+/// reaching the type checker) rather than by inspection, since no test
+/// anywhere had actually written a real `instance Collection`/`Context`
+/// declaration through this crate before.
 pub const BUILTIN_INTERFACES: &[&str] = &[
     "Eq",
     "Ord",
@@ -77,6 +84,8 @@ pub const BUILTIN_INTERFACES: &[&str] = &[
     "Num",
     "Fractional",
     "Integral",
+    "Collection",
+    "Context",
 ];
 
 /// Closed-interface methods and other prelude functions/values usable

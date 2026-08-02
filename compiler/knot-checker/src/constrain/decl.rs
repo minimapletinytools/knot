@@ -40,14 +40,16 @@
 
 use std::collections::{HashMap, HashSet};
 
-use knot_canonical::ast::{CDecl, CExpr, CInstanceDecl, CPattern, CType, CTypeSignature, Ref};
+use knot_canonical::ast::{
+    CDecl, CExpr, CFnDef, CInstanceDecl, CPattern, CType, CTypeSignature, Ref,
+};
 use knot_syntax::span::{Span, Spanned};
 
 use crate::ast::{TExpr, Typed, TypedExpr};
 use crate::constrain::expr::constrain_expr;
 use crate::constrain::pattern::constrain_pattern;
 use crate::constrain::{Constraint, DeclaredScheme, LetMember, LocalScope};
-use crate::interface::table::{method_shape, MethodShape};
+use crate::interface::table::{ctor_method_shape, method_shape, CtorMethodShape, MethodShape};
 use crate::ty::Structure;
 use crate::var::{Substitution, TypeVarId};
 
@@ -646,6 +648,51 @@ fn instantiate_method_shape(
     }
 }
 
+/// `instantiate_method_shape`'s `CtorMethodShape` counterpart — `self_ctor`
+/// is the concrete constructor a `Collection`/`Context` instance targets
+/// (e.g. `List`), substituted in wherever `SelfApp` applies it to
+/// something; `vars` collects this *one method's* own extra type variables
+/// (`map`'s `a`/`b`), fresh per call so two different methods never
+/// accidentally share one just because they reuse the same letter.
+fn instantiate_ctor_method_shape(
+    sub: &mut Substitution,
+    shape: &CtorMethodShape,
+    self_ctor: &Ref,
+    vars: &mut HashMap<String, TypeVarId>,
+) -> TypeVarId {
+    match shape {
+        CtorMethodShape::Var(name) => *vars
+            .entry((*name).to_string())
+            .or_insert_with(|| sub.fresh_unbound()),
+        CtorMethodShape::Fn(a, b) => {
+            let a_ty = instantiate_ctor_method_shape(sub, a, self_ctor, vars);
+            let b_ty = instantiate_ctor_method_shape(sub, b, self_ctor, vars);
+            sub.fresh_bound(Structure::Fn(a_ty, b_ty))
+        }
+        CtorMethodShape::SelfApp(arg) => {
+            let arg_ty = instantiate_ctor_method_shape(sub, arg, self_ctor, vars);
+            sub.fresh_bound(Structure::App(self_ctor.clone(), vec![arg_ty]))
+        }
+        CtorMethodShape::Bool => app0(sub, "Bool"),
+        CtorMethodShape::IntTy => app0(sub, "Int"),
+    }
+}
+
+/// The bare constructor a `Collection`/`Context` instance's own `target`
+/// names — `instance Collection List` targets just `List`, unapplied
+/// (unlike `instance Eq Shape`, where the target is a fully-formed type),
+/// so this is looking for a `CType::Named` with *no* arguments at all,
+/// rather than building any `Structure` from it the way `instantiate_rigid`
+/// would. `None` for anything else (a malformed target, e.g. `instance
+/// Collection (List Int)`) — silently unchecked, matching `constrain_
+/// instance`'s own stance on a method name it doesn't recognize.
+fn ctor_target(target: &CType) -> Option<&Ref> {
+    match target {
+        CType::Named(r, args) if args.is_empty() => Some(r),
+        _ => None,
+    }
+}
+
 /// Checks every method of `inst` against its interface's own `MethodShape`
 /// (Fix #5) — the target's own type variables become rigid (reusing
 /// `instantiate_rigid`, exactly like an ordinary signed binding's own
@@ -656,13 +703,14 @@ fn instantiate_method_shape(
 /// is constrained against its own signature, just without needing
 /// `RawBinding`'s borrowed-signature shape at all (there's no parsed
 /// `CTypeSignature` here to borrow — the "signature" is synthesized).
+/// `Collection`/`Context` instances go through `constrain_ctor_instance`
+/// instead — a genuinely different shape of check, see its own doc comment.
 ///
-/// A method whose name has no entry in `interface::table::METHODS` (an
-/// interface `method_shape` doesn't cover yet — currently just
-/// `Collection`/`Context`, see its own doc comment — or a genuinely bogus
-/// method name) is silently skipped, not type-checked at all: validating
-/// that an instance's method list exactly matches its interface is a
-/// separate, narrower concern this doesn't attempt.
+/// A method whose name has no entry in the relevant shape table (an
+/// interface neither table covers at all, or a genuinely bogus method
+/// name) is silently skipped, not type-checked at all: validating that an
+/// instance's method list exactly matches its interface is a separate,
+/// narrower concern this doesn't attempt.
 ///
 /// Deliberately doesn't thread an `elaborated_body` out anywhere (unlike
 /// `constrain_group_chain`'s members): `constrain_pattern`/`constrain_expr`
@@ -673,6 +721,10 @@ fn instantiate_method_shape(
 /// in the elaborated output is real, separate follow-up work, not
 /// something to force into the existing shape as a shortcut.
 fn constrain_instance(sub: &mut Substitution, inst: &CInstanceDecl) -> Constraint {
+    if matches!(inst.interface.as_str(), "Collection" | "Context") {
+        return constrain_ctor_instance(sub, inst);
+    }
+
     let mut rigids = HashMap::new();
     let target_ty = instantiate_rigid(sub, &inst.target, &mut rigids);
     let given: Vec<(TypeVarId, String)> = inst
@@ -692,33 +744,76 @@ fn constrain_instance(sub: &mut Substitution, inst: &CInstanceDecl) -> Constrain
             continue;
         };
         let expected_ty = instantiate_method_shape(sub, shape, target_ty);
-
-        let mut scope = LocalScope::new();
-        scope.push();
-        let mut constraints = Vec::new();
-        let typed_params: Vec<crate::ast::TypedPattern> = method
-            .params
-            .iter()
-            .map(|p| constrain_pattern(sub, &mut scope, p, &mut constraints))
-            .collect();
-        let typed_body = constrain_expr(sub, &mut scope, &method.body, &mut constraints);
-        scope.pop();
-
-        let inferred = typed_params.iter().rev().fold(typed_body.ty, |acc, p| {
-            sub.fresh_bound(Structure::Fn(p.ty, acc))
-        });
-        constraints.push(Constraint::Equal {
-            span: method.body.span,
-            expected: expected_ty,
-            actual: inferred,
-        });
-        method_constraints.push(Constraint::And(constraints));
+        method_constraints.push(constrain_method_body_against(sub, method, expected_ty));
     }
 
     Constraint::Given {
         given,
         body: Box::new(Constraint::And(method_constraints)),
     }
+}
+
+/// `constrain_instance`'s own shape, for `Collection`/`Context` (Fix #5's
+/// remaining, now-closed gap): `Self` is the instance's own bare
+/// constructor target (`ctor_target`), never a rigid ordinary type
+/// variable, and each method gets its *own* fresh set of extra type
+/// variables (`instantiate_ctor_method_shape`'s own `vars` map, started
+/// fresh per method) rather than sharing one rigid-variable pool the way
+/// an ordinary instance's methods all share its target's own rigids —
+/// `map`'s `a`/`b` have nothing to do with `filter`'s own `a`. No `given`
+/// facts are possible here at all: the target has no type-variable
+/// argument (it's an unapplied constructor) for a `Foo a =>` clause to
+/// even attach to, so unlike the ordinary path this is never wrapped in a
+/// `Constraint::Given`.
+fn constrain_ctor_instance(sub: &mut Substitution, inst: &CInstanceDecl) -> Constraint {
+    let Some(self_ctor) = ctor_target(&inst.target) else {
+        return Constraint::True;
+    };
+    let self_ctor = self_ctor.clone();
+
+    let mut method_constraints = Vec::new();
+    for method in &inst.methods {
+        let Some(shape) = ctor_method_shape(&inst.interface, &method.name) else {
+            continue;
+        };
+        let mut vars = HashMap::new();
+        let expected_ty = instantiate_ctor_method_shape(sub, shape, &self_ctor, &mut vars);
+        method_constraints.push(constrain_method_body_against(sub, method, expected_ty));
+    }
+
+    Constraint::And(method_constraints)
+}
+
+/// Constrains one method's params + body against `expected_ty`, exactly
+/// like a signed top-level binding's body is checked against its
+/// signature — shared between `constrain_instance`'s two shapes (ordinary
+/// interfaces and `Collection`/`Context`), which only differ in *how*
+/// `expected_ty` itself gets built.
+fn constrain_method_body_against(
+    sub: &mut Substitution,
+    method: &CFnDef,
+    expected_ty: TypeVarId,
+) -> Constraint {
+    let mut scope = LocalScope::new();
+    scope.push();
+    let mut constraints = Vec::new();
+    let typed_params: Vec<crate::ast::TypedPattern> = method
+        .params
+        .iter()
+        .map(|p| constrain_pattern(sub, &mut scope, p, &mut constraints))
+        .collect();
+    let typed_body = constrain_expr(sub, &mut scope, &method.body, &mut constraints);
+    scope.pop();
+
+    let inferred = typed_params.iter().rev().fold(typed_body.ty, |acc, p| {
+        sub.fresh_bound(Structure::Fn(p.ty, acc))
+    });
+    constraints.push(Constraint::Equal {
+        span: method.body.span,
+        expected: expected_ty,
+        actual: inferred,
+    });
+    Constraint::And(constraints)
 }
 
 /// The whole-module entry point: every `CDecl::Fn` becomes a `RawBinding`;
