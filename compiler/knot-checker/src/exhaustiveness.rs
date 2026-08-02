@@ -32,14 +32,28 @@ pub struct CtorTable {
 }
 
 impl CtorTable {
+    /// Derives every built-in sibling group straight from `knot_canonical::
+    /// prelude::BUILTIN_CONSTRUCTORS` — that table already has exactly what
+    /// a group needs (name, arity, owning type), grouped here by the third
+    /// field instead of hardcoded a second time. This used to be its own
+    /// hand-maintained literal list; found (and fixed) as a real, easy-to-
+    /// miss duplicate while renaming `Option`/`Some`/`None` to `Maybe`/
+    /// `Just`/`Nothing` — this file's own list had silently kept the old
+    /// names for one extra edit before that was caught.
     pub fn new() -> Self {
         let mut table = CtorTable {
             by_ctor: HashMap::new(),
         };
-        table.add_group(&[("True", 0), ("False", 0)]);
-        table.add_group(&[("Just", 1), ("Nothing", 0)]);
-        table.add_group(&[("Ok", 1), ("Err", 1)]);
-        table.add_group(&[("LT", 0), ("EQ", 0), ("GT", 0)]);
+        let mut groups: Vec<(&str, Vec<(&str, usize)>)> = Vec::new();
+        for &(name, arity, owner) in knot_canonical::prelude::BUILTIN_CONSTRUCTORS {
+            match groups.iter_mut().find(|(o, _)| *o == owner) {
+                Some((_, members)) => members.push((name, arity)),
+                None => groups.push((owner, vec![(name, arity)])),
+            }
+        }
+        for (_, members) in &groups {
+            table.add_group(members);
+        }
         table
     }
 
