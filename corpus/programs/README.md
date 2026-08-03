@@ -58,10 +58,31 @@ other changes needed, confirming both fixes landed exactly where expected.
    `text/*`, `errors/error-mapping.knot`, `interfaces/shape-show.knot`,
    `data_structures/json-value.knot`, `options/dict-lookup-fallback.knot`
    (8 files) — all now pass.
-2. **Integer literals never unify with `Float`** — `x :: Float; x = 5` is a
-   hard `Unify::Mismatch`. No numeric-literal polymorphism at all. (Avoided
-   in this batch's own fixtures once known; still real, see the
-   conversation history's own minimal repro.) **Not yet fixed.**
+2. **Fixed. Integer literals never unified with `Float`** — `x :: Float;
+   x = 5` was a hard `Unify::Mismatch`. No numeric-literal polymorphism at
+   all. **Fix**: `constrain::expr`'s own `CExpr::IntLit` handling gives an
+   int literal a fresh, `Num`-obligated variable now (`Num a => a`,
+   Haskell's own numeric-literal polymorphism, simplified) instead of
+   hard-wiring `Int` — it unifies with whatever the context demands
+   (`Float`, a signature, a sibling operand, even a custom `Num` instance
+   like `interfaces/vector2-custom-num.knot`'s own `Vector2`) via ordinary
+   unification. **Defaulting, in two places, both in `solve.rs`**: nothing
+   else in this closed language can produce a bare, non-function,
+   `Num`-polymorphic *value* except this one code path (every other route
+   either applies a function -- resolving the type via unification with a
+   concrete argument or signature -- or is itself function-typed, already
+   exempt from `check_ambiguous`'s own zero-arg restriction), so defaulting
+   an unresolved `"Num"` obligation to `Int` can never misfire on a real
+   user-written constraint like `Ord a =>`. `generalize` defaults one right
+   before it would otherwise become part of some binding's own generalized
+   scheme (so `x = 5`, no signature, keeps working exactly as before,
+   rather than tripping `AmbiguousConstraint` the moment literals stopped
+   being hard-wired to `Int`); `solve_with_obligations`'s own final sweep
+   catches the other shape -- an obligation that never becomes part of
+   *any* scheme's own quantified variables at all (`f x y = x == y; result
+   = f 1 2`: the literals' shared variable unifies with `f`'s own `a`, but
+   `result`'s own inferred type is just `Bool`, so nothing ever quantifies
+   over it) -- which would otherwise silently stay `StillAbstract` forever.
 3. **`Collection`/`Context` are broken for both of their 2-parameter
    built-ins** — the `VarApp` mechanism only ever constructs a ctor
    application with exactly one argument and requires exact arity match

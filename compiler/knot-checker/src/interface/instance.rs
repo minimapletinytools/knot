@@ -979,16 +979,30 @@ mod tests {
 
     #[test]
     fn an_instance_methods_body_returning_the_wrong_type_is_a_real_error() {
+        // `5`'s own type is `Num a => a`, not hard-wired to `Int` (see
+        // `constrain::expr`'s own doc comment on `CExpr::IntLit`) -- an
+        // unbound flexible variable unifies with *any* concrete structure,
+        // `Bool` included, so this no longer fails at the raw `unify`
+        // level. The real error now only surfaces once `check_pending`
+        // finds `Bool` has no `Num` instance -- exactly mirroring what a
+        // real Haskell `f :: Bool; f = 5` reports (`No instance for (Num
+        // Bool)`), not a unification mismatch.
         let cs = decls("type Shape = Circle Float\ninstance Eq Shape where\n  (==) a b = 5\n");
+        let (table, table_errors) = build_instance_table(&cs);
+        assert!(table_errors.is_empty(), "{table_errors:?}");
+
         let mut sub = Substitution::new();
         let (tree, _members) = crate::constrain::decl::constrain_module(&mut sub, &cs);
         let mut env = crate::solve::SchemeEnv::new();
-        let (_pending, errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        assert!(errors.is_empty(), "{errors:?}");
+
+        check_pending(&mut sub, &table, &HashMap::new(), pending, &mut errors);
         assert!(
-            errors
-                .iter()
-                .any(|e| matches!(&e.kind, TypeErrorKind::Unify(_))),
-            "expected a Unify error (Int where Bool expected), got {errors:?}"
+            errors.iter().any(
+                |e| matches!(&e.kind, TypeErrorKind::NoInstance { interface } if interface == "Num")
+            ),
+            "expected a NoInstance(\"Num\") error, got {errors:?}"
         );
     }
 
@@ -1146,18 +1160,32 @@ mod tests {
 
     #[test]
     fn a_collection_instances_wrong_shaped_method_body_is_a_real_error() {
-        // map must return `Box b`, not an Int.
+        // map must return `Box b`, not an Int -- but `5`'s own type is
+        // `Num a => a` (see `constrain::expr`'s own doc comment on
+        // `CExpr::IntLit`), so it unifies with `Box b`'s own structure
+        // just fine at the raw `unify` level (an unbound variable unifies
+        // with anything). The real error only surfaces once `check_
+        // pending` finds `Box` has no `Num` instance -- same story as
+        // `an_instance_methods_body_returning_the_wrong_type_is_a_real_
+        // error` above, just against a compound `Box b` shape instead of
+        // a plain nominal `Bool`.
         let cs = decls("type Box a = Box a\ninstance Collection Box where\n  map f b = 5\n");
+        let (table, table_errors) = build_instance_table(&cs);
+        assert!(table_errors.is_empty(), "{table_errors:?}");
+
         let mut sub = Substitution::new();
         let (tree, _members) = crate::constrain::decl::constrain_module(&mut sub, &cs);
         let mut env = crate::solve::SchemeEnv::new();
         seed_box_ctor_local(&mut sub, &mut env);
-        let (_pending, errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        assert!(errors.is_empty(), "{errors:?}");
+
+        check_pending(&mut sub, &table, &HashMap::new(), pending, &mut errors);
         assert!(
-            errors
-                .iter()
-                .any(|e| matches!(&e.kind, TypeErrorKind::Unify(_))),
-            "expected a Unify error, got {errors:?}"
+            errors.iter().any(
+                |e| matches!(&e.kind, TypeErrorKind::NoInstance { interface } if interface == "Num")
+            ),
+            "expected a NoInstance(\"Num\") error, got {errors:?}"
         );
     }
 

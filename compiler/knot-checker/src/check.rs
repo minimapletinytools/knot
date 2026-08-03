@@ -316,4 +316,70 @@ mod tests {
             |e| matches!(&e.kind, crate::error::TypeErrorKind::InstanceTargetNotNominal { interface } if interface == "Eq")
         ), "{errors:?}");
     }
+
+    #[test]
+    fn a_declared_float_signature_accepts_an_integer_literal_body() {
+        // The exact motivating case: `x :: Float; x = 5` used to be a hard
+        // Unify::Mismatch(Float, Int) -- an int literal is now `Num a =>
+        // a`, so it unifies with the declared `Float` directly.
+        let cs = decls("x :: Float\nx = 5\n");
+        let errors = check_module(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn an_unannotated_integer_literal_still_defaults_to_int() {
+        // No signature at all -- must still behave exactly as before this
+        // fix (ordinary Int arithmetic), not become ambiguous or silently
+        // stay polymorphic.
+        let cs = decls("x = 5\ny = x + 1\n");
+        let errors = check_module(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn an_integer_literal_used_as_a_generic_num_argument_still_defaults() {
+        // The `f x y = x == y; result = f 1 2` shape -- the literals' own
+        // shared Num-obligated variable never becomes part of *any*
+        // binding's own generalized scheme (`result`'s own type is just
+        // `Bool`), so it has to default via solve_with_obligations's own
+        // final sweep, not generalize's.
+        let cs = decls("f :: Eq a => a -> a -> Bool\nf x y = x == y\nresult = f 1 2\n");
+        let errors = check_module(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn an_integer_literal_defaults_to_int_even_inside_a_custom_num_instance() {
+        // A custom Num instance elsewhere in the module must not change
+        // plain-Int-literal defaulting for code that never touches it.
+        let cs = decls(concat!(
+            "type alias Vector2 = { x : Float, y : Float }\n",
+            "instance Num Vector2 where\n",
+            "  (+) a b = { x = a.x + b.x, y = a.y + b.y }\n",
+            "  (-) a b = { x = a.x - b.x, y = a.y - b.y }\n",
+            "  (*) a b = { x = a.x * b.x, y = a.y * b.y }\n",
+            "  negate v = { x = 0.0 - v.x, y = 0.0 - v.y }\n",
+            "  abs v = v\n",
+            "  signum v = v\n",
+            "plainSum = 1 + 2\n",
+        ));
+        let errors = check_module(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn an_integer_literal_with_no_num_instance_for_its_pinned_type_is_a_real_error() {
+        // `f :: Bool; f = 5` -- Bool has no Num instance, so this must
+        // still be a genuine error (NoInstance("Num"), not a silently
+        // accepted Unify success now that literals are polymorphic).
+        let cs = decls("f :: Bool\nf = 5\n");
+        let errors = check_module(&cs);
+        assert!(
+            errors.iter().any(
+                |e| matches!(&e.kind, crate::error::TypeErrorKind::NoInstance { interface } if interface == "Num")
+            ),
+            "{errors:?}"
+        );
+    }
 }

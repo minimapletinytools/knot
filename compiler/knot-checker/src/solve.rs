@@ -189,6 +189,27 @@ pub fn solve_with_obligations(
                     },
                 });
             }
+        } else if p.interface == "Num" && sub.resolve_structure(root).is_none() {
+            // Numeric-literal defaulting, second half -- see `generalize`'s
+            // own doc comment for the first half (a `Num` obligation
+            // captured into some binding's own generalized scheme, e.g.
+            // `x = 5`). This half catches the opposite case: a `Num`
+            // obligation that never became part of *any* scheme's own
+            // quantified variables at all, e.g. `f x y = x == y; result =
+            // f 1 2` -- both literals' own fresh variables get unified
+            // together with `f`'s own rigid-at-declaration, flexible-at-
+            // use-site `a`, but `result`'s own inferred type is just
+            // `Bool`, so that shared variable is never part of anyone's
+            // own free-type-variable set to quantify (and thus default)
+            // over inside `generalize`. Left unhandled, it would just stay
+            // "pending" forever, silently never resolving to anything
+            // (surfacing as `StillAbstract` wherever `elaborate::
+            // elaborate_module` looked at it, or simply vanishing here
+            // otherwise) rather than the `Int` a real user would expect.
+            sub.bind(
+                root,
+                Structure::App(Ref::Builtin("Int".to_string()), Vec::new()),
+            );
         } else {
             unresolved.push(p);
         }
@@ -472,7 +493,9 @@ fn check_ambiguous(
 /// obligation whose type is among the newly-quantified variables into the
 /// resulting scheme's own `constraints`, removing it from `pending` (it's
 /// now this scheme's responsibility to re-derive fresh at each
-/// instantiation, not something to check once here and forget).
+/// instantiation, not something to check once here and forget) -- *unless*
+/// it's a still-dangling `"Num"` obligation, which defaults to `Int`
+/// instead (see the loop's own doc comment).
 fn generalize(
     sub: &mut Substitution,
     ambient: &[TypeVarId],
@@ -485,7 +508,7 @@ fn generalize(
     for &a in ambient {
         free_vars(sub, a, &mut ftv_ambient);
     }
-    let quantified: HashSet<TypeVarId> = ftv_ty
+    let mut quantified: HashSet<TypeVarId> = ftv_ty
         .difference(&ftv_ambient)
         .copied()
         // A rigid variable is never "ours" to generalize -- it belongs to
@@ -498,12 +521,33 @@ fn generalize(
     let mut constraints = Vec::new();
     pending.retain(|p| {
         let root = sub.find(p.ty);
-        if quantified.contains(&root) {
-            constraints.push((root, p.interface.clone()));
-            false
-        } else {
-            true
+        if !quantified.contains(&root) {
+            return true;
         }
+        // Numeric-literal defaulting (spec's simplified stand-in for
+        // Haskell's own defaulting rules): `constrain::expr`'s own
+        // `CExpr::IntLit` handling is the *only* thing in this closed
+        // language that can ever produce a bare, non-function,
+        // `Num`-polymorphic value with nothing else to pin it down (every
+        // other route to a `Num` obligation either applies a function --
+        // resolving the type via unification with a concrete argument or
+        // signature -- or is itself function-typed, already exempted by
+        // `check_ambiguous`'s own arity check). Rather than leaving `x =
+        // 5` (no signature) either needlessly quantified or tripping that
+        // same zero-arg restriction, resolve it to `Int` right here,
+        // before it ever becomes part of a scheme at all -- a real,
+        // user-written constraint (`Ord a =>`) is never named `"Num"`
+        // *and* still dangling like this, so this can't misfire on one.
+        if p.interface == "Num" && sub.resolve_structure(root).is_none() {
+            sub.bind(
+                root,
+                Structure::App(Ref::Builtin("Int".to_string()), Vec::new()),
+            );
+            quantified.remove(&root);
+            return false;
+        }
+        constraints.push((root, p.interface.clone()));
+        false
     });
 
     Scheme {

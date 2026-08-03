@@ -259,7 +259,25 @@ pub fn constrain_expr(
     let span = expr.span;
     let wrap = |ty, node| Typed { span, ty, node };
     match &expr.node {
-        CExpr::IntLit(n) => wrap(app0(sub, "Int"), TExpr::IntLit(*n)),
+        // A bare integer literal is `Num a => a`, not hard-wired to `Int` --
+        // `5` must unify with `Float` just as readily as with `Int` (spec's
+        // simplified stand-in for Haskell's own numeric-literal
+        // polymorphism). The fresh var here gets pinned to whatever
+        // concrete type the surrounding context demands via ordinary
+        // unification (a declared `Float` signature, a sibling `Float`
+        // operand, ...); if nothing ever pins it down at all (`x = 5` with
+        // no signature), `solve::generalize`'s own defaulting resolves it
+        // to `Int` before it can either stay needlessly polymorphic or
+        // trip `check_ambiguous`'s zero-arg restriction.
+        CExpr::IntLit(n) => {
+            let ty = sub.fresh_unbound();
+            constraints.push(Constraint::HasInstance {
+                span,
+                interface: "Num".to_string(),
+                ty,
+            });
+            wrap(ty, TExpr::IntLit(*n))
+        }
         CExpr::FloatLit(f) => wrap(app0(sub, "Float"), TExpr::FloatLit(*f)),
         CExpr::StringLit(s) => wrap(app0(sub, "String"), TExpr::StringLit(s.clone())),
         CExpr::Unit => wrap(sub.fresh_bound(Structure::Unit), TExpr::Unit),
@@ -593,10 +611,16 @@ mod tests {
             &mut cs,
         );
         let unit_typed = constrain_expr(&mut sub, &mut scope, &e(CExpr::Unit), &mut cs);
-        assert_eq!(
-            sub.resolve_structure(int_typed.ty),
-            Some(builtin(&mut sub, "Int"))
-        );
+        // An int literal is `Num a => a`, not hard-wired to `Int` (see
+        // `constrain_expr`'s own doc comment on `CExpr::IntLit`) -- a bare
+        // fresh, still-unbound variable plus its own `Num` obligation,
+        // rather than an immediately-resolved builtin structure.
+        assert_eq!(sub.resolve_structure(int_typed.ty), None);
+        assert!(cs.iter().any(|c| matches!(
+            c,
+            Constraint::HasInstance { interface, ty, .. }
+                if interface == "Num" && *ty == int_typed.ty
+        )));
         assert_eq!(
             sub.resolve_structure(float_typed.ty),
             Some(builtin(&mut sub, "Float"))
@@ -738,20 +762,23 @@ mod tests {
         let cond_ty = app0(&mut sub, "Bool");
         scope.bind("cond", cond_ty);
         let mut cs = Vec::new();
+        // FloatLit, not IntLit -- see `list_unifies_every_element_to_the_
+        // same_type`'s own comment on why `solve_equalities` needs an
+        // already-concrete literal type here.
         let typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::If(
                 Box::new(e(CExpr::Var(Ref::Local("cond".to_string())))),
-                Box::new(e(CExpr::IntLit(1))),
-                Box::new(e(CExpr::IntLit(2))),
+                Box::new(e(CExpr::FloatLit(1.0))),
+                Box::new(e(CExpr::FloatLit(2.0))),
             )),
             &mut cs,
         );
         solve_equalities(&mut sub, cs);
         assert_eq!(
             sub.resolve_structure(typed.ty),
-            Some(builtin(&mut sub, "Int"))
+            Some(builtin(&mut sub, "Float"))
         );
     }
 
@@ -795,10 +822,18 @@ mod tests {
         let mut sub = Substitution::new();
         let mut scope = LocalScope::new();
         let mut cs = Vec::new();
+        // FloatLit, not IntLit -- a still-concrete, immediately-resolved
+        // literal type, unlike an int literal's own fresh `Num`-obligated
+        // variable (see `constrain_expr`'s own doc comment), so
+        // `solve_equalities` (no defaulting, unlike the real `solve.rs`)
+        // can actually resolve the shared element type here.
         let typed = constrain_expr(
             &mut sub,
             &mut scope,
-            &e(CExpr::List(vec![e(CExpr::IntLit(1)), e(CExpr::IntLit(2))])),
+            &e(CExpr::List(vec![
+                e(CExpr::FloatLit(1.0)),
+                e(CExpr::FloatLit(2.0)),
+            ])),
             &mut cs,
         );
         solve_equalities(&mut sub, cs);
@@ -806,10 +841,10 @@ mod tests {
             Some(Structure::App(r, args)) if r == Ref::Builtin("List".to_string()) => {
                 assert_eq!(
                     sub.resolve_structure(args[0]),
-                    Some(builtin(&mut sub, "Int"))
+                    Some(builtin(&mut sub, "Float"))
                 );
             }
-            other => panic!("expected List Int, got {other:?}"),
+            other => panic!("expected List Float, got {other:?}"),
         }
     }
 
@@ -818,11 +853,15 @@ mod tests {
         let mut sub = Substitution::new();
         let mut scope = LocalScope::new();
         let mut cs = Vec::new();
+        // FloatLit, not IntLit -- see `list_unifies_every_element_to_the_
+        // same_type`'s own comment; this test never even calls
+        // `solve_equalities`, so an int literal's own fresh variable would
+        // never resolve to anything at all.
         let typed = constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::Tuple(vec![
-                e(CExpr::IntLit(1)),
+                e(CExpr::FloatLit(1.0)),
                 e(CExpr::StringLit("x".to_string())),
             ])),
             &mut cs,
@@ -831,7 +870,7 @@ mod tests {
             Some(Structure::Tuple(elems)) => {
                 assert_eq!(
                     sub.resolve_structure(elems[0]),
-                    Some(builtin(&mut sub, "Int"))
+                    Some(builtin(&mut sub, "Float"))
                 );
                 assert_eq!(
                     sub.resolve_structure(elems[1]),
@@ -847,10 +886,16 @@ mod tests {
         let mut sub = Substitution::new();
         let mut scope = LocalScope::new();
         let mut cs = Vec::new();
+        // FloatLit, not IntLit -- see `list_unifies_every_element_to_the_
+        // same_type`'s own comment; this test never calls
+        // `solve_equalities` either.
         let typed = constrain_expr(
             &mut sub,
             &mut scope,
-            &e(CExpr::Record(vec![("x".to_string(), e(CExpr::IntLit(1)))])),
+            &e(CExpr::Record(vec![(
+                "x".to_string(),
+                e(CExpr::FloatLit(1.0)),
+            )])),
             &mut cs,
         );
         match sub.resolve_structure(typed.ty) {
@@ -858,7 +903,7 @@ mod tests {
                 assert_eq!(ext, None);
                 assert_eq!(
                     sub.resolve_structure(fields["x"]),
-                    Some(builtin(&mut sub, "Int"))
+                    Some(builtin(&mut sub, "Float"))
                 );
             }
             other => panic!("expected a closed Record, got {other:?}"),
@@ -954,18 +999,20 @@ mod tests {
 
     #[test]
     fn annotated_passes_through_to_the_targets_type_unconstrained() {
+        // FloatLit, not IntLit -- see `list_unifies_every_element_to_the_
+        // same_type`'s own comment; no `solve_equalities` call here either.
         let mut sub = Substitution::new();
         let mut scope = LocalScope::new();
         let mut cs = Vec::new();
         let typed = constrain_expr(
             &mut sub,
             &mut scope,
-            &e(CExpr::Annotated(vec![], Box::new(e(CExpr::IntLit(1))))),
+            &e(CExpr::Annotated(vec![], Box::new(e(CExpr::FloatLit(1.0))))),
             &mut cs,
         );
         assert_eq!(
             sub.resolve_structure(typed.ty),
-            Some(builtin(&mut sub, "Int"))
+            Some(builtin(&mut sub, "Float"))
         );
     }
 
@@ -980,6 +1027,14 @@ mod tests {
 
     #[test]
     fn add_unifies_operands_and_requires_num() {
+        // Each IntLit operand now carries its *own* fresh, Num-obligated
+        // variable (see `constrain_expr`'s own doc comment) -- so a
+        // top-level search over the whole `cs` for the first "Num"
+        // obligation would find one of *those*, not the shared one
+        // `constrain_binop` itself adds. `TExpr::BinOp`'s own `obligations`
+        // field stays correctly scoped to just the latter
+        // (`collect_has_instance`'s own `before` cutoff), so read it from
+        // there instead.
         let mut sub = Substitution::new();
         let mut scope = LocalScope::new();
         let mut cs = Vec::new();
@@ -993,36 +1048,48 @@ mod tests {
             )),
             &mut cs,
         );
-        let num_ty = has_instance(&cs, "Num").expect("Add should require Num");
-        // The TExpr node itself should also carry the same obligation.
-        match &typed.node {
+        let num_ty = match &typed.node {
             TExpr::BinOp(BinOp::Add, _, _, obligations) => {
-                assert_eq!(obligations, &vec![("Num".to_string(), num_ty)]);
+                assert_eq!(obligations.len(), 1);
+                assert_eq!(obligations[0].0, "Num");
+                obligations[0].1
             }
             other => panic!("expected a TExpr::BinOp(Add, ...), got {other:?}"),
-        }
+        };
         solve_equalities(&mut sub, cs);
-        assert_eq!(
-            sub.resolve_structure(typed.ty),
-            Some(builtin(&mut sub, "Int"))
-        );
-        assert_eq!(
-            sub.resolve_structure(num_ty),
-            Some(builtin(&mut sub, "Int"))
-        );
+        // No defaulting in `solve_equalities` (unlike the real
+        // `solve.rs`'s own `generalize`, see `check_int_literal_
+        // defaults_to_int_with_no_other_context` in `solve.rs` for that) --
+        // both operands' own fresh variables are still unresolved here,
+        // just unified together into the one `constrain_binop` itself
+        // returns as the whole expression's type.
+        assert_eq!(sub.find(typed.ty), sub.find(num_ty));
+        assert_eq!(sub.resolve_structure(typed.ty), None);
     }
 
     #[test]
     fn mismatched_add_operands_fail_to_solve() {
+        // A concrete Int-typed variable, not an IntLit -- an int *literal*
+        // operand no longer fails at the raw `unify` level at all (its own
+        // fresh variable happily unifies with anything, `String` included;
+        // see `constrain_expr`'s own doc comment on `CExpr::IntLit`), only
+        // later, once `check_instance` finds `String` has no `Num`
+        // instance (see `check::tests::adding_a_string_to_an_int_literal_
+        // is_a_no_instance_num_error_not_a_silent_pass` for that). A bound
+        // variable's own already-concrete type is what still makes this a
+        // real, immediate `unify` mismatch.
         let mut sub = Substitution::new();
         let mut scope = LocalScope::new();
+        scope.push();
+        let int_ty = app0(&mut sub, "Int");
+        scope.bind("n", int_ty);
         let mut cs = Vec::new();
         constrain_expr(
             &mut sub,
             &mut scope,
             &e(CExpr::BinOp(
                 BinOp::Add,
-                Box::new(e(CExpr::IntLit(1))),
+                Box::new(e(CExpr::Var(Ref::Local("n".to_string())))),
                 Box::new(e(CExpr::StringLit("x".to_string()))),
             )),
             &mut cs,
@@ -1141,6 +1208,8 @@ mod tests {
 
     #[test]
     fn cons_binop_builds_a_list_of_the_head_type() {
+        // FloatLit, not IntLit -- see `list_unifies_every_element_to_the_
+        // same_type`'s own comment.
         let mut sub = Substitution::new();
         let mut scope = LocalScope::new();
         let mut cs = Vec::new();
@@ -1149,7 +1218,7 @@ mod tests {
             &mut scope,
             &e(CExpr::BinOp(
                 BinOp::Cons,
-                Box::new(e(CExpr::IntLit(1))),
+                Box::new(e(CExpr::FloatLit(1.0))),
                 Box::new(e(CExpr::List(vec![]))),
             )),
             &mut cs,
@@ -1159,10 +1228,10 @@ mod tests {
             Some(Structure::App(r, args)) if r == Ref::Builtin("List".to_string()) => {
                 assert_eq!(
                     sub.resolve_structure(args[0]),
-                    Some(builtin(&mut sub, "Int"))
+                    Some(builtin(&mut sub, "Float"))
                 );
             }
-            other => panic!("expected List Int, got {other:?}"),
+            other => panic!("expected List Float, got {other:?}"),
         }
     }
 
@@ -1294,20 +1363,24 @@ mod tests {
 
     #[test]
     fn negate_requires_num_and_preserves_the_operands_type() {
+        // FloatLit, not IntLit -- see `list_unifies_every_element_to_the_
+        // same_type`'s own comment; no `solve_equalities` call here at all,
+        // so an int literal's own fresh variable would never resolve to
+        // anything.
         let mut sub = Substitution::new();
         let mut scope = LocalScope::new();
         let mut cs = Vec::new();
         let typed = constrain_expr(
             &mut sub,
             &mut scope,
-            &e(CExpr::Negate(Box::new(e(CExpr::IntLit(1))))),
+            &e(CExpr::Negate(Box::new(e(CExpr::FloatLit(1.0))))),
             &mut cs,
         );
         let num_ty = has_instance(&cs, "Num").expect("Negate should require Num");
         assert_eq!(num_ty, typed.ty);
         assert_eq!(
             sub.resolve_structure(typed.ty),
-            Some(builtin(&mut sub, "Int"))
+            Some(builtin(&mut sub, "Float"))
         );
         assert!(matches!(
             &typed.node,
@@ -1317,7 +1390,10 @@ mod tests {
 
     #[test]
     fn let_expression_delegates_to_constrain_decl_and_type_checks_end_to_end() {
-        // let x = 1 in x + 1
+        // let x = 1.0 in x + 1.0 -- FloatLit, not IntLit, so
+        // `solve_equalities` (no defaulting, unlike the real `solve.rs`)
+        // can actually resolve the result type; see `constrain_expr`'s own
+        // doc comment on why an int literal alone wouldn't resolve here.
         let mut sub = Substitution::new();
         let mut scope = LocalScope::new();
         let mut cs = Vec::new();
@@ -1325,11 +1401,11 @@ mod tests {
             &mut sub,
             &mut scope,
             &e(CExpr::Let(
-                vec![(p(CPattern::Var("x".to_string())), e(CExpr::IntLit(1)))],
+                vec![(p(CPattern::Var("x".to_string())), e(CExpr::FloatLit(1.0)))],
                 Box::new(e(CExpr::BinOp(
                     BinOp::Add,
                     Box::new(e(CExpr::Var(Ref::Local("x".to_string())))),
-                    Box::new(e(CExpr::IntLit(1))),
+                    Box::new(e(CExpr::FloatLit(1.0))),
                 ))),
             )),
             &mut cs,
@@ -1337,7 +1413,7 @@ mod tests {
         solve_equalities(&mut sub, cs);
         assert_eq!(
             sub.resolve_structure(typed.ty),
-            Some(builtin(&mut sub, "Int"))
+            Some(builtin(&mut sub, "Float"))
         );
         assert!(matches!(typed.node, TExpr::Let(ref bs, _) if bs.len() == 1));
     }
