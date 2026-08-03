@@ -1,0 +1,43 @@
+absFloat :: Float -> Float
+absFloat n = if n < 0.0 then 0.0 - n else n
+
+signFloat :: Float -> Float
+signFloat n =
+  if n > 0.0 then
+    1.0
+  else if n < 0.0 then
+    -1.0
+  else
+    0.0
+
+instance Num (Float, Float) where
+  (+) a b =
+    case (a, b) of
+      ((ax, ay), (bx, by)) -> (ax + bx, ay + by)
+  (-) a b =
+    case (a, b) of
+      ((ax, ay), (bx, by)) -> (ax - bx, ay - by)
+  (*) a b =
+    case (a, b) of
+      ((ax, ay), (bx, by)) -> (ax * bx, ay * by)
+  negate v =
+    case v of
+      (x, y) -> (0.0 - x, 0.0 - y)
+  abs v =
+    case v of
+      (x, y) -> (absFloat x, absFloat y)
+  signum v =
+    case v of
+      (x, y) -> (signFloat x, signFloat y)
+
+origin :: (Float, Float)
+origin = (0.0, 0.0)
+
+sumVectors :: List (Float, Float) -> (Float, Float)
+sumVectors vectors = foldl (+) origin vectors
+
+sampleVectors :: List (Float, Float)
+sampleVectors = [(1.0, 2.0), (3.0, 4.0), (-1.0, 0.5)]
+
+sampleTotal :: (Float, Float)
+sampleTotal = sumVectors sampleVectors

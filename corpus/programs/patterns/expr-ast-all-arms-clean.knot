@@ -1,0 +1,21 @@
+type Expr
+    = Num Int
+    | Add Expr Expr
+    | Mul Expr Expr
+    | Neg Expr
+
+-- Companion to expr-ast-missing-arm-warns.knot -- same 4-constructor
+-- recursive tree, every arm covered, so no exhaustiveness warning should
+-- fire here at all.
+eval :: Expr -> Int
+eval e = case e of
+  Num n -> n
+  Add l r -> eval l + eval r
+  Mul l r -> eval l * eval r
+  Neg x -> 0 - eval x
+
+sample :: Expr
+sample = Add (Num 1) (Neg (Mul (Num 2) (Num 3)))
+
+sampleResult :: Int
+sampleResult = eval sample

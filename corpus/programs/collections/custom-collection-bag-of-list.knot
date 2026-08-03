@@ -1,0 +1,44 @@
+type Bag a
+    = Bag (List a)
+
+instance Collection Bag where
+  map f b =
+    case b of
+      Bag xs -> Bag (map f xs)
+
+  foldl f z b =
+    case b of
+      Bag xs -> foldl f z xs
+
+  foldr f z b =
+    case b of
+      Bag xs -> foldr f z xs
+
+  filter p b =
+    case b of
+      Bag xs -> Bag (filter p xs)
+
+  length b =
+    case b of
+      Bag xs -> length xs
+
+itemCount :: Bag String -> Int
+itemCount b = length b
+
+shout :: Bag String -> Bag String
+shout b = map (\s -> s <> "!") b
+
+sampleBag :: Bag String
+sampleBag = Bag ["wash", "cook", "clean"]
+
+shoutedBag :: Bag String
+shoutedBag = shout sampleBag
+
+totalCount :: Bag Int -> Int
+totalCount b = foldl (+) 0 b
+
+sampleNumbers :: Bag Int
+sampleNumbers = Bag [1, 2, 3, 4]
+
+total :: Int
+total = totalCount sampleNumbers

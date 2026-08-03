@@ -404,14 +404,71 @@
 //!   `AmbiguousConstraint`. Fixed the same way: solve the header `Equal`
 //!   first.
 //!
-//! `corpus/programs` stands at 98/98 passing — every finding logged across
-//! all four rounds is fixed. See `corpus/programs/README.md` for the full,
-//! round-by-round account (including a couple of this session's own
-//! authoring mistakes that turned out not to be bugs at all), and
-//! `checker_impl_summary.md`'s own "Known gaps" section — reconciled
-//! against the current code in the same pass that added this entry — for
-//! what's left, including `corpus/programs/known_gaps/`'s own runnable
-//! fixtures pinning each one down.
+//! `corpus/programs` stood at 98/98 passing here — every finding logged
+//! across all four rounds was fixed. See `corpus/programs/README.md` for
+//! the full, round-by-round account (including a couple of this session's
+//! own authoring mistakes that turned out not to be bugs at all).
+//!
+//! **A user-directed pass closing four of the five gaps the previous
+//! entry's "Known gaps" review had just catalogued, plus a fifth round of
+//! `corpus/programs` (2026-08-03)**:
+//! - **Exhaustiveness checking is now wired in**: `check::
+//!   check_module_with_warnings`, a new sibling of `check_module` (which
+//!   keeps its own signature unchanged for its ~30 existing callers),
+//!   walks every binding's body and returns a `Vec<exhaustiveness::
+//!   Warning>` alongside the usual `Vec<TypeError>` — a wholly separate
+//!   channel, since the spec only ever wants a non-exhaustive `case`
+//!   reported as a warning, never something that can reject an otherwise-
+//!   valid program.
+//! - **A record instance's own declared context is now enforced**: a real,
+//!   demonstrated unsoundness, not just an incompleteness — `instance Eq a
+//!   => Eq { value : a }` type-checked and was accepted into the table,
+//!   but its own `Eq a` obligation was silently dropped, never re-checked
+//!   against a real call site's field type. New `InstanceEntry.
+//!   field_requires` (populated by `instance_field_requires`) closes this.
+//! - **Record/tuple instance keys are now type-aware, and a `Tuple` target
+//!   can now declare a custom instance too**: a new `CanonicalType` walk
+//!   (alpha-equivalent shape, type variables replaced by first-occurrence-
+//!   order indices) replaces the old field-name-only `RecordKey`, and
+//!   gives the new `TupleKey` the same treatment — `{ value : Int }` and
+//!   `{ value : String }` no longer collide as a false-positive
+//!   `DuplicateInstance`, and `instance Num (Int, Int)` no longer
+//!   incorrectly reports `InstanceTargetNotNominal`.
+//! - **Re-declaring an instance a builtin type already has is now
+//!   flagged**: `build_instance_table` takes the seeded builtin table as
+//!   its own `builtins` parameter, consulted by its coherence pass
+//!   alongside the module's own declared instances.
+//!
+//! (The fifth gap, type-checking annotation *values* against their own
+//! derived expected type, was deliberately left open — the largest, least-
+//! contained item, deserving separate discussion rather than folding into
+//! this pass.) Full detail on all four fixes, including exactly which
+//! `corpus/programs/known_gaps/` fixtures graduated into `corpus/semantic/`
+//! and where, is in `checker_impl_summary.md`'s own "Known gaps" section,
+//! not repeated here.
+//!
+//! **Round 5 of `corpus/programs`** (13 more fixtures, reaching deeper than
+//! rounds 1-4: a user-declared `Collection` instance recursively calling
+//! `map`/`foldl` on both its own wrapped `List` and, separately, on a
+//! genuinely recursive ADT; the brand-new custom-`Tuple`-instance feature
+//! above exercised in realistic sorting/vector-math/priority-queue code;
+//! exhaustiveness warnings inside a realistic 4-constructor expression AST
+//! and inside an instance method body specifically; annotations spanning a
+//! mutually-recursive pair of bindings; `@unravel` on a real multi-argument
+//! function) surfaced one new, genuine bug, fixed immediately:
+//! - **Fix #15**: `Ordering` (`LT`/`EQ`/`GT`) had no seeded `Eq`/`Ord`/
+//!   `Show` instance at all, unlike `Bool`'s identically-shaped `True`/
+//!   `False` — so the entirely ordinary idiom `compare a b == LT` was a
+//!   hard `NoInstance("Eq")`. `prelude::seed_instances`'s own Eq/Ord/Show
+//!   loop now includes `"Ordering"` alongside `Int`/`Float`/`String`/
+//!   `Bool`.
+//!
+//! After that fix, `corpus/programs` stands at 113/113 passing. See
+//! `corpus/programs/README.md` for this round's own full account, and
+//! `checker_impl_summary.md`'s own "Known gaps" section for what's still
+//! left open (one gap now: annotation values never checked against their
+//! own derived expected type), including `corpus/programs/known_gaps/`'s
+//! own runnable fixture pinning it down.
 
 pub mod annotation;
 pub mod ast;

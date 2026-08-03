@@ -335,6 +335,12 @@ a documented gap): `Map.empty`/`get`/`insert`/`remove`/`member`/`size`/
 ordinarily-constrained-polymorphic schemes (`Eq k =>` wherever a key
 comparison is needed) under `Ref::Imported(["Map"], _)`.
 
+**`Ordering` (`LT`/`EQ`/`GT`) now has seeded `Eq`/`Ord`/`Show` instances
+too** (Fix #15, found via `corpus/programs`'s own round 5) — previously
+missing entirely despite being an ordinary 3-ctor ADT the same shape as
+`Bool`'s `True`/`False`, so the everyday idiom `compare a b == LT` was a
+hard `NoInstance("Eq")`.
+
 **Numeric-literal polymorphism is real now too** (this session, reversing
 this document's own former praise of "no Haskell-style defaulting" as a
 design win): an int literal is `Num a => a`, unifying with `Int`,

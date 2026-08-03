@@ -1,0 +1,29 @@
+-- A (Int, String, Bool) tuple standing in for a lightweight "row" --
+-- (id, name, active) -- with custom Eq/Show overriding the automatic
+-- structural derivation so active rows render distinctly.
+instance Eq (Int, String, Bool) where
+  (==) a b =
+    case (a, b) of
+      ((id1, name1, active1), (id2, name2, active2)) ->
+        id1 == id2 && name1 == name2 && active1 == active2
+
+instance Show (Int, String, Bool) where
+  show row =
+    case row of
+      (id, name, True) -> "#" <> show id <> " " <> name <> " (active)"
+      (id, name, False) -> "#" <> show id <> " " <> name <> " (inactive)"
+
+sampleRows :: List (Int, String, Bool)
+sampleRows = [(1, "Alice", True), (2, "Bob", False), (3, "Carol", True)]
+
+renderRow :: (Int, String, Bool) -> String
+renderRow row = show row
+
+renderReport :: List (Int, String, Bool) -> List String
+renderReport rows = map renderRow rows
+
+sampleReport :: List String
+sampleReport = renderReport sampleRows
+
+rowsMatch :: (Int, String, Bool) -> (Int, String, Bool) -> Bool
+rowsMatch a b = a == b

@@ -1,0 +1,51 @@
+type Tree a
+    = Leaf
+    | Node (Tree a) a (Tree a)
+
+instance Collection Tree where
+  map f t =
+    case t of
+      Leaf -> Leaf
+      Node l x r -> Node (map f l) (f x) (map f r)
+
+  foldl f z t =
+    case t of
+      Leaf -> z
+      Node l x r ->
+        let
+            leftAcc = foldl f z l
+            withX = f leftAcc x
+        in
+        foldl f withX r
+
+  foldr f z t =
+    case t of
+      Leaf -> z
+      Node l x r ->
+        let
+            rightAcc = foldr f z r
+            withX = f x rightAcc
+        in
+        foldr f withX l
+
+  filter p t =
+    case t of
+      Leaf -> Leaf
+      Node l x r -> Node (filter p l) x (filter p r)
+
+  length t =
+    case t of
+      Leaf -> 0
+      Node l _ r -> 1 + length l + length r
+
+sampleTree :: Tree Int
+sampleTree = Node (Node Leaf 1 Leaf) 2 (Node Leaf 3 Leaf)
+
+treeSum :: Tree Int -> Int
+treeSum t = foldl (+) 0 t
+
+treeSize :: Tree Int -> Int
+treeSize t = length t
+
+doubledTree :: Tree Int -> Tree Int
+doubledTree t = map (\x -> x + x) t

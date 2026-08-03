@@ -1,0 +1,30 @@
+-- A record whose own field is itself a Tuple with a custom instance
+-- (Task #39) -- the record's own automatic structural Show must
+-- correctly recurse into the tuple field and pick up the *custom* Show
+-- there, not the tuple's own default structural derivation.
+instance Show (Float, Float) where
+  show p =
+    case p of
+      (x, y) -> "<" <> show x <> ", " <> show y <> ">"
+
+type alias Marker =
+    { label : String
+    , position : (Float, Float)
+    }
+
+describeMarker :: Marker -> String
+describeMarker m = m.label <> " at " <> show m.position
+
+sampleMarker :: Marker
+sampleMarker = { label = "origin", position = (0.0, 0.0) }
+
+sampleDescription :: String
+sampleDescription = describeMarker sampleMarker
+
+-- Marker itself has no custom Show instance -- this relies on the
+-- structural fallback (Task #38's own check_instance Record arm),
+-- which must recurse into the position field and find the *custom*
+-- tuple Show above, not fall back to (Float, Float)'s own default
+-- structural derivation.
+sampleShown :: String
+sampleShown = show sampleMarker

@@ -1,0 +1,21 @@
+type Expr
+    = Num Int
+    | Add Expr Expr
+    | Mul Expr Expr
+    | Neg Expr
+
+-- A realistic authoring slip: Neg is never handled, so this case is
+-- genuinely non-exhaustive -- exercises exhaustiveness checking (Task
+-- #37) over a deeper, realistic 4-constructor recursive tree, not just a
+-- toy 2-constructor example.
+eval :: Expr -> Int
+eval e = case e of
+  Num n -> n
+  Add l r -> eval l + eval r
+  Mul l r -> eval l * eval r
+
+sample :: Expr
+sample = Add (Num 1) (Mul (Num 2) (Num 3))
+
+sampleResult :: Int
+sampleResult = eval sample

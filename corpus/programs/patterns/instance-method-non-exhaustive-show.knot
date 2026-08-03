@@ -1,0 +1,20 @@
+type Signal
+    = Red
+    | Yellow
+    | Green
+
+-- A realistic authoring slip inside an *instance method* body specifically
+-- (not a plain top-level function) -- Yellow is never handled by this
+-- custom Show instance, exercising exhaustiveness checking (Task #37)
+-- reaching into instance method bodies in a realistic setting, not just
+-- the isolated unit test that first proved it worked.
+instance Show Signal where
+  show s = case s of
+    Red -> "stop"
+    Green -> "go"
+
+describeSignal :: Signal -> String
+describeSignal s = "Signal: " <> show s
+
+sampleReport :: List String
+sampleReport = map describeSignal [Red, Green]

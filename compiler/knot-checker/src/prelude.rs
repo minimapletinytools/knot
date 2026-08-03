@@ -77,14 +77,20 @@ fn seed_instances(table: &mut InstanceTable) {
     table.insert_builtin("Fractional", Ref::Builtin("Float".to_string()), vec![]);
 
     // Eq/Ord/Show for every primitive that needs them (plan §9's open
-    // question #1's own answer: String, Bool alongside the numerics). Unit
-    // deliberately isn't here -- `interface::instance::check_instance`'s
-    // hardcoded `Structure::Unit` case answers for it structurally now
-    // (Fix #4), and `Ref::Builtin("Unit")` is unreachable in practice
-    // anyway: Knot's grammar only ever produces the unit type via literal
-    // `()` syntax (`Type::Unit`/`CType::Unit`), never by naming the
-    // identifier `Unit`.
-    for ty in ["Int", "Float", "String", "Bool"] {
+    // question #1's own answer: String, Bool alongside the numerics), plus
+    // `Ordering` itself (found via `corpus/programs`'s own realistic-
+    // program probing, round 5: `compare a b == LT`-style comparison of a
+    // `compare` result -- an entirely ordinary idiom -- was a hard
+    // `NoInstance("Eq")`, since `Ordering` was defined as a plain 3-ctor
+    // ADT in `knot-canonical::prelude::BUILTIN_CONSTRUCTORS` but never
+    // registered here at all, unlike `Bool`'s own identically-shaped
+    // `True`/`False`). Unit deliberately isn't here --
+    // `interface::instance::check_instance`'s hardcoded `Structure::Unit`
+    // case answers for it structurally now (Fix #4), and
+    // `Ref::Builtin("Unit")` is unreachable in practice anyway: Knot's
+    // grammar only ever produces the unit type via literal `()` syntax
+    // (`Type::Unit`/`CType::Unit`), never by naming the identifier `Unit`.
+    for ty in ["Int", "Float", "String", "Bool", "Ordering"] {
         table.insert_builtin("Eq", Ref::Builtin(ty.to_string()), vec![]);
         table.insert_builtin("Ord", Ref::Builtin(ty.to_string()), vec![]);
         table.insert_builtin("Show", Ref::Builtin(ty.to_string()), vec![]);
@@ -717,6 +723,37 @@ mod tests {
         let mut sub = Substitution::new();
         let (mut env, table) = seed(&mut sub);
         let cs = decls("isZero n = if n == 0 then True else False\n");
+        let (tree, _members) = constrain_module(&mut sub, &cs);
+        let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        assert!(errors.is_empty(), "{errors:?}");
+        check_pending(
+            &mut sub,
+            &table,
+            &std::collections::HashMap::new(),
+            pending,
+            &mut errors,
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn ordering_has_seeded_eq_ord_and_show_instances() {
+        // Found via corpus/programs's own realistic-program probing (round
+        // 5): `compare a b == LT`-style comparison of a compare result is
+        // an entirely ordinary idiom, but Ordering (a plain 3-ctor ADT,
+        // same shape as Bool's True/False) had no Eq/Ord/Show seeded here
+        // at all, unlike Bool -- a hard NoInstance("Eq") on completely
+        // idiomatic code.
+        let mut sub = Substitution::new();
+        let (mut env, table) = seed(&mut sub);
+        let cs = decls(
+            "isLess :: Int -> Int -> Bool\n\
+             isLess a b = compare a b == LT\n\
+             showResult :: Int -> Int -> String\n\
+             showResult a b = show (compare a b)\n\
+             rankResult :: Int -> Int -> Int -> Int -> Bool\n\
+             rankResult a b c d = compare a b == compare c d\n",
+        );
         let (tree, _members) = constrain_module(&mut sub, &cs);
         let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
         assert!(errors.is_empty(), "{errors:?}");

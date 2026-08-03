@@ -1,0 +1,35 @@
+-- An association list of (priority, item) pairs, kept sorted by a custom
+-- Ord on the (Int, String) key tuple itself (Task #39) -- a realistic
+-- priority-queue shape built directly on a tuple instance rather than a
+-- record one.
+instance Eq (Int, String) where
+  (==) a b =
+    case (a, b) of
+      ((p1, s1), (p2, s2)) -> p1 == p2 && s1 == s2
+
+instance Ord (Int, String) where
+  compare a b =
+    case (a, b) of
+      ((p1, _), (p2, _)) -> compare p1 p2
+
+insertByPriority :: (Int, String) -> List (Int, String) -> List (Int, String)
+insertByPriority entry queue =
+  case queue of
+    [] -> [entry]
+    q : rest ->
+      if compare entry q == LT then entry : queue else q : insertByPriority entry rest
+
+buildQueue :: List (Int, String) -> List (Int, String)
+buildQueue entries =
+  case entries of
+    [] -> []
+    e : rest -> insertByPriority e (buildQueue rest)
+
+sampleQueue :: List (Int, String)
+sampleQueue = buildQueue [(3, "cleanup"), (1, "fire"), (2, "review")]
+
+nextTask :: List (Int, String) -> String
+nextTask queue =
+  case queue of
+    [] -> "nothing to do"
+    (_, task) : _ -> task

@@ -1,0 +1,25 @@
+-- Annotations attached to both halves of a genuinely mutually-recursive
+-- pair -- exercises annotation parsing/canonicalization alongside
+-- Constraint::Let's own SCC grouping in a realistic-program setting (the
+-- semantic-corpus row for this interaction, per corpus/semantic/README.md,
+-- only ever used one annotation on one half).
+@{
+  nodeId = "is-even-check",
+  label = "Even Check"
+}
+isEven :: Int -> Bool
+isEven n = if n == 0 then True else isOdd (n - 1)
+
+@{
+  nodeId = "is-odd-check",
+  label = "Odd Check",
+  position = (1.0, 0.0)
+}
+isOdd :: Int -> Bool
+isOdd n = if n == 0 then False else isEven (n - 1)
+
+sampleEvenCheck :: Bool
+sampleEvenCheck = @nodeId("sample-even-check") (isEven 10)
+
+sampleOddCheck :: Bool
+sampleOddCheck = isOdd 7

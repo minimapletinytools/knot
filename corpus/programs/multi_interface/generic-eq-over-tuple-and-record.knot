@@ -1,0 +1,25 @@
+-- One generic, constrained function (Eq a => a -> a -> Bool) called at
+-- two different concrete types, each satisfying Eq a *different* way --
+-- a custom Tuple instance (Task #39) and a custom Record instance --
+-- confirming both new instance-target shapes interoperate through
+-- ordinary generic code, not just when named directly.
+instance Eq (Int, Int) where
+  (==) a b =
+    case (a, b) of
+      ((x1, y1), (x2, y2)) -> x1 == x2 && y1 == y2
+
+type alias Money =
+    { cents : Int
+    }
+
+instance Eq Money where
+  (==) a b = a.cents == b.cents
+
+bothEqual :: Eq a => a -> a -> a -> a -> Bool
+bothEqual a1 a2 b1 b2 = (a1 == a2) && (b1 == b2)
+
+samplePointsEqual :: Bool
+samplePointsEqual = bothEqual (1, 2) (1, 2) (3, 4) (3, 4)
+
+sampleMoneyEqual :: Bool
+sampleMoneyEqual = bothEqual { cents = 500 } { cents = 500 } { cents = 100 } { cents = 200 }

@@ -1,0 +1,17 @@
+-- @unravel attached to a real 2-argument binding -- exercises
+-- annotation::table::derive_unravel_type's own multi-parameter tuple-
+-- collapsing path (Sensitivity Int -> UnravelInput Int -> UnravelInput
+-- Int -> Maybe (Int, Int)) from a realistic-looking program, not just a
+-- unit test constructing the Structure chain by hand. Whatever value
+-- @unravel is given here isn't actually checked against that derived type
+-- yet (known_gaps/annotation-value-never-checked.knot already pins that
+-- gap down on a 2-argument function too) -- this fixture is about
+-- everything *else* (parsing, canonicalization, solving the rest of the
+-- module) still working correctly around a real multi-parameter @unravel
+-- site, not about that gap itself.
+@unravel(42)
+combine :: Int -> Int -> Int
+combine a b = a + b
+
+sampleCombined :: Int
+sampleCombined = combine 3 4

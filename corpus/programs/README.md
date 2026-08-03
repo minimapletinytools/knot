@@ -393,3 +393,51 @@ polymorphism stress test, and a single record type carrying `Eq`+`Ord`+
     misgeneralize over it.
 
 After this fix, 98 of 98 pass.
+
+### Round 5 (2026-08-03)
+
+13 more fixtures (113 total), deliberately aimed at territory the first
+four rounds never touched: a user-declared `Collection` instance that
+calls the polymorphic `map`/`foldl` *recursively* on its own wrapped
+`List` (`collections/custom-collection-bag-of-list.knot`) and, separately,
+on a genuinely recursive ADT (`collections/binary-tree-collection-
+fold.knot`); the brand-new custom-`Tuple`-instance feature (this session's
+own Task #39, above) exercised in realistic code for the first time
+outside `corpus/semantic`'s own minimal pinning fixtures — an insertion
+sort keyed by a custom `Ord (Int, Int)` (`interfaces/point-tuple-ord-
+sort.knot`), vector math via a custom `Num (Float, Float)` folded with an
+operator section (`numeric/vector-tuple-num-fold.knot`), a 3-tuple
+standing in for a lightweight row with custom `Eq`/`Show`
+(`interfaces/tuple-show-eq-report.knot`), a record whose own field is a
+custom-`Show` tuple (`records/record-with-tuple-field-custom-show.knot`),
+a priority queue keyed directly by a tuple
+(`data_structures/priority-queue-tuple-keys.knot`), and one generic
+`Eq a =>` function called at both a custom-tuple and a custom-record
+concrete type (`multi_interface/generic-eq-over-tuple-and-record.knot`);
+exhaustiveness warnings (Task #37, above) in a realistic 4-constructor
+expression-AST evaluator missing one arm, plus its clean companion
+(`patterns/expr-ast-missing-arm-warns.knot` and `.../expr-ast-all-arms-
+clean.knot`), and specifically *inside* a custom instance method's own
+body rather than an ordinary top-level function (`patterns/instance-
+method-non-exhaustive-show.knot`); annotations spanning a genuinely
+mutually-recursive pair of
+bindings (`patterns/annotations-on-mutual-recursion.knot`); and `@unravel`
+on a real 2-argument function, exercising `derive_unravel_type`'s own
+multi-parameter tuple-collapsing path from realistic-looking code
+(`patterns/unravel-on-multi-arg-function.knot`). 111 of 113 passed
+initially — no parse errors at all this round, both failures were
+immediately genuine type-check findings:
+
+13. **Fixed (Fix #15). `Ordering` (`LT`/`EQ`/`GT`) had no seeded
+    `Eq`/`Ord`/`Show` instance at all** — an entirely ordinary idiom,
+    `compare a b == LT`, was a hard `NoInstance("Eq")`, since `Ordering`
+    is a plain 3-constructor ADT (`knot-canonical::prelude::
+    BUILTIN_CONSTRUCTORS`) the exact same shape as `Bool`'s `True`/`False`,
+    but `prelude::seed_instances`'s own Eq/Ord/Show loop only ever included
+    `Int`/`Float`/`String`/`Bool`, never `Ordering`. Hit
+    `interfaces/point-tuple-ord-sort.knot` and `data_structures/priority-
+    queue-tuple-keys.knot`, both of which compare a `compare` result
+    directly rather than only ever pattern-matching it — both now pass.
+    **Fixed** by adding `"Ordering"` to that same loop.
+
+After this fix, 113 of 113 pass.

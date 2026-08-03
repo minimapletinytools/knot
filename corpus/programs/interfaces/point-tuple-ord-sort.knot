@@ -1,0 +1,30 @@
+type alias Point = (Int, Int)
+
+instance Eq Point where
+  (==) a b =
+    case (a, b) of
+      ((x1, y1), (x2, y2)) -> x1 == x2 && y1 == y2
+
+instance Ord Point where
+  compare a b =
+    case (a, b) of
+      ((x1, y1), (x2, y2)) ->
+        if x1 /= x2 then compare x1 x2 else compare y1 y2
+
+insert :: Point -> List Point -> List Point
+insert p ps =
+  case ps of
+    [] -> [p]
+    q : qs -> if compare p q == LT then p : ps else q : insert p qs
+
+insertionSort :: List Point -> List Point
+insertionSort ps =
+  case ps of
+    [] -> []
+    p : rest -> insert p (insertionSort rest)
+
+samplePoints :: List Point
+samplePoints = [(3, 1), (1, 2), (2, 0)]
+
+sortedPoints :: List Point
+sortedPoints = insertionSort samplePoints
