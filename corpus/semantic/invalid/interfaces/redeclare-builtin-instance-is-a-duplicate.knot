@@ -1,9 +1,12 @@
--- expect: DOCUMENTED KNOWN GAP (see check::check_module's own doc comment,
--- Fix #10) -- re-declaring Eq for a builtin type that already has one is
--- currently accepted, not flagged as a DuplicateInstance, since
--- build_instance_table's own coherence pass runs before the builtin table
--- is merged in. This fixture pins down the *current* behavior so a future
--- change to fix this doesn't silently alter it without this test noticing.
+-- expect: re-declaring Eq for a builtin type that already has one (Int)
+-- must be rejected as a DuplicateInstance, the same as re-declaring a
+-- user-declared instance twice -- build_instance_table's own coherence
+-- pass now takes the seeded builtin table as its own `builtins` parameter
+-- (Task #40), so this is caught here instead of being silently merged in
+-- later via InstanceTable::merge_from. Was accepted, not flagged, before
+-- this got fixed (see check::check_module's own Fix #10 note, now
+-- resolved).
+-- error-kind: DuplicateInstance
 instance Eq Int where
     (==) a b =
         False
