@@ -81,9 +81,52 @@ Knot represents a middle ground between Haskell and Elm, tailored specifically t
 
 ---
 
-## 4. Type System
+## 3. Node Graph Model
 
-### 3.1 Primitive Types
+*(Placeholder — needs its own design pass. The premise on this document's very first
+page is that every language feature maps onto a visual node graph, but nothing yet
+defines the actual vocabulary: what is a node, what is an edge/strand, how does a
+`let` binding, function application, or `case` expression turn into graph structure,
+and how do the forward/reverse (§14 Unravel) execution models relate to it. Sections
+13 (Annotations) and 14 (Unravel) already lean on this vocabulary informally — this
+section should make it precise. To fill in together.)*
+
+---
+
+## 4. Lexical Syntax & Layout
+
+### 4.1 Comments
+Line comments start with `--` and run to end of line. Block comments are `{- ... -}`
+and nest (`{- outer {- inner -} still outer -}` is one comment), matching Haskell.
+
+### 4.2 Identifiers & Keywords
+Identifiers are ASCII-only: a leading letter, then letters/digits/`_`. Case
+distinguishes the two identifier namespaces, matching Haskell/Elm — lowercase-leading
+for values, function names, type variables, and record fields; uppercase-leading for
+types, constructors, and modules. There is no trailing `'` convention (Haskell's `x'`).
+
+Reserved words (never usable as an identifier): `module`, `exposing`, `import`, `as`,
+`type`, `alias`, `let`, `in`, `if`, `then`, `else`, `case`, `of`, `do`, `True`, `False`,
+`interface`, `where`, `instance`. (`interface`/`where` are reserved even though a user
+never writes an `interface ... where` block themselves — see §10 — since `where` is
+real, user-facing syntax via `instance ... where`.)
+
+### 4.3 Layout / Indentation Rule
+Knot is layout-sensitive, in the tradition of Haskell/Elm: a block-forming construct
+(`let`, `case`/`of` arms, `do`, and top-level declarations) establishes a reference
+indent column, and every subsequent item at that block's level must align to it —
+there's no explicit block-closing token. Ported conceptually from Elm's own layout
+algorithm.
+
+### 4.4 File & Module Structure
+Every `.knot` file is exactly one module (§12). A module's declared name should match
+its file path, dot-separated (`Geometry.Shapes` lives at `Geometry/Shapes.knot`).
+
+---
+
+## 5. Type System
+
+### 5.1 Primitive Types
 
 | Type     | Description           |
 |----------|-----------------------|
@@ -93,21 +136,13 @@ Knot represents a middle ground between Haskell and Elm, tailored specifically t
 | `String` | UTF-8 text            |
 | `Unit`   | `()` — the unit type  |
 
-### 3.2 Unit-Aware Numeric Types
+### 5.2 Type Aliases
+`type alias Name = Type` gives an existing type a new name — a naming convenience,
+not a new nominal type. Aliases are expanded away entirely before type checking, so
+two different aliases naming the same underlying shape (e.g. two record aliases with
+identical fields) are the same type as far as the checker is concerned.
 
-Deferred — not in v0. All physical quantities represented as `Float` for now.
-
-### 3.4 Extensible Record Types
-
-A type variable in record position means "any record with at least these fields":
-
-```knot
-distance :: { r | x : Float, y : Float } -> Float
-```
-
-Allows ad-hoc polymorphism over records without requiring full typeclasses.
-
-### 3.5 Algebraic Data Types
+### 5.3 Algebraic Data Types
 
 ```knot
 type Shape
@@ -124,47 +159,112 @@ type Result e a
   | Err e
 ```
 
-### 3.6 Generic Containers (Built-in)
-
-| Type         | Description                               |
-|--------------|-------------------------------------------|
-| `List a`     | Ordered sequence                          |
-| `Map k v`    | Key-value map (`k` must implement `Ord`)  |
-| `Maybe a`    | Nullable / missing value                  |
-| `Result e a` | Success or failure with a typed error     |
-
-### 3.8 Tuple Types
+### 5.4 Records
+Construction, update, and access all use Elm's syntax (§2.1):
 
 ```knot
--- construction
+p  = { x = 1.0, y = 2.0 }
+p2 = { p | y = 3.0 }
+p.x
+```
+
+A record type is **closed** by default (exactly these fields, no more) — a type
+variable in record position instead means "any record with at least these fields"
+(**open**, a.k.a. row-polymorphic):
+
+```knot
+distance :: { r | x : Float, y : Float } -> Float
+```
+
+**Record Spreads**: a record type can be defined to contain all of another's fields via
+`..Name`, and this composes with row polymorphism:
+
+```knot
+type alias B = { ..A, someField : Int }     -- B has every field of A, plus someField
+distance2 :: { a | ..GraphicsElement, label : String } -> Float
+```
+
+### 5.5 Tuples
+
+```knot
 pair :: (Int, String)
 pair = (42, "hello")
 
 triple :: (Float, Float, Float)
 triple = (1.0, 2.0, 3.0)
-
--- pattern matching
-case pair of
-  (x, y) -> x
 ```
 
-Tuple arity is capped at 3 elements (pairs and triples only), matching Elm — larger fixed-size groupings should use a record instead.
+Tuple arity is capped at 3 elements (pairs and triples only), matching Elm — larger
+fixed-size groupings should use a record instead.
+
+### 5.6 Built-in Generic Containers
+
+| Type         | Description                               |
+|--------------|--------------------------------------------|
+| `List a`     | Ordered sequence                          |
+| `Map k v`    | Key-value map (`k` must implement `Ord`)  |
+| `Maybe a`    | Nullable / missing value                  |
+| `Result e a` | Success or failure with a typed error     |
+| `IO a`       | Side effects (file I/O, printer comms, etc.) |
+
+### 5.7 `Ordering`
+
+```knot
+type Ordering
+  = LT
+  | EQ
+  | GT
+```
+
+The result type of `compare` (§10). `Ordering` has its own `Eq`/`Ord`/`Show`
+instances, same as any other primitive-shaped built-in type.
+
+### 5.8 Unit-Aware Numeric Types
+Deferred to v2 (§18) — all physical quantities are represented as plain `Float` for now.
 
 ---
 
-## 5. Expressions
+## 6. Type Inference & Checking
 
-### 4.2 Pipe Operators
+### 6.1 Let-Polymorphism / Generalization
+Standard Hindley-Milner: a top-level or `let`-bound binding is generalized and may be
+used at multiple types; a lambda- or `case`-bound parameter is not generalized within
+its own scope (matching Haskell/Elm).
+
+### 6.2 Numeric-Literal Polymorphism & Defaulting
+An integer literal isn't hard-wired to `Int` — it starts as `Num a => a` and unifies
+with whatever the surrounding context demands (`Float`, a signature, a sibling
+operand, or even a user's own custom `Num` instance). If nothing else ever pins its
+type down, it defaults to `Int` (Haskell-style defaulting, simplified to this one
+closed-world case).
+
+### 6.3 Ambiguous Constraints
+A binding that ends up generalized over an interface obligation with no way to ever
+resolve it — a constraint that never becomes part of any concrete use, and never
+attaches to a function's own parameter — is a compile error, not a silently-ambiguous
+runtime dictionary.
+
+---
+
+## 7. Expressions
+
+### 7.1 Literals
+`Int`, `Float`, `String`, and `Bool` (`True`/`False`) literals, standard syntax.
+
+### 7.2 Records, Lists, Tuples
 
 ```knot
--- forward pipe: passes left value as argument to right function
-x |> f |> g
+[1, 2, 3]
 
--- forward composition: produces a new function (f then g)
-f >> g       -- equivalent to \x -> g (f x)
+myMap :: Map String Int
+myMap = Map.fromList [ ("apple", 1), ("banana", 2) ]
+
+pair = (42, "hello")
+
+point = { x = 1.0, y = 2.0 }
 ```
 
-### 4.3 Let Bindings
+### 7.3 Let, If/Else, Case
 
 ```knot
 let
@@ -172,46 +272,17 @@ let
   area   = 3.14159 * radius * radius
 in
   area
-```
 
-### 4.6 Pattern Matching
+if radius > 0.0 then area else 0.0
 
-```knot
 case shape of
-  Circle r       -> 3.14159 * r * r
-  Rectangle w h  -> w * h
-  Triangle a b c -> ...
+  Circle r      -> 3.14159 * r * r
+  Rectangle w h -> w * h
 ```
 
-#### Pattern Matching Rules:
-- **No guards** (see §2.2): use nested `if...then...else` inside match branches instead.
-- **List pattern matching** via `:` cons:
-  ```knot
-  case list of
-    []     -> 0
-    x : xs -> x + sum xs
-  ```
-- **Pattern aliases** (`as`, see §2.2):
-  ```knot
-  case list of
-    (x : xs) as fullList -> fullList
-  ```
-- **No record shorthand** (see §2.3): match via alias + dot notation instead: `r as point -> point.x`.
-- **No Float literal patterns** (matches Elm — float equality is unsound): compare explicitly with `if` inside the match arm instead. `Int` and `String` literal patterns are both fine (also matching Elm).
+See §8 for the full pattern-matching story.
 
-
-### 4.7 List & Map Literals
-
-```knot
-[1, 2, 3]
-```
-
-```knot
-myMap :: Map String Int
-myMap = Map.fromList [ ("apple", 1), ("banana", 2) ]
-```
-
-### 4.8 Built-in Operators & Precedence
+### 7.4 Operators & Precedence
 
 To ensure unambiguous parsing and 1-to-1 visual node graph mapping, Knot defines a strict set of built-in operators and precedence rules:
 
@@ -226,14 +297,17 @@ To ensure unambiguous parsing and 1-to-1 visual node graph mapping, Knot defines
 | 2 | `\|\|` | Right | Logical OR (lazy evaluation) |
 | 1 | `\|>`, `>>` | Left | Forward pipe, forward composition |
 
-*(Fixed contradictions from earlier drafts: cons was previously listed here as `::`, which collides with the type-signature operator — cons is `:`, matching §2.1 and §4.6. Neither `.` nor `$` exist in Knot — see §2.3 — so neither has a precedence slot; use `>>`/`|>` instead.)*
+```knot
+x |> f |> g              -- forward pipe
+f >> g                    -- forward composition, equivalent to \x -> g (f x)
+```
 
 Because Knot's operator set is closed (§2.3 — no user-defined operators), this table is exhaustive and fixed at parse time; unlike Elm, a parser never needs to consult import declarations to learn an operator's fixity.
 
 #### Boolean Operators
 - `not :: Bool -> Bool` — logical negation (prefix function; `&&`/`||` are in the table above and short-circuit as usual).
 
-### 4.9 Unary Negation
+### 7.5 Unary Negation
 
 `-` is overloaded between subtraction and negation; Knot resolves this exactly like Elm
 does — a `-` with whitespace before but none after is unary negation binding tighter than
@@ -242,49 +316,116 @@ ordinary subtraction. The remaining case — whitespace *after* `-` but not befo
 (`f- 1`) — is a parse error: it's ambiguous between the two and must be disambiguated
 with parentheses or by fixing the spacing.
 
+### 7.6 Operator Sections
+A bare operator in parens is a first-class function: `(+)` is `\x y -> x + y`. Unlike
+Haskell, there are no *partial* sections — `(+2)`/`(2+)` are both unsupported; write
+the lambda out (`\x -> x + 2`) instead.
+
 ---
 
-## 6. Definitions
+## 8. Pattern Matching
+
+### 8.1 Supported Patterns
+
+```knot
+case shape of
+  Circle r       -> 3.14159 * r * r
+  Rectangle w h  -> w * h
+  Triangle a b c -> ...
+```
+
+- **List patterns** via `:` cons:
+  ```knot
+  case list of
+    []     -> 0
+    x : xs -> x + sum xs
+  ```
+- **Tuple patterns**:
+  ```knot
+  case pair of
+    (x, y) -> x
+  ```
+- **Pattern aliases** (`as`, see §2.1):
+  ```knot
+  case list of
+    (x : xs) as fullList -> fullList
+  ```
+- **No record shorthand** (see §2.3): match via alias + dot notation instead: `r as point -> point.x`.
+- **No Float literal patterns** (matches Elm — float equality is unsound): compare explicitly with `if` inside the match arm instead. `Int` and `String` literal patterns are both fine (also matching Elm).
+
+### 8.2 No Guards
+Pattern matching does not support guards (§2.1) — use nested `if...then...else` inside a match arm instead.
+
+### 8.3 Exhaustiveness Checking
+The compiler checks whether a `case`'s patterns cover every possible value of the
+scrutinee's type — recursively, through nested constructor/tuple patterns — and
+whether any arm is unreachable because an earlier arm already covers everything it
+would match. Both are reported, but only ever as a **warning**, never a hard error,
+matching §1's "partial functions allowed" principle — an incomplete or redundant
+match still compiles. This applies uniformly everywhere a `case` can appear,
+including inside an interface instance's own method body (§10).
+
+---
+
+## 9. Function & Value Definitions
 
 ```knot
 name :: Type
 name arg1 arg2 = expr
 ```
 
+A name is bound by exactly one equation (§2.3 — no multi-clause definitions);
+branch on argument shape with `case` (§8) inside the body instead.
+
 ---
 
-## 7. Interfaces (Built-in, Closed in v0)
+## 10. Interfaces (Typeclasses)
 
-The interface set is fixed — user-defined interfaces are not supported in v0 (see §14
-for the v2 plan). Instances of these interfaces, however, are open: both built-in and
-user-defined types may implement them (concrete instance-declaration syntax is TBD — see
-§13). Users may also write their own function signatures constrained by these interfaces,
-e.g. `myMax :: Ord a => a -> a -> a`, usable with any type that has an `Ord` instance.
+The interface set is fixed (§2.4) — user-defined interfaces are not supported in v0
+(planned for v2, §18). Instances of these interfaces are open, though: both built-in
+and user-defined types may implement them. Users may also write their own function
+signatures constrained by these interfaces, e.g. `myMax :: Ord a => a -> a -> a`,
+usable with any type that has an `Ord` instance.
 
-### 6.1 Core Interfaces
+### 10.1 The Closed Interface Set
+See §2.4 for the full, authoritative table of all ten interfaces and their Haskell
+analogs — not repeated here to avoid the two copies drifting apart.
 
-| Interface     | Key Operations                                   |
-|---------------|--------------------------------------------------|
-| `Eq a`        | `(==) :: a -> a -> Bool`                        |
-| `Ord a`       | `compare :: a -> a -> Ordering` (implies `Eq`)  |
-| `Show a`      | `show :: a -> String`                           |
-| `Semigroup a` | `(<>) :: a -> a -> a`                           |
-| `Monoid a`    | `empty :: a` (implies `Semigroup`)              |
-
-The `Ordering` ADT is defined as:
+### 10.2 Instance Declarations & Coherence
 ```knot
-type Ordering
-  = LT
-  | EQ
-  | GT
+instance Eq Shape where
+  (==) a b = ...
 ```
+An instance's target is a nominal type, a *closed* record, or a tuple — never a bare
+type variable, a function type, or an *open* (row-polymorphic) record, since there's
+no fixed, exact shape to key an instance by in those cases.
 
-### 6.2 Numeric Interfaces
+At most one instance may exist per `(interface, type)` pair, across the whole program
+— this includes builtin types: re-declaring an instance a builtin type already has
+(`instance Eq Int where ...`) is a duplicate, the same as declaring the same instance
+twice for a user's own type.
 
-Following Haskell's design, Knot uses interfaces to support overloaded arithmetic operations on `Int` and `Float`:
+### 10.3 Superclasses
+Some interfaces imply another: `Ord` implies `Eq`, `Monoid` implies `Semigroup`,
+`Fractional` and `Integral` both imply `Num`, and `Integral` additionally implies
+`Ord` (see §2.4's table for methods). Declaring an instance for an interface without
+its superclass instance already existing *somewhere* in the same program is a
+compile error — order of declaration within a module doesn't matter.
+
+### 10.4 Structural Derivation
+`Eq`, `Ord`, and `Show` derive automatically, field-by-field/element-by-element, for
+any `Tuple`, `Record` (closed or open), or `Unit` value with no declared instance —
+no user declaration needed for the common case. A custom instance for one of these
+three targets *overrides* the automatic derivation rather than conflicting with it.
+Every other interface (`Num`, `Semigroup`, and anything the target type doesn't have
+a structural instance for) has no such fallback — an explicit `instance` is required.
+
+### 10.5 Numeric Interfaces: Exponentiation & Conversion
+The three numeric interfaces, shown here in interface-block notation purely to
+document their built-in signatures (users never write `interface ... where`
+themselves — §4.2, §18):
 
 ```knot
--- Basic numeric operations
 interface Num a where
   (+)    :: a -> a -> a
   (-)    :: a -> a -> a
@@ -293,43 +434,32 @@ interface Num a where
   abs    :: a -> a
   signum :: a -> a
 
--- Fractional types (Float)
 interface Num a => Fractional a where
   (/)    :: a -> a -> a
   recip  :: a -> a
 
--- Integral types (Int)
 interface (Num a, Ord a) => Integral a where
   div    :: a -> a -> a
   mod    :: a -> a -> a
 ```
 
-#### Exponentiation
+Built-in instances: `Num Int`, `Num Float`, `Integral Int`, `Fractional Float`.
 
-`^` (spec §4.8) is not a method of any single interface above — unlike
-`+`/`-`/`*`/`/`/`div`/`mod`, its signature constrains *two different* type
-variables via two different interfaces at once, so it's a standalone built-in
-signature, matching Haskell exactly:
+`^` (§7.4) is not a method of any single interface above — its signature constrains
+two different type variables via two different interfaces at once, so it's a
+standalone built-in signature, matching Haskell exactly:
 
 ```knot
 (^) :: (Num a, Integral b) => a -> b -> a
 ```
 
-Base and exponent may differ in type — `2.5 ^ 3` is a `Float` base raised to
-an `Int` exponent — the same shape as `fromIntegral` below, just infix.
+Base and exponent may differ in type — `2.5 ^ 3` is a `Float` base raised to an `Int`
+exponent.
 
-Instances are built-in for:
-- `Num Int` and `Num Float`
-- `Integral Int`
-- `Fractional Float`
+Conversion: `fromIntegral :: (Integral a, Num b) => a -> b` converts an integral
+value (e.g. `Int`) to any other numeric type (e.g. `Float`).
 
-#### Conversion Helpers
-- `fromIntegral :: (Integral a, Num b) => a -> b`
-  Converts an integral value (e.g. `Int`) to any other numeric type (e.g. `Float`).
-
-### 6.3 Collection Interface 
-
-Implemented by `List` and `Map`:
+### 10.6 `Collection` & `Context`: Signatures and Restrictions
 
 ```knot
 map    :: (a -> b) -> f a -> f b
@@ -337,30 +467,23 @@ foldl  :: (b -> a -> b) -> b -> f a -> b
 foldr  :: (a -> b -> b) -> b -> f a -> b
 filter :: (a -> Bool) -> f a -> f a
 length :: f a -> Int
-```
 
-Consider doing functor, foldable, and doing interface hierarchy, but the above is fine for V1
-
-### 6.4 Context Interface (Monadic Chaining)
-
-```knot
 pure :: a -> f a
 bind :: f a -> (a -> f b) -> f b   -- also exposed as (>>=)
 ```
 
-Built-in instances: `Maybe`, `Result`, `IO`, `List`.
+Built-in `Collection` instances: `List`, `Map`. Built-in `Context` instances:
+`Maybe`, `Result`, `IO`, `List`. As noted in §2.4, a user's own signature can't be
+generic over "any `Collection`"/"any `Context`" — these are only reachable through
+the built-in functions above — but a user's own type constructor can still have a
+`Collection`/`Context` instance declared for it.
 
 ---
 
-## 8. Built-in Monads & Do-Notation
+## 11. Do-Notation & Built-in Contexts
 
-| Type         | Purpose                                      |
-|--------------|----------------------------------------------|
-| `IO a`       | Side effects (file I/O, printer comms, etc.) |
-| `Maybe a`    | Nullable / missing values                    |
-| `Result e a` | Fallible computations with typed errors      |
-
-Do-notation desugars to `bind`/`>>=` and `pure`:
+`do` notation sequences chained computations over any `Context` instance (§10.6),
+desugaring to `bind`/`pure`:
 
 ```knot
 do
@@ -369,28 +492,28 @@ do
   pure (x + y)
 ```
 
+| Type         | Purpose                                      |
+|--------------|-----------------------------------------------|
+| `Maybe a`    | Nullable / missing values                    |
+| `Result e a` | Fallible computations with typed errors      |
+| `IO a`       | Side effects (file I/O, printer comms, etc.) |
+| `List a`     | Nondeterminism / list-comprehension-style chaining |
+
 ---
 
-## 9. Modules & Imports
+## 12. Modules & Imports
 
-Knot adopts Elm-style module and import syntax. Every file defines a single module.
+Knot adopts Elm-style module and import syntax. Every file defines a single module (§4.4).
 
-### 8.1 Module Declaration
-
-The module header specifies the module name and the list of exposed types, ADT variants, and functions:
+### 12.1 Module Declaration
 
 ```knot
 module Geometry exposing (Point, distance, Shape(..))
+
+module Geometry exposing (..)      -- expose everything
 ```
 
-Exposing everything in the module:
-```knot
-module Geometry exposing (..)
-```
-
-A module's declared name should match its file path, dot-separated (e.g. module `Geometry.Shapes` lives at `Geometry/Shapes.knot`), matching Elm's convention — this lets the parser/module-loader map an import to a file without a separate lookup table.
-
-### 8.2 Imports
+### 12.2 Imports
 
 Imports are **qualified by default** to prevent namespace pollution:
 
@@ -407,7 +530,7 @@ import String exposing (length, concat)
 
 ---
 
-## 10. Metadata & Annotations
+## 13. Metadata & Annotations
 
 Annotations can be attached to any named binding. They carry node graph layout metadata,
 stable IDs, reverse execution logic, documentation, and other tooling hints. They have
@@ -420,7 +543,7 @@ type-checked like any other Knot code.
 
 Two syntaxes are supported and can be freely mixed:
 
-### 8.1 Stacked single-key form: `@name(args)`
+### 13.1 Stacked single-key form: `@name(args)`
 
 Placed on the line(s) immediately above a top-level definition or a `let` binding.
 Good for simple scalar annotations:
@@ -443,7 +566,7 @@ Multiple `@` lines stack — all apply to the binding that follows.
 
 **Desugaring**: `@name(args)` desugars into a single key of the equivalent `@{ ... }` block — a single argument becomes a bare value (`@label("My Function")` ≡ `@{ label = "My Function" }`); multiple arguments become a tuple (`@position(100, 200)` ≡ `@{ position = (100, 200) }`).
 
-### 8.2 Block form: `@{ ... }`
+### 13.2 Block form: `@{ ... }`
 
 A single annotation block containing a record expression. Any valid Knot expression
 is allowed as a field value — function references, lambdas, conditionals, let bindings.
@@ -471,7 +594,7 @@ myFunc :: Int -> Int
 myFunc x = x + 1
 ```
 
-### 8.3 Inline sub-expression annotations
+### 13.3 Inline sub-expression annotations
 
 For annotating individual stages of a pipeline, `@annotation` is written **prefix**,
 immediately before the expression atom it targets. Both forms work inline:
@@ -493,7 +616,7 @@ x = @{ nodeId = "n1", position = (100.0, 200.0) } (f a b)
 
 Prefer extracting to named `let` bindings when inline annotations get unwieldy.
 
-### 8.4 Standard annotation keys
+### 13.4 Standard annotation keys
 
 | Key | Type | Meaning |
 |---|---|---|
@@ -504,11 +627,11 @@ Prefer extracting to named `let` bindings when inline annotations get unwieldy.
 | `color` | `String` | Node color (hex) |
 | `group` | `String` | Visual group/cluster |
 | `collapsed` | `Bool` | Whether node renders collapsed by default |
-| `unravel` | `Unraveler` | Reverse execution function — see §11 |
+| `unravel` | `Unraveler` | Reverse execution function — see §14 |
 
 The annotation set is open — new keys can be added without changing the language.
 
-### 8.5 Annotations Are Typed, Prefix Functions
+### 13.5 Annotations Are Typed, Prefix Functions
 
 An annotation key is not a special grammatical category — it's an ordinary, prefix-
 position Knot function with a real type signature, and `@key(args)` is checked exactly
@@ -517,7 +640,7 @@ parameter type, then the whole thing behaves as `identity` on the value it's att
 at runtime (per this section's "no effect on forward runtime semantics"). Standard keys'
 signatures:
 
-- `unravel :: Unraveler -> ...` — takes a **function type** (see §11; `Unraveler`'s exact
+- `unravel :: Unraveler -> ...` — takes a **function type** (see §14; `Unraveler`'s exact
   shape mirrors the annotated binding's own signature).
 - `nodeId`, `label`, `doc`, `color`, `group` — take `String`.
 - `position` — takes `(Float, Float)`.
@@ -529,21 +652,21 @@ New keys (the set is open, per above) are added the same way: give the key a typ
 function may reference anything in scope at the point the annotation is written: the
 same `let`-bound names, function parameters, and imports visible to the binding it
 annotates. This is what lets an `unravel` body close over its own function's parameters
-(§11.1's `\inputs sensitivity -> ...`).
+(§14.1's `\inputs sensitivity -> ...`).
 
 **Placement — the one special rule**: as ordinary prefix functions, annotations follow
-the expression-atom binding rule of §8.3. The one addition to that rule is that an
+the expression-atom binding rule of §13.3. The one addition to that rule is that an
 annotation may also be stacked immediately above three things that are *not* expression
 atoms: the right-hand side of a `let` binding, a function definition, and a `name ::
 Type` signature line. The first two are really just the atom rule applied with the whole
 bound value (or function body) as the atom; the signature-line case is the genuine
-exception, since a bare `:: Type` line isn't an expression at all — §8.1's stacked form
+exception, since a bare `:: Type` line isn't an expression at all — §13.1's stacked form
 is this rule combined with the AST-level merging of a signature and its definition into
 one binding.
 
 ---
 
-## 11. Unravel (Reverse Execution) 
+## 14. Unravel (Reverse Execution)
 
 TODO review this section ,you never reviewed this lol.
 TODO you also need to add the special "unraveller" output node that attaches both to an output value to unravel, and an application output object for positioning in the UI
@@ -554,7 +677,7 @@ corresponding desired changes to its inputs. This is what enables the graph to b
 driven backwards: change a visualized output, propagate the change upstream to find
 which input values (typically literals) to modify.
 
-### 9.1 What an unravel function is
+### 14.1 What an unravel function is
 
 An unravel function is a regular Knot function attached to a binding via the `unravel`
 annotation key. Its signature mirrors the forward function but runs in reverse:
@@ -571,13 +694,13 @@ The runtime calls a node's unravel during a backward pass through the graph, pas
 the desired output change (sensitivity) and the original inputs. The unravel returns
 desired changes for each input, which are then propagated further upstream.
 
-### 9.2 Default unravelers
+### 14.2 Default unravelers
 
 Built-in operations have sensible default unravelers — no annotation needed for simple
 cases. For example, addition splits the output sensitivity evenly across its inputs by
 default. The annotation only needs to appear when overriding the default behavior.
 
-### 9.3 Unravel on higher-order functions
+### 14.3 Unravel on higher-order functions
 
 When a node takes a function as input (e.g. `foldl`, `map`), its unravel receives not
 just the function value but also that function's own unravel, and calls it during the
@@ -585,7 +708,7 @@ backward pass. Function strands in the graph carry their unravel bundled alongsi
 their forward implementation — passing a function to a higher-order node automatically
 makes its unravel available for the backward pass.
 
-### 9.4 Conflict resolution
+### 14.4 Conflict resolution
 
 When multiple downstream paths converge on the same node during a backward pass, that
 node may receive conflicting desired values from different paths. The default strategy
@@ -594,7 +717,7 @@ is to average them; this is configurable per-node via a `solver` annotation key
 number of iterations, it surfaces a warning rather than silently producing a wrong
 result.
 
-### 9.5 Annotation examples
+### 14.5 Annotation examples
 
 ```knot
 -- simple override: assign full delta to first argument instead of splitting
@@ -615,9 +738,9 @@ result = complexTransform input
 output = domainSpecificOp input
 ```
 
-### 9.6 `Sensitivity` Is a Recursive Type Function
+### 14.6 `Sensitivity` Is a Recursive Type Function
 
-`Sensitivity` (the output-change type threaded through §9.1's unravel signatures) is not
+`Sensitivity` (the output-change type threaded through §14.1's unravel signatures) is not
 an ordinary parametric type applied wholesale to a binding's output — it's a type-level
 function that recurses into that output type's *shape*, mirroring structure rather than
 wrapping it:
@@ -625,7 +748,7 @@ wrapping it:
 ```
 Sensitivity(record { f1 : T1, f2 : T2, ... }) = record { f1 : Sensitivity(T1), f2 : Sensitivity(T2), ... }
 Sensitivity(tuple(T1, T2, T3))                = tuple(Sensitivity(T1), Sensitivity(T2), Sensitivity(T3))
-Sensitivity(scalar T)                         = <leaf sensitivity vocabulary for T>  -- TBD, §13
+Sensitivity(scalar T)                         = <leaf sensitivity vocabulary for T>  -- TBD, §17
 ```
 
 This recursion applies uniformly to **user-defined record types**, not just built-in
@@ -634,11 +757,11 @@ its `Sensitivity Point` is `{ x : Sensitivity Float, y : Sensitivity Float }`. T
 an unravel caller constrain `x` while leaving `y` free, rather than being forced to
 specify (or leave entirely unconstrained) the whole record at once. The leaf case —
 `Sensitivity` of a scalar type — is where the actual constraint vocabulary lives; still
-open, see §13.
+open, see §17.
 
 **Scope of the recursion — product shapes only, so far.** The rule above only covers
 *product* shapes: record and tuple, where the set of fields is fixed and statically known.
-It does not (yet) cover *sum* shapes — any multi-constructor `type` (§3.5), including
+It does not (yet) cover *sum* shapes — any multi-constructor `type` (§5.3), including
 `List` (`Nil | Cons a (List a)` — `:`/`[]` are surface sugar over an ordinary recursive ADT
 here, exactly as in Haskell/Elm, not a structurally distinct case), `Maybe`, `Result`, or a
 user's own `type Shape = Circle Float | Rectangle Float Float`. Recursing `Sensitivity` into
@@ -651,16 +774,16 @@ non-product type.
 
 ---
 
-## 12. Typed Holes
+## 15. Typed Holes
 
 Knot uses `_` as a **typed hole** in expression position — a placeholder for an expression
 that has not yet been supplied. Holes are intentionally invalid there: programs containing
 an expression-position hole do not compile, but the compiler reports the expected type at
 each hole site, making incomplete programs informative rather than silent. Named holes
 (`_name`) are a separate, narrower feature restricted to pattern/binding discard position
-(§12.3) — they are **not** valid as expression placeholders.
+(§15.2) — they are **not** valid as expression placeholders.
 
-### 12.2 Expression holes
+### 15.1 Expression holes
 
 `_` is valid in any expression position, in its bare unnamed form only — `_name` is not
 supported here (`f a _b c` is invalid; use `f a _ c`). The compiler reports what type is
@@ -677,34 +800,51 @@ identity = \x -> _        -- error: _ :: a (the return type of the lambda)
 config = { host = "localhost", port = _ }   -- error: _ :: Int
 ```
 
-### 12.3 Pattern match and Binding holes (`let _ = ...`)
+### 15.2 Pattern match and Binding holes (`let _ = ...`)
 
 `_` in a pattern or `let`-binding LHS discards the value — this is valid, not an error
 (`let _ = expression` drops the result). A named variant is allowed here specifically:
 `let _debugValue = expression in ...` is also valid, purely as a self-documenting mnemonic
 for the reader — the name carries no compiler-checked meaning.
 
-
-### 12.5 Annotation compatibility
+### 15.3 Annotation compatibility
 
 Holes cannot carry annotations — `_ @nodeId("x")` is a parse error. Annotate
 the enclosing expression or the binding instead.
 
 ---
 
-## 13. Open Questions
+## 16. Diagnostics: Errors & Warnings
 
-1. **Metadata/annotation syntax** — TBD.
-2. **Logging / observable side effects** — what's the story for debug output or
-   structured logging within `IO`? Needs user stories before designing.
-3. **Instance-declaration syntax** — user-defined instances of existing interfaces are
-   confirmed allowed (§2.4, §7), but the actual declaration syntax isn't designed yet
-   (Haskell-style `instance Eq Shape where (==) a b = ...`? something else?). Needed
-   before the parser can support it.
+A hard type error rejects the program; a warning does not. What falls in each bucket:
+
+**Errors** — ordinary type mismatches; referencing an undefined name; a binding
+generalized over an interface obligation that never resolves (§6.3, "ambiguous
+constraint"); a concrete type missing a required interface instance; two instances
+declared for the same `(interface, type)` pair (§10.2); an interface instance
+declared without its required superclass instance (§10.3); an instance declared for
+a target shape that can't be given one at all — a bare type variable, a function
+type, or an open record (§10.2).
+
+**Warnings** (never errors — §1) — a `case` that doesn't cover every possible value
+of its scrutinee's type; a `case` arm that can never be reached (§8.3).
 
 ---
 
-## 14. Planned for v2
+## 17. Open Questions
+
+1. **Logging / observable side effects** — what's the story for debug output or
+   structured logging within `IO`? Needs user stories before designing.
+2. **`Sensitivity`'s leaf scalar vocabulary** — the constraint vocabulary for a
+   scalar's own sensitivity (candidates seen elsewhere: `Exact`/`Range`/`Tolerance`/
+   `Free`) is still undesigned (§14.6).
+3. **`Sensitivity` over sum types** — letting an unravel constraint change *which
+   constructor* is active, not just a fixed shape's fields, is a genuinely harder,
+   unsolved problem (§14.6).
+
+---
+
+## 18. Planned for v2
 
 - **User-defined interfaces** — allow users to declare their own interfaces and implement
   them for custom types. Requires a constraint-solving/dictionary-passing subsystem;
