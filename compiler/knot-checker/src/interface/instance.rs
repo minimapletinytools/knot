@@ -16,26 +16,39 @@
 //! `knot-checker-gaps-plan.md`) to "does `ty` have `interface`" — a
 //! parametric instance's own `requires` (e.g. `instance Eq a => Eq (List
 //! a)`'s `Eq a`) is checked recursively against each corresponding
-//! argument, and `Tuple`/`Record`/`Unit` get hardcoded structural rules
-//! (spec: these derive `Eq`/`Ord`/`Show` from their own parts) rather than
-//! a table lookup at all — no `Ref` to key them by in the first place.
-//! `has_instance` stays a flat existence check underneath (used for
-//! coherence: does *this exact* head have *some* instance, full stop,
-//! ignoring what its own parameters might need) — `insert_declared_unchecked`'s
-//! caller (`build_instance_table`'s own superclass/duplicate passes) only
-//! ever needs that shallow question, not the recursive one.
+//! argument, and `Tuple`/`Unit` (and an *open* `Record`, and any `Record`
+//! with no matching custom instance) get hardcoded structural rules (spec:
+//! these derive `Eq`/`Ord`/`Show` from their own parts) rather than a table
+//! lookup at all — no `Ref` to key them by in the first place. `has_
+//! instance` stays a flat existence check underneath (used for coherence:
+//! does *this exact* head have *some* instance, full stop, ignoring what
+//! its own parameters might need) — `insert_declared_unchecked`'s caller
+//! (`build_instance_table`'s own superclass/duplicate passes) only ever
+//! needs that shallow question, not the recursive one.
 //!
-//! **A user can't declare an instance *for* a `Var`/`Fn`/`Tuple`/`Record`/
-//! `Unit` shape directly** (`head_ref` returns `None` for those `CType`s —
-//! no `Ref` to key an instance-table entry by at all) — only this table's
-//! own hardcoded structural rule ever answers for `Eq`/`Ord`/`Show` on
-//! `Tuple`/`Record`/`Unit`, and no interface at all can be given to a bare
-//! `Fn`/`Var` target. This used to be silent (the declaration just vanished
-//! with no diagnostic, surfacing only as a confusing `NoInstance` wherever
-//! a caller tried to use it) — `build_instance_table` now reports a real
-//! `InstanceTargetNotNominal` at the declaration site instead. A `VarApp`
-//! whose head is still unresolved (a genuine kind error, spec §6.3/§6.4) is
-//! never confirmed by anything — see `check_instance`'s own doc comment.
+//! **A user can't declare an instance *for* a `Var`/`Fn`/`Tuple`/`Unit`
+//! shape, or an *open* `Record`, directly** (`head_ref` returns `None` for
+//! those `CType`s — no `Ref` to key an instance-table entry by at all) —
+//! this table's own hardcoded structural rule is the only thing that ever
+//! answers for `Eq`/`Ord`/`Show` on `Tuple`/`Unit`, and no interface at all
+//! can be given to a bare `Fn`/`Var` target or an open row. This used to be
+//! silent (the declaration just vanished with no diagnostic, surfacing
+//! only as a confusing `NoInstance` wherever a caller tried to use it) —
+//! `build_instance_table` now reports a real `InstanceTargetNotNominal` at
+//! the declaration site instead. A *closed* `Record` target is the one
+//! exception: `record_key` gives `InstanceTable`'s own separate `record_
+//! entries` a `RecordKey` (sorted field-name set) to key by instead of a
+//! `Ref` — since `knot-canonical::resolve::alias::expand_aliases` erases
+//! every `type alias` reference before this ever runs, a record's field
+//! names are the only handle left to declare (and later look up) a custom
+//! instance by, letting it override the structural Eq/Ord/Show fallback
+//! and, more importantly, giving records access to interfaces (`Num`,
+//! `Semigroup`, anything user-defined) that have no structural fallback at
+//! all. See `InstanceTable`'s own doc comment on `record_entries` for the
+//! one accepted limitation this brings (field-*name* keying, not
+//! field-*type* keying). A `VarApp` whose head is still unresolved (a
+//! genuine kind error, spec §6.3/§6.4) is never confirmed by anything —
+//! see `check_instance`'s own doc comment.
 
 use std::collections::{HashMap, HashSet};
 
@@ -68,9 +81,30 @@ pub struct InstanceEntry {
     pub requires: Vec<(usize, String)>,
 }
 
+/// A closed record's own field-name set, sorted, standing in for `Ref` as
+/// the key for a record-shaped instance target (`instance Num Vector2`
+/// where `Vector2` is a `type alias` for `{ x : Float, y : Float }`) --
+/// see `record_key`'s own doc comment for why records need a wholly
+/// separate table from `entries` rather than a new `Ref` variant.
+type RecordKey = std::collections::BTreeSet<String>;
+
 #[derive(Debug, Default)]
 pub struct InstanceTable {
     entries: HashMap<(String, Ref), InstanceEntry>,
+    /// **Known limitation**, documented rather than silently wrong: this
+    /// keys purely on field *names*, not field types, so `instance Show {
+    /// x : Int }` and a hypothetical `instance Show { x : String }`
+    /// declared elsewhere in the same module would collide as
+    /// "duplicate" even though they're genuinely different record shapes.
+    /// Real field-type-aware keying would need `RecordKey` to carry each
+    /// field's own resolved type too, which pulls in the same
+    /// `Substitution`-dependent equality this table otherwise has no
+    /// reason to know about — an edge case narrow enough (two *unrelated*
+    /// record aliases sharing an identical field-name set, both wanting
+    /// the *same* interface, in the *same* module) to accept for now
+    /// rather than block a real, common pattern (a domain record wanting
+    /// its own `Eq`/`Ord`/`Show`/anything else) on it.
+    record_entries: HashMap<(String, RecordKey), InstanceEntry>,
 }
 
 impl InstanceTable {
@@ -81,6 +115,11 @@ impl InstanceTable {
     pub fn has_instance(&self, interface: &str, head: &Ref) -> bool {
         self.entries
             .contains_key(&(interface.to_string(), head.clone()))
+    }
+
+    fn has_record_instance(&self, interface: &str, key: &RecordKey) -> bool {
+        self.record_entries
+            .contains_key(&(interface.to_string(), key.clone()))
     }
 
     fn entry(&self, interface: &str, head: &Ref) -> Option<&InstanceEntry> {
@@ -114,6 +153,9 @@ impl InstanceTable {
         for (key, entry) in other.entries {
             self.entries.entry(key).or_insert(entry);
         }
+        for (key, entry) in other.record_entries {
+            self.record_entries.entry(key).or_insert(entry);
+        }
     }
 
     /// Registers a declared instance's own existence with no checking at
@@ -136,16 +178,57 @@ impl InstanceTable {
             },
         );
     }
+
+    /// The record-keyed counterpart of `insert_declared_unchecked` — same
+    /// no-checking-here contract, same two-pass caller.
+    fn insert_declared_record_unchecked(
+        &mut self,
+        interface: &str,
+        key: RecordKey,
+        requires: Vec<(usize, String)>,
+    ) {
+        self.record_entries.insert(
+            (interface.to_string(), key),
+            InstanceEntry {
+                kind: InstanceKind::Declared,
+                requires,
+            },
+        );
+    }
 }
 
 /// The head type constructor an instance's `target` names —
 /// `instance Eq Shape` -> `Shape`'s `Ref`; `instance Eq (List a)` ->
-/// `List`'s. `None` for a target this table can't key by `Ref` at all
-/// (`Tuple`/`Record`/`Fn`/`Unit`/a bare type variable) — see module docs.
+/// `List`'s. `None` for a target this can't key by `Ref` at all
+/// (`Tuple`/`Fn`/`Unit`/a bare type variable, or a `Record` -- see
+/// `record_key` for that last one's own separate path) — see module docs.
 fn head_ref(target: &CType) -> Option<&Ref> {
     match target {
         CType::Named(r, _) => Some(r),
         CType::Var(_) | CType::Fn(..) | CType::Tuple(_) | CType::Record(..) | CType::Unit => None,
+    }
+}
+
+/// The `RecordKey` a *closed* record target keys `InstanceTable`'s own
+/// `record_entries` by — `None` for an open/row-polymorphic one (`{ a | x :
+/// Int }`, spelled with a leading `a |`), which can never be a well-defined
+/// instance target: unlike `Eq`/`Ord`/`Show`'s own structural derivation
+/// (which only ever needs to recurse into whatever fields happen to be
+/// *visible* at a given call site, `ext` or not), a genuinely custom
+/// instance is declared once for one exact, fixed shape, so there must be
+/// no further fields a use site could still gain through unification. By
+/// the time this ever runs, `knot-canonical::resolve::alias::expand_
+/// aliases` has already substituted away every `type alias` reference
+/// (`Vector2` in `instance Num Vector2` is already this literal `CType::
+/// Record`, not a nominal name any more) — a `RecordKey` is genuinely the
+/// *only* handle left for "which declaration is this," see `InstanceTable`'s
+/// own `record_entries` doc comment for the resulting, accepted limitation.
+fn record_key(target: &CType) -> Option<RecordKey> {
+    match target {
+        CType::Record(fields, _, None) => {
+            Some(fields.iter().map(|(name, _)| name.clone()).collect())
+        }
+        _ => None,
     }
 }
 
@@ -173,10 +256,24 @@ fn instance_requires(target: &CType, constraints: &[CConstraint]) -> Vec<(usize,
     requires
 }
 
+/// Which of `InstanceTable`'s two parallel key spaces one declared
+/// instance's own target resolved to — see `head_ref`/`record_key`.
+#[derive(Debug, Clone)]
+enum DeclaredHead {
+    Nominal(Ref),
+    Record(RecordKey),
+}
+
 /// `(interface, head, requires, span)` for one declared instance this table
-/// can key by `Ref` — `build_instance_table`'s own intermediate shape
-/// between collecting every such declaration and its two checking passes.
-type DeclaredInstance<'a> = (&'a str, Ref, Vec<(usize, String)>, knot_syntax::span::Span);
+/// can key by either `Ref` or `RecordKey` — `build_instance_table`'s own
+/// intermediate shape between collecting every such declaration and its two
+/// checking passes.
+type DeclaredInstance<'a> = (
+    &'a str,
+    DeclaredHead,
+    Vec<(usize, String)>,
+    knot_syntax::span::Span,
+);
 
 /// Builds the table from every `CDecl::Instance` in `decls`. Unknown
 /// interfaces are skipped (`knot-canonical` already reported that error);
@@ -208,10 +305,13 @@ pub fn build_instance_table(decls: &[Spanned<CDecl>]) -> (InstanceTable, Vec<Typ
         if !is_known_interface(&inst.interface) {
             continue;
         }
-        match head_ref(&inst.target) {
+        let head = head_ref(&inst.target)
+            .map(|r| DeclaredHead::Nominal(r.clone()))
+            .or_else(|| record_key(&inst.target).map(DeclaredHead::Record));
+        match head {
             Some(head) => declared.push((
                 inst.interface.as_str(),
-                head.clone(),
+                head,
                 instance_requires(&inst.target, &inst.constraints),
                 d.span,
             )),
@@ -226,7 +326,11 @@ pub fn build_instance_table(decls: &[Spanned<CDecl>]) -> (InstanceTable, Vec<Typ
 
     let mut accepted = vec![false; declared.len()];
     for (i, (interface, head, requires, span)) in declared.iter().enumerate() {
-        if table.has_instance(interface, head) {
+        let already_exists = match head {
+            DeclaredHead::Nominal(r) => table.has_instance(interface, r),
+            DeclaredHead::Record(key) => table.has_record_instance(interface, key),
+        };
+        if already_exists {
             errors.push(TypeError {
                 span: *span,
                 kind: TypeErrorKind::DuplicateInstance {
@@ -234,7 +338,14 @@ pub fn build_instance_table(decls: &[Spanned<CDecl>]) -> (InstanceTable, Vec<Typ
                 },
             });
         } else {
-            table.insert_declared_unchecked(interface, head.clone(), requires.clone());
+            match head {
+                DeclaredHead::Nominal(r) => {
+                    table.insert_declared_unchecked(interface, r.clone(), requires.clone())
+                }
+                DeclaredHead::Record(key) => {
+                    table.insert_declared_record_unchecked(interface, key.clone(), requires.clone())
+                }
+            }
             accepted[i] = true;
         }
     }
@@ -244,7 +355,11 @@ pub fn build_instance_table(decls: &[Spanned<CDecl>]) -> (InstanceTable, Vec<Typ
             continue;
         }
         for superclass in superclasses(interface) {
-            if !table.has_instance(superclass, head) {
+            let has_superclass = match head {
+                DeclaredHead::Nominal(r) => table.has_instance(superclass, r),
+                DeclaredHead::Record(key) => table.has_record_instance(superclass, key),
+            };
+            if !has_superclass {
                 errors.push(TypeError {
                     span: *span,
                     kind: TypeErrorKind::MissingSuperclassInstance {
@@ -306,9 +421,24 @@ pub fn check_instance(
         Some(Structure::Tuple(elems)) if matches!(interface, "Eq" | "Ord" | "Show") => elems
             .iter()
             .all(|e| check_instance(sub, table, given, interface, *e)),
-        Some(Structure::Record(fields, _)) if matches!(interface, "Eq" | "Ord" | "Show") => fields
-            .values()
-            .all(|f| check_instance(sub, table, given, interface, *f)),
+        // A *closed* record first checks for a matching custom instance
+        // (Fix, this session: `RecordKey`-keyed, see that type's own doc
+        // comment) -- letting a real declaration override the structural
+        // fallback below, exactly as a user would expect. An open/row-
+        // polymorphic one (`ext.is_some()`) skips that lookup entirely: a
+        // use site that hasn't pinned down every field yet can't possibly
+        // match one exact, fixed instance target soundly.
+        Some(Structure::Record(fields, ext)) => {
+            let key: RecordKey = fields.keys().cloned().collect();
+            if ext.is_none() && table.has_record_instance(interface, &key) {
+                true
+            } else {
+                matches!(interface, "Eq" | "Ord" | "Show")
+                    && fields
+                        .values()
+                        .all(|f| check_instance(sub, table, given, interface, *f))
+            }
+        }
         // One value, trivially all three.
         Some(Structure::Unit) => matches!(interface, "Eq" | "Ord" | "Show"),
         _ => false,
@@ -448,20 +578,23 @@ mod tests {
     }
 
     #[test]
-    fn a_non_eq_ord_show_instance_targeting_a_record_is_a_real_error_not_silent() {
-        // Semigroup has no structural fallback the way Eq/Ord/Show do --
-        // this used to just vanish from the table with no diagnostic at
-        // all, only surfacing later as a confusing NoInstance wherever a
-        // caller tried to use `<>` on a Point.
+    fn a_non_eq_ord_show_instance_targeting_a_closed_record_is_now_accepted() {
+        // Semigroup has no structural fallback the way Eq/Ord/Show do, but
+        // that's exactly the case a real user most wants a *custom*
+        // instance for -- rejecting it as InstanceTargetNotNominal used to
+        // make this "unreachable dead code" reasoning (right for Eq/Ord/
+        // Show, which already derive automatically) wrongly block a
+        // genuinely new capability instead. Now accepted into `record_
+        // entries` (keyed by field-name set, `Ref`-keyed `entries` stays
+        // untouched either way) rather than `entries` itself.
         let cs = decls("instance Semigroup { x : Float } where\n  (<>) a b = { x = a.x }\n");
         let (table, errors) = build_instance_table(&cs);
-        assert!(errors.iter().any(|e| matches!(
-            &e.kind,
-            TypeErrorKind::InstanceTargetNotNominal { interface } if interface == "Semigroup"
-        )));
-        // And it really isn't registered anywhere -- the diagnostic isn't
-        // just cosmetic alongside a table entry that still works.
+        assert!(errors.is_empty(), "{errors:?}");
         assert!(table.entries.is_empty());
+        assert!(table.has_record_instance(
+            "Semigroup",
+            &std::collections::BTreeSet::from(["x".to_string()])
+        ));
     }
 
     #[test]

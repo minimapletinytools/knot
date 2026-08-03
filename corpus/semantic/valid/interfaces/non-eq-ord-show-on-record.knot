@@ -1,0 +1,11 @@
+-- expect: a Semigroup instance targeting a literal record type (no alias
+-- involved) is now accepted -- Eq/Ord/Show's own structural fallback was
+-- never really the relevant distinction; this is exactly the case (an
+-- interface with *no* structural fallback at all) a real user most wants
+-- a custom instance for (corpus/programs/README.md's finding #5, widened
+-- by `interfaces/vector2-custom-num.knot`'s own Num-on-a-record example).
+-- Used to be InstanceTargetNotNominal before InstanceTable grew a second,
+-- record-shaped key space alongside its Ref-keyed one.
+instance Semigroup { x : Float } where
+    (<>) a b =
+        { x = a.x }

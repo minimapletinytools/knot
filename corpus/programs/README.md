@@ -82,26 +82,47 @@ other changes needed, confirming both fixes landed exactly where expected.
    `Monoid a =>`) — both now pass. Fixed via
    `solve::insert_given_with_superclasses`, reusing the existing
    `interface::table::superclasses`.
-5. **`InstanceTargetNotNominal` (this session's own Fix #9) blocks
+5. **Fixed. `InstanceTargetNotNominal` (this session's own Fix #9) blocked
    legitimate custom `Eq`/`Ord`/`Show` instances on records, not just the
    interfaces with no structural fallback** — `interfaces/point-ord.knot`
    wants `Ord` on a `Point` record *by magnitude*, a real, common pattern
    (order-by-derived-key) the automatic structural per-field derivation
    could never produce on its own. Fix #9's own reasoning ("no structural
-   fallback exists, so an explicit instance is unreachable dead code") is
+   fallback exists, so an explicit instance is unreachable dead code") was
    right for `Semigroup`/`Monoid`/etc. but wrong for `Eq`/`Ord`/`Show`
    specifically, where a real fallback exists that an explicit instance
    should be allowed to *override*, not just duplicate. A likely
    overcorrection in that fix, found by using the feature it changed.
    **Broader than first documented (round 3, `interfaces/vector2-custom-
-   num.knot`)**: `head_ref` rejects *any* record target regardless of
+   num.knot`)**: `head_ref` rejected *any* record target regardless of
    interface, not just `Eq`/`Ord`/`Show` — a hand-declared `instance Num
    Vector2` (operator-overloaded 2D vector math, `Num` having no
-   structural fallback at all) is blocked exactly the same way, then
-   every use of `+`/`-` on a `Vector2` additionally reports its own
+   structural fallback at all) was blocked exactly the same way, then
+   every use of `+`/`-` on a `Vector2` additionally reported its own
    `NoInstance("Num")` once the instance itself never made it into the
    table. Same root cause, wider blast radius than "Eq/Ord/Show on
-   records" alone suggested.
+   records" alone suggested -- and, as it turned out, this second half is
+   the more important one: `Num`/`Semigroup`/anything user-defined having
+   *no* structural fallback at all is exactly the case a custom record
+   instance matters most for. **Fix**: `type alias` expansion
+   (`knot-canonical::resolve::alias`) erases every alias reference to its
+   literal underlying `CType` before this table ever runs, so by
+   instance-declaration time there's no name left to key a `Ref` by at all
+   -- `InstanceTable` now keeps a second, parallel key space
+   (`record_entries`, keyed by `RecordKey`: a *closed* record's own sorted
+   field-name set) alongside its original `Ref`-keyed one, populated
+   whenever a target is `CType::Record` with no open row (`instance Eq
+   (HasX a)`-style open targets still correctly report
+   `InstanceTargetNotNominal` -- there's no fixed, exact shape to match
+   against when a use site could still gain more fields via `a`).
+   `check_instance` tries a matching record instance first, falling back
+   to the structural `Eq`/`Ord`/`Show` derivation only when none exists,
+   so a custom instance correctly overrides rather than merely duplicating
+   it. **One accepted, documented limitation**: this keys purely on field
+   *names*, not field *types*, so two unrelated record aliases that happen
+   to share an identical field-name set and both want the *same* interface
+   in the *same* module would wrongly collide as a duplicate -- narrow
+   enough to accept rather than block the common case on.
 6. **Fixed. `let`-bound local functions couldn't take parameters** —
    `let go acc rest = ... in ...` was a hard parse error (`expected \`=\``);
    `let_binding` in `knot-syntax` only ever parsed a bare pattern then `=`,
@@ -241,6 +262,9 @@ root cause, **not yet fixed**:
     `(div n 2)` as a failed section attempt during testing, caught before
     landing.
 
-After that fix, 71 of 80 pass. After also fixing finding #6 (see its own
-updated text above), 72 of 80 pass; the remaining 8 are exactly finding #5
-(now broadened) and the still-open Round 1 findings (#3, #7).
+After that fix, 71 of 80 pass. After also fixing finding #6, 72 of 80
+pass. After also fixing finding #5 (see its own updated text above), 76 of
+80 pass; the remaining 4 are exactly the still-open Round 1 findings (#3,
+#7) -- every fixture written across all three rounds so far now passes
+except the `Map` API gap and the `Collection`/`Context` 2-parameter arity
+mismatch.

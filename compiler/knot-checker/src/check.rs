@@ -256,4 +256,64 @@ mod tests {
         let errors = check_module(&cs);
         assert!(errors.is_empty(), "{errors:?}");
     }
+
+    #[test]
+    fn a_custom_ord_instance_on_a_record_alias_overrides_the_structural_fallback() {
+        // interfaces/point-ord.knot's own motivating case: Ord *by
+        // magnitude*, a real pattern the automatic structural per-field
+        // derivation could never produce. Used to be InstanceTargetNotNominal.
+        let cs = decls(concat!(
+            "type alias Point = { x : Float, y : Float }\n",
+            "magnitude :: Point -> Float\n",
+            "magnitude p = p.x * p.x + p.y * p.y\n",
+            "instance Eq Point where\n",
+            "  (==) a b = a.x == b.x && a.y == b.y\n",
+            "instance Ord Point where\n",
+            "  compare a b = compare (magnitude a) (magnitude b)\n",
+            "closerToOrigin :: Point -> Point -> Point\n",
+            "closerToOrigin a b = if a < b then a else b\n",
+        ));
+        let errors = check_module(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn a_custom_num_instance_on_a_record_alias_type_checks_end_to_end() {
+        // interfaces/vector2-custom-num.knot's own motivating case: Num has
+        // no structural fallback at all, so this is exactly the case a
+        // custom record instance matters most for. Used to be
+        // InstanceTargetNotNominal *and* NoInstance("Num") on every use.
+        let cs = decls(concat!(
+            "type alias Vector2 = { x : Float, y : Float }\n",
+            "instance Num Vector2 where\n",
+            "  (+) a b = { x = a.x + b.x, y = a.y + b.y }\n",
+            "  (-) a b = { x = a.x - b.x, y = a.y - b.y }\n",
+            "  (*) a b = { x = a.x * b.x, y = a.y * b.y }\n",
+            "  negate v = { x = 0.0 - v.x, y = 0.0 - v.y }\n",
+            "  abs v = v\n",
+            "  signum v = v\n",
+            "sampleSum :: Vector2\n",
+            "sampleSum = { x = 1.0, y = 2.0 } + { x = 3.0, y = 4.0 }\n",
+        ));
+        let errors = check_module(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn an_open_row_polymorphic_record_still_cant_take_a_custom_instance() {
+        // `HasX a = { a | x : Float }` is a genuinely open row -- there's
+        // no fixed, exact shape to match a custom instance's own declared
+        // target against (a use site could always have more fields via
+        // `a`), so this must still be rejected, unlike a fully closed
+        // record.
+        let cs = decls(concat!(
+            "type alias HasX a = { a | x : Float }\n",
+            "instance Eq (HasX a) where\n",
+            "  (==) p q = p.x == q.x\n",
+        ));
+        let errors = check_module(&cs);
+        assert!(errors.iter().any(
+            |e| matches!(&e.kind, crate::error::TypeErrorKind::InstanceTargetNotNominal { interface } if interface == "Eq")
+        ), "{errors:?}");
+    }
 }

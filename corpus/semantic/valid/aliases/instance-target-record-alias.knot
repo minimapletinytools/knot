@@ -1,0 +1,16 @@
+-- expect: a Semigroup instance targeting a record type *alias* is now
+-- accepted after alias expansion resolves it to a bare Record shape --
+-- keyed by a RecordKey (sorted field-name set) rather than a Ref, since
+-- the alias's own name is already gone by the time instance-table
+-- building runs. Used to be InstanceTargetNotNominal (Fix #9's own
+-- overcorrection, see corpus/programs/README.md's finding #5) before
+-- InstanceTable grew a second, record-shaped key space alongside its
+-- Ref-keyed one.
+type alias Point =
+    { x : Float
+    }
+
+
+instance Semigroup Point where
+    (<>) a b =
+        { x = a.x }
