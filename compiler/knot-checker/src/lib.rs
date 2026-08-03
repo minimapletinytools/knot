@@ -333,6 +333,85 @@
 //! `monoids/max-min-via-ord.knot` and `multi_interface/recursive-tree-
 //! show.knot` for Fix #14) — see `corpus/programs/README.md` for the rest
 //! of this round's findings.
+//!
+//! **`corpus/programs/`, rounds 3-4, plus a user-directed fix pass
+//! (2026-08-02)** — round 3 (18 more fixtures: graph algorithms, an
+//! error-handling interpreter, a hand-declared `Num` instance) surfaced one
+//! new root cause (operator sections entirely missing as an expression) and
+//! confirmed `InstanceTargetNotNominal` was broader than Fix #9 first
+//! documented. Rather than stopping at "logged, not yet fixed," every
+//! outstanding `corpus/programs` finding through that point was then
+//! deliberately closed in one pass, followed by a fourth, monad-`do`-
+//! notation-focused round that found one more:
+//! - **Elm-style bare operator sections**: `(+)`/`(::)`/`(<>)`/... as
+//!   first-class values, desugaring to `\x y -> x op y` at parse time in
+//!   `knot-syntax::parse::expr::try_operator_section`. Deliberately no
+//!   Haskell-style partial sections (`(+ 1)`/`(1 +)`) — a real design
+//!   decision, not a shortcut; those now hard-fail with a message pointing
+//!   at the lambda-form alternative instead of silently misparsing.
+//! - **`let`-bound local functions can take parameters**: `let go acc rest
+//!   = ... in ...` was a hard parse error; `knot-syntax::parse::expr::
+//!   let_binding` now runs the identical params-loop a top-level `FnDef`
+//!   already has, folding the result into a `Lambda` the same way the
+//!   `\acc rest -> ...` workaround already did.
+//! - **Custom instances on closed records**: `type alias` expansion erases
+//!   every alias reference to its literal `CType` before instance-table
+//!   building ever runs, so `InstanceTable` gained a second key space,
+//!   `record_entries` (keyed by `RecordKey`, a closed record's own sorted
+//!   field-name set) alongside its `Ref`-keyed one — letting a custom
+//!   instance override the structural `Eq`/`Ord`/`Show` fallback, and,
+//!   more importantly, giving records access to interfaces with no
+//!   structural fallback at all (`Num`, `Semigroup`, anything user-
+//!   defined). An *open* record target still correctly reports
+//!   `InstanceTargetNotNominal` — there's no fixed shape to key by when a
+//!   use site could still gain more fields. Two limitations accepted
+//!   rather than solved (see `checker_impl_summary.md`'s own "Known gaps"):
+//!   field-*name*-only keying, and a record instance's own declared
+//!   context never being re-checked against a real argument type.
+//! - **Numeric-literal polymorphism**: `constrain::expr`'s `CExpr::IntLit`
+//!   now produces a fresh, `Num`-obligated variable instead of a hard-wired
+//!   `Int`, unifying with `Float` or any user's own `Num` instance by
+//!   ordinary unification. Defaulting to `Int` when nothing else pins it
+//!   down needs two separate spots in `solve.rs`, both provably safe
+//!   against ever misfiring on a real user-written constraint like `Ord a
+//!   =>` (nothing else in this closed language can produce a bare,
+//!   non-function, `Num`-polymorphic value): `generalize` defaults one
+//!   right before it would become part of some binding's own generalized
+//!   scheme (`x = 5`, no signature); `solve_with_obligations`'s own final
+//!   sweep catches the shape that never becomes part of *any* scheme's own
+//!   quantified variables at all (`f x y = x == y; result = f 1 2`).
+//! - **The 2-parameter `Collection`/`Context` fix**: `ty::Structure::
+//!   Ctor(Ref)` became `Ctor(Ref, Vec<TypeVarId>)`, carrying whichever
+//!   leading arguments of a constructor are already fixed. `unify.rs`'s
+//!   own `VarApp`-vs-`App` case now splits the concrete side's own argument
+//!   list at `own_len - VarApp's own arg count` instead of demanding an
+//!   exact match — the latter had made every 2-parameter `Collection`/
+//!   `Context` instance (`Map k v`, `Result e a`) unconditionally fail to
+//!   unify at all, breaking `Result`'s own do-notation entirely.
+//! - **`Map`'s own key-value API**: `prelude::seed_map_module` seeds
+//!   `Ref::Imported(["Map"], _)` schemes for `empty`/`get`/`insert`/
+//!   `remove`/`member`/`size`/`isEmpty`/`keys`/`values`/`toList`/
+//!   `fromList` — concrete, ordinarily-constrained-polymorphic (`Eq k =>`
+//!   wherever a key comparison is needed), not `Collection`/`Context`-
+//!   generic, since these are specific to `Map`'s own two-parameter shape.
+//! - **Instance methods' own header-vs-body solve order**: `constrain::
+//!   decl::constrain_method_body_against` had the identical bug Fix #13
+//!   fixed in `constrain_group_chain`, independently present since
+//!   instance methods build the same header-`Equal`-after-body shape via
+//!   their own, separate code path. A local `let` inside an instance
+//!   method's own body (e.g. a `Show` instance computing intermediate
+//!   values via `div`/`mod` before formatting them) misfired
+//!   `AmbiguousConstraint`. Fixed the same way: solve the header `Equal`
+//!   first.
+//!
+//! `corpus/programs` stands at 98/98 passing — every finding logged across
+//! all four rounds is fixed. See `corpus/programs/README.md` for the full,
+//! round-by-round account (including a couple of this session's own
+//! authoring mistakes that turned out not to be bugs at all), and
+//! `checker_impl_summary.md`'s own "Known gaps" section — reconciled
+//! against the current code in the same pass that added this entry — for
+//! what's left, including `corpus/programs/known_gaps/`'s own runnable
+//! fixtures pinning each one down.
 
 pub mod annotation;
 pub mod ast;

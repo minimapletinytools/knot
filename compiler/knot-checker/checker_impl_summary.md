@@ -1,20 +1,25 @@
 # Knot Type Checker (`knot-checker`) — Implementation Summary
 
-Covers what's actually built, as of this pass: all of TM0–TM9 from
-`knot-type-checker-plan.md`. 130 tests in `knot-checker` alone (347 across
-the whole `compiler/` workspace), `cargo clippy`/`cargo fmt` clean. This is
-a summary of *the implementation*, not a plan — see `knot-type-checker-plan.md`
-for the original design discussion and `language-spec-notes.md` for the
-language being checked.
+Covers what's actually built, as of this pass. This document was originally
+written right after TM0–TM9 (`knot-type-checker-plan.md`) first landed; a
+great deal has happened since — a public `check_module` entry point, real
+higher-kinded `Collection`/`Context` polymorphism, a complete `CExpr` ->
+`TExpr` elaboration tree walk, custom instances on record types, numeric-
+literal polymorphism, a full `Map` stdlib module, and ~15 real bugs found
+by throwing realistic whole programs at the checker (`corpus/programs/`)
+rather than only checking features in isolation. This revision folds all
+of that in. See `knot-type-checker-plan.md` for the original design
+discussion, `knot-checker-gaps-plan.md` for the post-TM9 audit, `lib.rs`'s
+own doc comment for the complete, dated, blow-by-blow fix log this
+document summarizes, and `language-spec-notes.md` for the language being
+checked.
 
-**There is still no public `check_module` entry point.** Everything through
-TM9 works and is tested at the level each milestone operates on, but the
-last mile — walking a whole `CModule` end to end and handing back a
-finished, elaborated result — needs the `ast.rs` tree-walk gap closed first
-(see TM7 below). Until then, the way to actually exercise the checker is
-the pattern every test in the crate already uses: `constrain::decl::
-constrain_module` → `solve::solve` → `interface::instance::check_pending`,
-seeded with `prelude::seed`.
+**A public `check_module` entry point exists** (`check.rs`, Fix #10):
+`constrain::decl::constrain_module` → `solve::solve_with_obligations` →
+`interface::instance::check_pending`, seeded with `prelude::seed` and a
+module's own `build_instance_table`, all wired into one call. It
+deliberately does *not* also call `elaborate::elaborate_module` — see
+TM7 below for why.
 
 ---
 
@@ -30,7 +35,7 @@ Expr/Pattern      (raw AST — names are just strings)
 CExpr/CPattern    (Canonical AST — every name is a Ref: Local/TopLevel/Imported/Builtin/Unresolved)
    │  knot-checker  (this crate)
    ▼
-(not yet built) TExpr — an Elaborated AST with a type on every node
+TExpr/TPattern    (Elaborated AST — a type on every node, Stage A of TM7)
 ```
 
 `knot-checker`'s own internal pipeline is **generate constraints, then
@@ -39,15 +44,21 @@ deliberately from Elm's compiler (plan §2):
 
 ```
 CExpr/CPattern
-   │  constrain::{expr, pattern, decl}   (TM3/TM4)
+   │  constrain::{expr, pattern, decl}   (TM3/TM4) -- also builds TExpr/TPattern (Fix #3)
    ▼
 Constraint tree   (nothing checked yet — just "here's what must hold")
-   │  solve::solve                        (TM5)
+   │  solve::solve / solve_with_obligations  (TM5)
    ▼
-Substitution (mutated) + SchemeEnv + Vec<PendingInstance> + Vec<TypeError>
+Substitution (mutated) + SchemeEnv + Vec<PendingInstance> + Vec<TypeError> + given map
    │  interface::instance::check_pending  (TM6)
    ▼
 Vec<TypeError>  (fully resolved, including instance-table lookups)
+
+-- separately, not part of check_module's own pipeline (see TM7) --
+(TExpr tree, ObligationMap)
+   │  elaborate::elaborate_module  (TM7 Stage B)
+   ▼
+HashMap<(interface, TypeVarId), ObligationResolution>  (Concrete/Structural/StillAbstract)
 ```
 
 ---
@@ -57,7 +68,7 @@ Vec<TypeError>  (fully resolved, including instance-table lookups)
 A `Substitution` is an arena (`Vec<Slot>`); a `TypeVarId` is an index into
 it. Each slot is `Unbound` (a genuine unknown), `Link` (a union-find
 redirect), `Bound(Structure)` (resolved to a concrete shape), or `Rigid`
-(a signature's own type variable — see TM4).
+(a signature's own type variable — see TM4). Unchanged since TM0.
 
 ## TM1/TM2 — `unify.rs`: structural unification
 
@@ -80,44 +91,63 @@ and mutates the `Substitution` to record it:
   records flatten correctly via plain recursion, and what makes a rigid
   row variable (`{ r | x : Float, y : Float }`) correctly refuse to be
   forced into a concrete shape — for free, no extra code needed.
+- **`Ctor`/`VarApp`** (added by Fix #2, extended this session): a
+  constructor-*variable*-headed application (`f a` in `map :: (a -> b) -> f
+  a -> f b`) unifies against a concrete `App` by pinning the variable to a
+  `Structure::Ctor`, now itself *partially applicable* — `Ctor(Ref,
+  Vec<TypeVarId>)`, carrying whichever leading arguments of a
+  2-parameter constructor (`Map k v`, `Result e a`) are already fixed once
+  the `VarApp`'s own trailing argument is split off the end. Originally
+  demanded an *exact* arity match, which made every 2-parameter
+  `Collection`/`Context` instance unconditionally fail to unify at all
+  (found via `corpus/programs`, see the "Since this summary was written"
+  section below).
 
 `Sensitivity` is stubbed here as an ordinary opaque one-argument type
-(`Structure::App`, same treatment as `Option`) — per this session's
-explicit decision, no recursive expansion into record/tuple shape yet
-(spec §9.6 is still just a stub; see `annotation::sensitivity`).
+(`Structure::App`, same treatment as `Maybe`) — still true today, no
+recursive expansion into record/tuple shape (spec §9.6 is still just a
+stub; see `annotation::sensitivity`, and "Known gaps" below).
 
 ## TM3 — `constrain::{expr, pattern}`: constraint generation
 
 Each function is bottom-up: constrain the children, get their `TypeVarId`s
-back, combine them via `Constraint::Equal`/`HasInstance`. A few
-illustrative cases:
+back, combine them via `Constraint::Equal`/`HasInstance`. Since Fix #3,
+every one of these functions returns a `Typed<TExpr>`/`Typed<TPattern>`
+(`ast.rs`) — the fully-typed node itself, not just a bare `TypeVarId` — so
+this stage builds *both* the constraint tree TM5 solves *and* Stage A of
+real elaboration (TM7) in the same walk. A few illustrative cases:
 
-- A literal *is* its builtin type directly — no constraint needed.
+- An integer literal is `Num a => a`, a fresh variable carrying its own
+  `HasInstance("Num", _)` obligation — **not** hard-wired to `Int` (that
+  changed this session; see "Since this summary was written"). A float
+  literal is still unconditionally, immediately `Float` — there's no
+  sensible integer reading of a decimal-point literal to be polymorphic
+  over.
 - `App(f, arg)`: constrain `f`/`arg`, invent a fresh result variable, push
-  one constraint — `f`'s type must equal `arg's type -> result`.
+  one constraint — `f`'s type must equal `arg`'s type -> result.
 - `Var(Ref::Local(x))`: no constraint at all — look `x` up in `LocalScope`
   (a stack of name→type maps for lambda/case bindings, which are never
   generalized) and return that type directly.
 - `Var(Ref::TopLevel/Builtin/Imported(...))`: push a `Constraint::Lookup` —
   "look this name's scheme up later, instantiate it fresh, unify the
-  result against this variable." This is the "`CLocal`-equivalent" the
-  plan names — the mechanism that makes forward/mutual references and real
-  let-polymorphism possible at all, since a top-level binding's principal
-  type isn't known until its own group finishes solving.
+  result against this variable." A `let`-bound name generalizable within
+  its own block instead pushes `Constraint::LookupLocal` (Fix #1) — see
+  TM4/TM5.
 - `BinOp`/`Negate`: a small, closed operator → interface table (`Add` needs
   `Num` and unifies both operands; `Pow` is `(Num a, Integral b) => a -> b
-  -> a`, the one operator needing two *different* interfaces on two
-  different variables — this resolved a real spec gap, since `^` had no
-  documented signature before this session).
-- `Let`: delegates to `constrain::decl` (see TM4) — this is where the
-  `todo!()` from earlier drafts got filled in.
+  -> a`).
+- `Let`: delegates to `constrain::decl` (see TM4).
+- `Do` (spec §6.4/§8): **real now** (Fix #2) — desugars straight to
+  `bind`/`pure` calls before ever reaching the rest of this module, once
+  `Collection`/`Context` gave those two names real, checkable signatures.
+  `do { x <- e1; rest }` becomes `bind e1 (\x -> rest)`; a bare statement
+  becomes `bind e1 (\_ -> rest)`.
 
-**Not implemented**: `Do` (needs the Context interface's `pure`/`bind`,
-spec §6.4 — entangled with the same higher-kinded-polymorphism gap TM8
-hits). `Annotated` is handled, but deliberately shallow: annotation
-*values* aren't constrained here at all yet (TM6's `annotation::table`
-only derives what type a value *would* need, nothing checks a real one
-against it).
+**Still not implemented**: `Annotated` is handled, but deliberately
+shallow — annotation *values* still aren't constrained/checked here at
+all (`annotation::table` only derives what type a value *would* need,
+nothing calls that from here to check a real one against it; see "Known
+gaps").
 
 ## TM4 — `constrain::decl`: SCC splitting and `Constraint::Let`
 
@@ -137,31 +167,37 @@ referencing an *already-processed* group still goes through the deferred
 later.
 
 **Rigid variables, for real**: a signed binding's declared type variables
-become `Substitution::fresh_rigid` slots (built in TM0/TM1, unused until
-now); its params/body are constrained directly against the signature's own
-shape, so `unify`'s rigid-vs-concrete rejection actually gets exercised for
-the first time.
+become `Substitution::fresh_rigid` slots; its params/body are constrained
+directly against the signature's own shape, so `unify`'s rigid-vs-concrete
+rejection actually gets exercised.
 
-**A real asymmetry, not a bug**: `knot-canonical`'s `Ref` has no separate
-case for "`let`-bound name" — `Ref::Local` covers `let` the same as
-lambda/case/do params (a name-*resolution* concern, indifferent to
-polymorphism). So `Constraint::Let` carries a `top_level: bool`: a
-module-level group gets fully generalized and installed into the global
-scheme environment; a `let`-expression's group does not — its names stay
-monomorphic for the lifetime of that `let` block, a documented, sound (just
-occasionally more conservative than ML/Haskell) simplification, since
-`Ref::Local` always resolves immediately regardless.
+**`let`-bound names get real let-polymorphism too, not just top-level ones
+(Fix #1)** — the paragraph in the previous revision of this document about
+`let`-bound names being forced monomorphic as "a documented, sound
+simplification" is **superseded**: `constrain::LocalBinding`/
+`Constraint::LookupLocal`/`solve.rs`'s own `local_env` now mirror the
+`Ref::TopLevel`/`Lookup`/`SchemeEnv` machinery, letting a `let`-bound name
+be `promote_to_generalizable`d and used polymorphically at two different
+types within its own block, exactly like a top-level one. `Ref::Local`
+still covers both `let` and truly-monomorphic lambda/case/do params — the
+distinction now lives in *which constraint* a reference to it emits
+(`LookupLocal` vs. nothing at all), not in whether it can be polymorphic.
 
-**Two real bugs found here** (both via the flagship "`identity` used at two
-different types" end-to-end test — see TM5):
+**Instance method bodies are real, type-checked function bodies (Fix #5,
+extended by Fix #6)** — `constrain_instance` instantiates each method's
+shape (`interface::table::METHODS`/`CTOR_METHODS`, covering both the eight
+ordinary interfaces and `Collection`/`Context`) against the instance's own
+target, and checks the body against it exactly like a signed top-level
+binding. `constrain_method_body_against` is genuinely a second copy of
+this logic, not a call into the ordinary-binding path — see "Since this
+summary was written" for a bug that fell out of that duplication.
+
+**Two real bugs found here originally** (both via the flagship "`identity`
+used at two different types" end-to-end test — see TM5):
 
 1. A group's own scope frame originally stayed open through the *entire*
-   rest of the binding chain (needed for `let`, per the paragraph above).
-   For top-level groups this let a *later, unrelated* group's code resolve
-   an *earlier* one's name via raw `LocalScope` instead of the deferred
-   `Lookup`+instantiate path — silently defeating polymorphism for it.
-   Fixed: the frame now closes immediately after a top-level group's own
-   bodies are constrained, before recursing into what comes next.
+   rest of the binding chain. Fixed: the frame now closes immediately
+   after a top-level group's own bodies are constrained.
 2. (See TM5 — the companion bug in `generalize` itself.)
 
 ## TM5 — `solve.rs`: generalize, instantiate, real let-polymorphism
@@ -169,167 +205,315 @@ different types" end-to-end test — see TM5):
 The driver that actually calls `unify`. Walks the `Constraint` tree:
 
 - `Equal` → call `unify` directly.
-- `HasInstance` → **don't** classify it yet — just collect it into a
-  `pending` list. A `HasInstance` obligation often can't be judged the
-  moment it's seen (the type it's about might still be an unresolved
-  variable that a *later* `Equal` in the same list pins down). Only after
-  the *whole* tree's `Equal`s have run does `solve` go back and classify
-  each one: rigid (checked against `given` facts — no instance table
-  needed, since a rigid variable can never have more permissions than its
-  own signature granted) or concrete (left in the returned list for TM6).
-- `Lookup` → instantiate whatever scheme is currently installed (fresh
-  copy of each quantified variable, deep-copying the stored structure),
-  unify the fresh copy against the reference's own type.
-- `Let` → push the group's `header_ty`s onto an `ambient` stack (so no
-  *inner* `generalize` mistakes an outer, still-in-progress binding's type
-  variable for one it owns), solve `header_con`, then for each *top-level*
-  member: a signed one's scheme is just its signature restated; an
-  unsigned one needs the real **`generalize`** — textbook `ftv(ty) \
-  ftv(ambient)`, gathering any of its own now-pending obligations into the
-  new scheme's `constraints` — then the **ambiguous-CAF check** (this
-  session's arity-based replacement for Haskell's monomorphism
-  restriction: a zero-argument binding generalized over a variable that
-  still carries an interface obligation is an error, full stop; arity ≥ 1
-  is never restricted).
+- `HasInstance` → collect into a `pending` list, classified only after the
+  *whole* tree's `Equal`s have run: rigid (checked against `given` facts,
+  now closed over the interface hierarchy's own superclasses — `Ord a =>`
+  implies `given Eq a` too, Fix #12) or concrete (left for TM6).
+- `Lookup`/`LookupLocal` → instantiate whatever scheme is currently
+  installed (fresh copy of each quantified variable), unify the fresh copy
+  against the reference's own type.
+- `Let` → push the group's `header_ty`s onto an `ambient` stack, solve
+  `header_con`, then for each member: a signed one's scheme is just its
+  signature restated; an unsigned one needs the real **`generalize`** —
+  textbook `ftv(ty) \ ftv(ambient)` — then the **ambiguous-CAF check**
+  (arity-based replacement for Haskell's monomorphism restriction: a
+  zero-argument binding generalized over a variable that still carries an
+  interface obligation is an error, full stop — *except* a still-dangling
+  bare `"Num"` obligation, which **defaults to `Int`** instead of erroring
+  or staying pending forever; see "Since this summary was written").
 
-**The companion bug to TM4's**: `ambient` originally still contained the
-*very member being generalized* (pushed right before solving its own
-`header_con`, never popped before `generalize` ran). `ftv(ty) \
-ftv(ambient)` then always cancelled to empty — no top-level binding was
-ever actually generalized, silently. Fixed by popping a group's own
-`header_ty`s immediately after solving `header_con`, *before* generalizing
-them. Both bugs were caught by the same test — `identity x = x;
-useIdentity = (identity 1, identity True)` — which is exactly why that
-test is worth having: it's the simplest program that only type-checks
-correctly if let-polymorphism (both the generation-time scoping and the
-solve-time generalization) actually works, not just looks like it does.
+**The companion bug to TM4's #1**: `ambient` originally still contained
+the *very member being generalized*. Fixed by popping a group's own
+`header_ty`s immediately after solving `header_con`, before generalizing
+them.
 
 ## TM6 — `interface::{table, instance}`, `annotation::{table, sensitivity}`
 
 **`interface::table`**: the closed interface set (`Eq`, `Ord`, `Show`,
-`Semigroup`, `Monoid`, `Num`, `Fractional`, `Integral`) and their
-superclasses (`Ord`→`Eq`, `Monoid`→`Semigroup`, `Integral`→`{Num, Ord}`,
-`Fractional`→`Num`) — a small hardcoded table, since the set can never grow.
+`Semigroup`, `Monoid`, `Num`, `Fractional`, `Integral`, plus `Collection`/
+`Context` since Fix #2) and their superclasses — a small hardcoded table,
+since the set can never grow. Also holds each interface's own method
+*shapes* (`METHODS`/`CTOR_METHODS`, Fix #5/#6) for checking instance
+method bodies.
 
 **`interface::instance`**: `InstanceTable`, built from a module's own
 `instance` declarations, checking **coherence** (at most one instance per
-`(interface, head type)` pair) and **superclass existence** (`instance Ord
-Shape` needs `Eq Shape` to already exist). `check_pending` resolves
-`solve::solve`'s leftover `PendingInstance`s against it.
-
-Two things explicitly *not* handled, both documented rather than silently
-wrong: only `Structure::App`-headed obligations are checked at all (a
-`Tuple`/`Record`-headed one is neither confirmed nor rejected — extending
-`Eq`/`Ord`/`Show` to structural types needs a different, shape-based
-lookup); and a *parametric* instance's own constraints (`instance Eq a =>
-Eq (List a)`'s own `Eq a` requirement) aren't checked recursively — that's
-real dictionary-construction work, correctly left to TM7.
+head) and **superclass existence**. `check_instance` (Fix #4) is the real,
+*recursive* answer to "does `ty` have `interface`" — a parametric
+instance's own `requires` (`instance Eq a => Eq (List a)`'s `Eq a`) is
+checked against each corresponding argument, including through a rigid
+variable buried inside an otherwise-concrete type (Fix #14) and through a
+`Collection`/`Context`-style partially-applied `Ctor` (this session).
+`Tuple`/`Unit` (and any `Record` with no matching custom instance) get
+hardcoded structural `Eq`/`Ord`/`Show` rules. **A closed `Record` can now
+declare a real, custom instance for *any* interface** (this session) —
+`InstanceTable` keeps a second key space, `record_entries`, keyed by
+`RecordKey` (a closed record's own sorted field-name set) rather than
+`Ref`, since `type alias` expansion has already erased any nominal name by
+the time this table is built. `check_instance` tries a matching record
+instance first, falling back to the structural derivation only when none
+exists — letting a custom `Eq`/`Ord`/`Show` correctly *override* the
+automatic one, and giving records access to interfaces (`Num`,
+`Semigroup`, anything user-defined) that have no structural fallback at
+all. Two residual gaps in this new machinery, both documented rather than
+silently wrong — see "Known gaps": it keys on field *names* only, not
+field *types*; and a record instance's own declared context (`instance Eq
+a => Eq { value : a }`) is accepted but its `a` obligation is never
+actually re-checked against a real call site's argument type.
 
 **`annotation::table`**: derives an annotation key's expected type — fixed
 shapes for `nodeId`/`position`/`label`/`doc`/`color`/`group`/`collapsed`,
-and the real derivation rule for `unravel`: `Sensitivity Out -> UnravelInput
-A -> UnravelInput B -> ... -> Option (A, B, C)`, collapsing to a bare
-`Option A` for one parameter. `annotation::sensitivity::sensitivity_of` is
-the single seam this calls through for `Sensitivity`'s own (currently
-opaque) expansion — upgrading it later to the real record/tuple-recursive
-behavior touches only that one function. Nothing yet checks a real
-annotation value against the derived type (that's still `constrain::expr`'s
-`Annotated` gap).
+and the real derivation rule for `unravel`. **Still true**: nothing yet
+checks a real annotation *value* against the derived type — see "Known
+gaps".
 
-## TM7 — `ast.rs`/`elaborate.rs`: Elaborated AST, scoped down honestly
+## TM7 — `ast.rs`/`elaborate.rs`: Elaborated AST — **now a complete tree walk (Fix #3)**
 
-The plan's own framing calls this "the crate's actual deliverable" — a
-full `CExpr` → `TExpr` tree walk producing a fully-typed AST with explicit
-dictionaries at every constrained call site.
+The plan's own framing calls this "the crate's actual deliverable." This
+was the biggest gap in the original version of this document — it no
+longer is.
 
-**What's real here**: `ast.rs` defines the target shape (`Dictionary`,
-`ElaboratedRef`). `elaborate::resolve_dictionary`/`resolve_pending` fully
-implement and test the part that's tractable in isolation — given a
-concrete `HasInstance` obligation and a solved substitution + instance
-table, determine exactly which instance answers it.
+**Stage A, complete**: `constrain::expr`/`pattern` (TM3) now return a
+`Typed<TExpr>`/`Typed<TPattern>` per node directly, not a bare `TypeVarId`
+— there is a real `CExpr -> TExpr` tree for every binding
+(`LetMember.elaborated_body`).
 
-**What's deliberately not attempted**: a complete tree walk. `constrain::
-expr`/`pattern` only ever return a bare `TypeVarId` per node — the
-`Constraint` list they build is a flat `Vec`, not shaped like the original
-`CExpr` tree, so there's no way to recover *which* `TypeVarId` belonged to
-*which* node after the fact. Doing this for real needs those functions
-retrofitted to return `(TypeVarId, TExpr)` pairs instead. That's
-concrete, well-understood follow-up work — not attempted here as a
-shortcut, because a version that merely *looked* like full elaboration but
-silently correlated the wrong node to the wrong type would be worse than
-not having one.
+**Stage B, real but intentionally scoped down, and *not* wired into
+`check_module`**: `elaborate::elaborate_module` walks every top-level
+binding's elaborated body and resolves each obligation it carries via
+`resolve_dictionary`, producing `ObligationResolution::{Concrete,
+Structural, StillAbstract}` — telling apart "resolved to a real
+`Dictionary`," "structurally derived, no `Dictionary` representation
+exists for it," and "still generic, correctly deferred to the binding's
+own callers" (the last one matters: without it, `useEq x y = x == y`'s own
+never-instantiated `Eq` obligation would be misreported as `NoInstance`).
+`check_module` deliberately never calls this — doing so today would
+double-count `NoInstance` errors for ordinary bindings while *also*
+missing every obligation from inside an instance method's own body
+(`elaborate_module` only walks `LetMember`s; instance methods have no
+`LetMember`-shaped home — never generalized, never scheme-installed,
+dispatched by `(interface, head)` instead of by name). `check_pending`
+alone remains the complete, correct source of truth for "does every
+obligation in this module resolve" — instance-method obligations *are*
+caught (as existence errors), just never elaborated into a resolved
+dictionary.
+
+**Still out of scope entirely**: actually compiling a polymorphic binding
+to *take* an extra dictionary parameter and threading a caller's own
+dictionary down through it (the full Wadler & Blott transform) — there is
+no codegen anywhere in this project yet for that to plug into.
 
 ## TM8 — `prelude.rs`: built-in instances and schemes
 
-Seeds a real `SchemeEnv`/`InstanceTable`: `Num Int`/`Num Float`, `Integral
-Int`, `Fractional Float`; `Eq`/`Ord`/`Show` for `Int`/`Float`/`String`/
-`Bool`/`Unit` and for `List`/`Option`/`Result` heads; schemes for
-`compare`, `show`, `negate`/`abs`/`signum`, `recip`, `div`/`mod`,
-`fromIntegral`, `empty`, `not`, and every built-in constructor.
+Seeds a real `SchemeEnv`/`InstanceTable`. **The biggest gap in the
+original version of this document is now closed**: `map`, `foldl`,
+`foldr`, `filter`, `length`, `pure`, `bind` (spec §6.3/§6.4) *are* seeded,
+with real, polymorphic-over-a-type-constructor signatures (Fix #2) —
+`ty::Structure::Ctor`/`VarApp` and `Substitution::fresh_ctor_unbound` give
+a constructor variable the same `Unbound`/`Bound` machinery any other type
+variable already has, constrained by two new interfaces, `Collection`
+(`List`, `Map`) and `Context` (`Maybe`, `Result`, `IO`, `List`), rather
+than full kind polymorphism (deliberately — see `ty::Structure::VarApp`'s
+own doc comment on why this stays a closed, seven-built-in-type mechanism,
+not something a user's own Knot source can extend to a new higher-kinded
+type... with one caveat: a user's own type constructor *can* get a
+`Collection`/`Context` **instance** declared for it, e.g.
+`corpus/programs/contexts/either-like-custom-result-context.knot`'s own
+`Outcome e a`; what stays closed is the *interface set* itself, not which
+constructors can join `Collection`/`Context`).
 
-**A genuine structural gap, not an oversight**: `map`, `foldl`, `foldr`,
-`filter`, `length`, `pure`, `bind` are *not* seeded. Their signatures
-(`map :: (a -> b) -> f a -> f b`) are polymorphic over `f` itself — a type
-*constructor*, not an ordinary type — and `Structure::App(Ref, Vec
-<TypeVarId>)` has no way to represent "some type constructor, not yet
-known" as a variable, only a concrete `Ref` head. Giving these a correct
-signature needs a real design decision (a new `Structure` variant for a
-higher-kinded variable, plus updating everywhere that pattern-matches
-`Structure`) — out of scope to invent as a side effect of seeding the
-prelude, so it's flagged instead of worked around with an incorrect
-concrete-`f` stand-in.
+**`Map`'s own qualified key-value API is real too** (this session, closing
+a documented gap): `Map.empty`/`get`/`insert`/`remove`/`member`/`size`/
+`isEmpty`/`keys`/`values`/`toList`/`fromList`, seeded as concrete,
+ordinarily-constrained-polymorphic schemes (`Eq k =>` wherever a key
+comparison is needed) under `Ref::Imported(["Map"], _)`.
 
-One test worth calling out: `f n = 1.0 + fromIntegral n` correctly
-generalizes `f` to `Integral a => a -> Float`, *not* `Int -> Float` — `n`'s
-type stays a free, `Integral`-constrained variable because this design has
-no Haskell-style numeric-literal defaulting (a much earlier decision this
-session). `Int` just happens to be the only seeded `Integral` instance;
-the type system itself doesn't know that, by design — interfaces stay open.
+**Numeric-literal polymorphism is real now too** (this session, reversing
+this document's own former praise of "no Haskell-style defaulting" as a
+design win): an int literal is `Num a => a`, unifying with `Int`,
+`Float`, or any user's own `Num` instance depending on context, and
+defaulting to `Int` (in exactly the two places nothing else can pin it
+down — see TM5, and the "Since this summary was written" section) when
+nothing does. `f n = 1.0 + fromIntegral n` still correctly generalizes `n`
+to a free, `Integral`-constrained variable (`fromIntegral`'s own
+signature, unrelated to literal defaulting, is untouched) — that part of
+the original test's own reasoning still holds.
 
 ## TM9 — `exhaustiveness.rs`: pattern-match usefulness checking (stretch)
 
-Explicitly lower priority in the plan (spec only ever wants a warning
-here), but implemented for real: Maranget's usefulness-checking algorithm,
-the same one Elm's `Nitpick.PatternMatches` uses. A `CtorTable` tracks each
-constructor's sibling set (built-in enums seeded, user `type` declarations
-added per-module); `is_useful` recursively specializes a pattern matrix by
-constructor, falling back to a "default matrix" (rows headed by a
-wildcard, that column dropped) when the constructors seen don't exhaust
-the type — or when they can't in principle (`Int`/`String` literals have
-no enumerable complete set, matching Elm). `is_exhaustive` and
-`redundant_arms` are both just different questions asked of the same
-`is_useful` core.
+Implemented for real: Maranget's usefulness-checking algorithm. A
+`CtorTable` tracks each constructor's sibling set; `is_useful` recursively
+specializes a pattern matrix by constructor, falling back to a "default
+matrix" when the constructors seen don't exhaust the type (or can't in
+principle — `Int`/`String` literals have no enumerable complete set).
+`is_exhaustive` and `redundant_arms` are both just different questions
+asked of the same `is_useful` core.
 
-List's `Cons`/`Nil` patterns are handled as their own two-constructor
-pseudo-type directly (they're a distinct `CPattern` shape, not
-`CPattern::Ctor`, so they don't go through `CtorTable` at all); tuples and
-`Unit` are single-shape types, always trivially "complete."
+**Still true, and worth stating plainly rather than leaving implicit**:
+`check_module` never calls this. A `case` missing an entire constructor
+arm (`Circle`/`Square` handled, `Triangle` silently missing) type-checks
+today with zero diagnostics of any kind — not even a warning, even though
+the exact machinery to catch it exists, is fully tested, and needs no
+further design work to wire in. See "Known gaps."
 
-Reports a boolean exhaustive/not and which arm indices are redundant, not
-a constructed counter-example (`"missing: Circle _"`) — witness synthesis
-is a further, well-understood extension of the same algorithm, left out to
-keep this stretch milestone bounded. Entirely self-contained: nothing else
-in the pipeline calls into it, since a warning-only pass doesn't need to be
-wired into anything.
+---
+
+## Since this summary was written: everything from Fix #1 through this session
+
+The original TM0–TM9 pass left a five-item gaps plan
+(`knot-checker-gaps-plan.md`), which is now fully closed (Fix #1–#6), plus
+a steady stream of further fixes found by grounding decisions in live
+tests and, starting 2026-08-02, an entire new corpus tier
+(`corpus/programs/`) of realistic whole programs written the way an
+actual user would, rather than checked feature-by-feature. **`lib.rs`'s
+own doc comment is the complete, dated blow-by-blow** — this is a
+condensed pointer, not a replacement:
+
+- **Fix #1**: real let-polymorphism for `let`-bound names (TM4/TM5 above).
+- **Fix #2**: real `Collection`/`Context` higher-kinded signatures, and
+  real `Do`-notation as a consequence (TM3/TM8 above).
+- **Fix #3**: the complete `CExpr -> TExpr` elaboration tree walk (TM7
+  above), plus `ObligationResolution::StillAbstract` for a genuinely
+  still-polymorphic obligation.
+- **Fix #4**: `check_instance`'s real recursive parametric-instance check,
+  plus hardcoded structural `Eq`/`Ord`/`Show` for `Tuple`/`Record`/`Unit`
+  (TM6 above).
+- **Fix #5/#6**: instance method bodies (ordinary interfaces, then
+  `Collection`/`Context`) are real, type-checked function bodies (TM4
+  above).
+- **Two post-gaps-plan finds**: user-defined ADT constructors had no
+  schemes at all (`seed_user_constructors`); `type alias` never expanded
+  (fixed in `knot-canonical`).
+- **Fix #7** (`knot-canonical`): an extensible-record alias applied to a
+  concrete argument in its own row-extension position never actually
+  substituted anything in.
+- **Fix #8**: superclass coherence checking depended on declaration order
+  within one module; now two passes.
+- **Fix #9**: a non-`Eq`/`Ord`/`Show` instance targeting a `Tuple`/
+  `Record`/`Unit`/bare-variable/`Fn` shape used to vanish with no
+  diagnostic; now `InstanceTargetNotNominal`. (This session narrowed the
+  scope of what this actually blocks — see below.)
+- **Fix #10**: added `check::check_module` itself.
+- **Fix #11**: `Semigroup`/`Monoid` had zero builtin instances anywhere
+  (`<>`/`empty` failed on every builtin type, `String` included).
+- **Fix #12**: `given` facts weren't closed over superclasses (`Ord a =>`
+  didn't imply `given Eq a`).
+- **A `knot-syntax` parser bug**: unary negation wasn't recognized at the
+  very start of a parenthesized/bracketed (sub)expression (`(-40.0)`,
+  `[-5, -6]`, `f (-5)` all hard-failed).
+- **Fix #13**: a signed binding's header-vs-inferred-type `Equal`
+  constraint solved *after* its own body, not before, misfiring
+  `AmbiguousConstraint` on a nested `let` inside an ordinary function.
+- **Fix #14**: `check_instance`'s recursive per-argument check had no way
+  to resolve a bare rigid variable, breaking parametric instances whose
+  own `requires` needed a `given`-only type (`instance Ord a => Semigroup
+  (Max a)`) and self-referential ones (`instance Show a => Show (Tree a)`).
+- **Elm-style bare operator sections**: `(+)`, `(::)`, `(<>)`, ... as
+  first-class values (`\x y -> x op y`) — there was previously no
+  expression-level grammar for this at all, only for naming an interface
+  method inside `instance`/`interface ... where`. Deliberately no
+  Haskell-style partial sections (`(+ 1)`/`(1 +)`).
+- **`let`-bound local functions can take parameters**: `let go acc rest =
+  ... in ...` was a hard parse error; only the `\acc rest -> ...`-lambda
+  workaround used to work.
+- **Custom instances on closed records** (TM6 above) — this **narrows**
+  Fix #9's own original scope: a record target is no longer unconditionally
+  `InstanceTargetNotNominal`, only an *open* (row-polymorphic) one still is.
+- **Numeric-literal polymorphism** (TM3/TM5/TM8 above) — this **reverses**
+  this document's own former framing of "no defaulting" as a settled
+  design decision.
+- **The 2-parameter `Collection`/`Context` fix** (TM1/TM2 above) — `Map`/
+  `Result` were unconditionally unable to unify as a `Collection`/`Context`
+  target at all before this; do-notation over `Result`, and `map`/
+  `filter`/`foldl` over `Map`'s own values, simply didn't work.
+- **`Map`'s own key-value API** (TM8 above).
+- **Instance methods' own header-vs-body solve order**: the exact same bug
+  as Fix #13, independently present in `constrain_method_body_against`
+  (instance methods' own separate code path from ordinary bindings),
+  found the same way (a real fixture, not inspection).
+
+All fixes in this section were found the same way: writing (or reading)
+real code and watching it fail for the wrong reason, not by auditing the
+implementation for suspicious-looking gaps. `corpus/programs/README.md`
+has the full round-by-round account, including several findings that
+turned out to be this session's own authoring mistakes rather than real
+bugs — also worth reading as a record of what *didn't* need fixing.
 
 ---
 
 ## Known gaps, all documented in place, none silently papered over
 
-- **`Sensitivity` is an opaque stub** (spec §9.6's recursive record/tuple
-  expansion isn't built) — single seam: `annotation::sensitivity::
-  sensitivity_of`.
-- **`let`-bound names don't get let-polymorphism** — a documented,
-  sound simplification forced by `Ref::Local` covering both `let` and
-  truly-monomorphic bindings with no way to tell them apart.
-- **Higher-kinded polymorphism doesn't exist** — blocks `map`/`foldl`/
-  `foldr`/`filter`/`length`/`pure`/`bind` from having any signature at all
-  (TM8), and blocks `Do`-notation (TM3).
-- **No full elaboration tree walk** — `ast.rs`/`elaborate.rs` give the
-  target shape and a working dictionary-resolution primitive, not a
-  complete `CExpr -> TExpr` pass (TM7).
-- **Structural (`Tuple`/`Record`) and parametric instance checking** aren't
-  implemented — `interface::instance` only confirms a concrete, named
-  type's own head has an instance (TM6).
-- **Annotation *values* are never type-checked** — `annotation::table`
-  derives the expected type; nothing calls it from `constrain::expr` yet.
+Verified against the current code (not just old doc comments) while
+writing this revision — see `corpus/programs/known_gaps/` for a runnable
+fixture demonstrating each of the ones a `.knot` program can actually
+exercise.
+
+- **`exhaustiveness.rs` is never wired into `check_module`.** A `case`
+  missing an entire constructor arm produces zero diagnostics — not an
+  error, not even a warning — despite the checker having a complete,
+  tested Maranget's-algorithm implementation sitting right there,
+  needing no further design work to invoke. Arguably the single highest-
+  value remaining gap: this is core, everyday type-checker functionality
+  in any ML-family language, not an edge case.
+- **A record instance's own declared context is accepted but never
+  enforced at use sites — a real, demonstrated unsoundness, not just an
+  incompleteness.** `instance Eq a => Eq { value : a } where ...` type-
+  checks and is accepted into the table, but `interface::instance::
+  instance_requires` only ever populates `requires` for a `CType::Named`
+  target — a `CType::Record` target's own declared constraints are
+  silently dropped. The result: `check_instance` confirms `Eq { value :
+  SomeTypeWithNoEqInstance }` holds (the *shape* has an instance) without
+  ever verifying `SomeTypeWithNoEqInstance` itself has `Eq` — a value
+  whose field type provably can't be compared type-checks as comparable
+  anyway.
+- **The new record-instance table keys on field *names* only, not field
+  *types*** (documented at the time, in `InstanceTable`'s own doc
+  comment) — two unrelated record aliases that happen to share an
+  identical field-name set, both wanting the same interface in the same
+  module, are rejected as a `DuplicateInstance` even though they're
+  genuinely different shapes.
+- **A custom instance still can't target a `Tuple` (or bare `Var`/`Fn`)
+  shape, only a closed `Record`** — `instance Semigroup (Int, Int) where
+  ...` still reports `InstanceTargetNotNominal`, even though the
+  equivalent record case now works. `Tuple` still gets automatic
+  structural `Eq`/`Ord`/`Show`, same as before; it just can't be
+  *overridden* or given any other interface the way a record now can.
+- **Annotation *values* are never type-checked against their own derived
+  expected type**, and relatedly, **`Sensitivity` stays an opaque,
+  non-introspecting stub** (spec §9.6) — `annotation::table` can derive
+  what type `@unravel`'s own value *should* have from the annotated
+  binding's signature, but nothing calls that from `constrain::expr`'s
+  `Annotated` handling to check a real value against it, so `@unravel(42)`
+  on a binding whose derived `unravel` type is a multi-argument function
+  is silently accepted. Fixing the first half doesn't by itself fix the
+  second: `Sensitivity`'s own eventual recursive record/tuple expansion
+  (`annotation::sensitivity::sensitivity_of`) is a separate, still-stubbed
+  piece needed before an annotation value *involving* a real
+  `Sensitivity`-shaped argument could be checked meaningfully.
+- **No real cross-module resolution.** A qualified reference (`Map.get`,
+  `List.map`, or anything else spelled `Module.name`) is trusted at face
+  value — there's no project-wide module loader to confirm the named
+  module really exports that name, or even really exists. In snippet mode
+  (`canonicalize_decls`, what `corpus/programs`/`corpus/semantic` both run
+  fixtures through) this is unconditional; in real module mode
+  (`canonicalize_module`) a qualifier is at least checked against the
+  current module's own `import` list, but nothing verifies what that
+  import's target module *actually contains*.
+- **Re-declaring an instance a *builtin* type already has isn't flagged
+  as a duplicate** — `build_instance_table`'s own coherence pass only ever
+  sees a module's own declared instances; the builtin table is merged in
+  only afterward, at which point `merge_from` just keeps the user's own
+  entry silently, no error, no warning.
+- **Full dictionary-passing codegen doesn't exist** (TM7 above) — not a
+  regression, since there is no codegen anywhere in this project yet for
+  it to plug into, but worth naming precisely: `elaborate::
+  elaborate_module` answers *which* instance resolves an obligation, not
+  *how* to compile a polymorphic function to actually receive one at
+  runtime.
+- **Elaboration (TM7 Stage B) isn't wired into `check_module`, and never
+  covers instance method bodies even when run directly** — `check_pending`
+  alone is the correct, complete source of truth for whether a module
+  type-checks (instance-method obligations *are* checked for existence);
+  `elaborate_module` is a separate, narrower, currently-disconnected
+  question ("what dictionary would this resolve to") that only ever
+  walks ordinary top-level `LetMember`s.

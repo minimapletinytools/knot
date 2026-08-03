@@ -1,0 +1,12 @@
+-- KNOWN GAP, not a discovery: check::check_module's own doc comment
+-- already names this narrow gap (inherited from Fix #10, never
+-- introduced by it): build_instance_table's coherence pass only sees a
+-- module's own declared instances -- prelude::seed's builtin table is
+-- only merged in afterward (InstanceTable::merge_from, which silently
+-- keeps whichever side is `self`, no diagnostic either way). Re-declaring
+-- Eq on a type that already has a builtin Eq instance -- Int, here --
+-- neither reports DuplicateInstance nor is rejected any other way. See
+-- checker_impl_summary.md's own "Known gaps" section. Expected once
+-- fixed: a DuplicateInstance error at this declaration's own span.
+instance Eq Int where
+  (==) a b = False

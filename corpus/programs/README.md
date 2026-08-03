@@ -34,6 +34,36 @@ natural way to lock in the fix as a permanent regression test — this tier
 is where things are *discovered*, `corpus/semantic/` is where they're
 *pinned down*.
 
+## `known_gaps/` — a deliberate exception to "outcome-agnostic"
+
+Every fixture in this one subdirectory *does* have a known, declared
+expected outcome, unlike the rest of this tier — each one exists
+specifically to pin down one already-understood, already-documented gap
+from `knot-checker/checker_impl_summary.md`'s own "Known gaps" section,
+not to discover something new. Every file starts with a `-- KNOWN GAP, not
+a discovery:` comment explaining exactly which gap, why the current
+behavior is what it is, and what the *correct* outcome would look like
+once that gap is eventually closed. When `cargo run --example
+corpus_report` reports one of these as a failure, that's expected and
+correct (the checker rejecting something `checker_impl_summary.md` says
+should currently still be rejected); when it reports one as `OK`, that
+does *not* mean the fixture is fine — several of these are deliberately
+*silently-wrong-acceptance* gaps (most notably `record-instance-generic-
+constraint-not-enforced.knot`, a real, demonstrated unsoundness, not just
+an incompleteness), so `OK` there means "confirmed still silently
+accepting something it shouldn't," not "passing." If a fixture in this
+directory ever *changes* which of these it reports, that's a signal the
+underlying gap moved (fixed, or newly broken worse) — update
+`checker_impl_summary.md`'s own "Known gaps" section and this fixture's
+own comment together, in the same change, rather than letting them drift
+apart. As of this writing: 6 fixtures, covering exhaustiveness checking
+never being wired into `check_module`, custom instances still not being
+able to target a `Tuple`, a record instance's own declared context never
+being enforced against a real argument type, the new record-instance
+table's field-name-only (not field-type-aware) keying, re-declaring an
+instance a builtin type already has not being flagged, and annotation
+values never being type-checked against their own derived expected type.
+
 ## Findings log
 
 Kept here so the iteration history doesn't get lost across rounds. See

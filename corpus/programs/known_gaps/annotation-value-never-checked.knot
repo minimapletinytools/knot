@@ -1,0 +1,19 @@
+-- KNOWN GAP, not a discovery: annotation::table can derive the type an
+-- annotation *value* would need to have (derive_unravel_type for
+-- `unravel` specifically, from the annotated binding's own signature --
+-- here, `Sensitivity Int -> UnravelInput Int -> UnravelInput Int -> Maybe
+-- (Int, Int)`, a 3-argument function), but nothing in constrain::expr's
+-- own Annotated handling ever calls that derivation to check a *real*
+-- value against it. `42` -- a bare Int, not remotely function-shaped --
+-- is accepted as `scaleAndAdd`'s own `@unravel` value with zero errors.
+-- Relatedly, even once value-checking exists, `Sensitivity` itself stays
+-- an opaque, non-introspecting stub (spec section 9.6's own eventual
+-- recursive record/tuple expansion isn't built) -- so an annotation value
+-- that genuinely needs to be checked *through* a Sensitivity-shaped
+-- argument wouldn't be checkable in any deep sense even then. See
+-- checker_impl_summary.md's own "Known gaps" section. Expected once
+-- value-checking is fixed: a real type error here, since `42` cannot
+-- possibly have the derived 3-argument function type.
+@unravel(42)
+scaleAndAdd :: Int -> Int -> Int
+scaleAndAdd a b = a + b
