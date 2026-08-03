@@ -634,6 +634,17 @@ impl<'a> ParseState<'a> {
     /// signature) wraps the *value* in `Expr::Annotated` instead — the same
     /// representation prefix inline annotations already use, rather than
     /// inventing a second one.
+    ///
+    /// A bare `Var` pattern may be followed by a parameter list (`let go
+    /// acc rest = ... in ...`), exactly like a top-level `FnDef` -- reusing
+    /// the identical loop (`pattern_atom` collected until `=` or the
+    /// enclosing layout block ends) and desugaring the same way top-level
+    /// bindings already do: fold the params into a `Lambda` wrapping the
+    /// body, rather than inventing a second representation for "a let
+    /// binding with parameters." Any other pattern (tuple/cons/literal/etc.
+    /// destructuring) can't take params at all -- there's no "call" a
+    /// `(a, b)` makes sense as the head of -- so the loop is skipped
+    /// entirely for those, same as before this fix.
     fn let_binding(
         &mut self,
     ) -> Result<(Spanned<crate::ast::pattern::Pattern>, Spanned<Expr>), ParseError> {
@@ -647,9 +658,36 @@ impl<'a> ParseState<'a> {
         self.skip_trivia()?;
         let pat = self.pattern()?;
         self.skip_trivia()?;
+
+        let mut params = Vec::new();
+        if matches!(pat.node, Pattern::Var(_)) {
+            loop {
+                let checkpoint = self.clone();
+                self.skip_trivia()?;
+                if self.peek() == Some(b'=') || !self.continues_layout() {
+                    *self = checkpoint;
+                    break;
+                }
+                match self.pattern_atom() {
+                    Ok(p) => params.push(p),
+                    Err(err) if err.fatal => return Err(err),
+                    Err(_) => {
+                        *self = checkpoint;
+                        break;
+                    }
+                }
+            }
+        }
+
         self.expect_byte(b'=')?;
         self.skip_trivia()?;
-        let value = self.expr()?;
+        let raw_value = self.expr()?;
+        let value = if params.is_empty() {
+            raw_value
+        } else {
+            let span = Span::new(pat.span.start, raw_value.span.end);
+            Spanned::new(span, Expr::Lambda(params, Box::new(raw_value)))
+        };
         let value = if annotations.is_empty() {
             value
         } else {
@@ -1159,6 +1197,58 @@ mod tests {
         assert_eq!(bindings[0].0.node, Pattern::Var("radius".to_string()));
         assert_eq!(bindings[1].0.node, Pattern::Var("pi".to_string()));
         assert!(matches!(body.node, Expr::BinOp(BinOp::Mul, _, _)));
+    }
+
+    #[test]
+    fn let_bound_local_function_takes_parameters() {
+        // "let go acc rest = ... in ..." -- previously a hard "expected `=`"
+        // parse error (found via corpus/programs/data_structures/
+        // linked-list-reverse.knot); desugars to the same shape the
+        // existing `let go = \acc rest -> ...` workaround already produced.
+        let src = "let\n  addPair acc x = acc + x\nin addPair 1 2";
+        let Expr::Let(bindings, body) = ex(src) else {
+            panic!("expected Let")
+        };
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(bindings[0].0.node, Pattern::Var("addPair".to_string()));
+        let Expr::Lambda(params, lambda_body) = &bindings[0].1.node else {
+            panic!(
+                "expected the params folded into a Lambda, got {:?}",
+                bindings[0].1.node
+            )
+        };
+        assert_eq!(params.len(), 2);
+        assert!(matches!(params[0].node, Pattern::Var(ref n) if n == "acc"));
+        assert!(matches!(params[1].node, Pattern::Var(ref n) if n == "x"));
+        assert!(matches!(lambda_body.node, Expr::BinOp(BinOp::Add, _, _)));
+        assert!(matches!(body.node, Expr::App(_, _)));
+    }
+
+    #[test]
+    fn let_bound_recursive_local_function_with_parameters() {
+        // The exact motivating idiom: a local recursive helper accumulating
+        // into a parameter, called from within its own body.
+        let src = "let\n  go acc xs = case xs of\n    [] -> acc\n    h : t -> go (h : acc) t\nin go [] [1, 2, 3]";
+        let Expr::Let(bindings, _) = ex(src) else {
+            panic!("expected Let")
+        };
+        assert_eq!(bindings[0].0.node, Pattern::Var("go".to_string()));
+        let Expr::Lambda(params, lambda_body) = &bindings[0].1.node else {
+            panic!("expected Lambda")
+        };
+        assert_eq!(params.len(), 2);
+        assert!(matches!(lambda_body.node, Expr::Case(_, _)));
+    }
+
+    #[test]
+    fn let_bound_destructuring_pattern_still_rejects_params() {
+        // A non-`Var` pattern (tuple destructuring here) never enters the
+        // params loop at all -- "let (a, b) c = ..." has no sensible
+        // meaning, so this must still fail exactly as before this fix
+        // (a plain "expected `=`" from `expect_byte`, not a parse of `c`
+        // as a bogus parameter).
+        let mut s = ParseState::new("let\n  (a, b) c = a\nin a");
+        assert!(s.expr().is_err());
     }
 
     #[test]

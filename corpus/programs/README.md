@@ -102,15 +102,22 @@ other changes needed, confirming both fixes landed exactly where expected.
    `NoInstance("Num")` once the instance itself never made it into the
    table. Same root cause, wider blast radius than "Eq/Ord/Show on
    records" alone suggested.
-6. **`let`-bound local functions can't take parameters** — `let go acc
-   rest = ... in ...` is a hard parse error (`expected \`=\``);
-   `let_binding` in `knot-syntax` only ever parses a bare pattern then `=`,
+6. **Fixed. `let`-bound local functions couldn't take parameters** —
+   `let go acc rest = ... in ...` was a hard parse error (`expected \`=\``);
+   `let_binding` in `knot-syntax` only ever parsed a bare pattern then `=`,
    with no parameter-list sugar at all. Only `let go = \acc rest -> ...`
-   works. Both Elm and Haskell support the parameterized form for local
+   worked. Both Elm and Haskell support the parameterized form for local
    recursive helpers, which is exactly the idiom
-   `data_structures/linked-list-reverse.knot` reaches for naturally.
-   Left the fixture exactly as a real author would write it (not rewritten
-   to dodge the gap) — it's a genuine parse failure, not a typo.
+   `data_structures/linked-list-reverse.knot` reaches for naturally, and
+   which now passes. Fixed by reusing the exact same params-loop a
+   top-level `FnDef` already has (`pattern_atom`s collected until `=` or
+   the enclosing layout block ends) directly inside `let_binding`, folding
+   any collected params into a `Lambda` wrapping the body -- the same
+   desugared shape the `\acc rest -> ...` workaround already produced, so
+   nothing downstream of the parser needed to change. Only a bare `Var`
+   pattern can take params at all (`let (a, b) c = ...` still correctly
+   rejects `c` rather than parsing it as a bogus parameter) -- there's no
+   "call" a destructuring pattern makes sense as the head of.
 7. **`Map`'s own key-value API (`get`/`insert`/`empty`/...) doesn't exist**
    — `collections/build-map.knot`, `collections/word-count-attempt.knot`.
    Already a documented, known-open design question
@@ -234,5 +241,6 @@ root cause, **not yet fixed**:
     `(div n 2)` as a failed section attempt during testing, caught before
     landing.
 
-After this fix, 71 of 80 pass; the remaining 9 are exactly finding #5 (now
-broadened) and the still-open Round 1 findings (#3, #6, #7).
+After that fix, 71 of 80 pass. After also fixing finding #6 (see its own
+updated text above), 72 of 80 pass; the remaining 8 are exactly finding #5
+(now broadened) and the still-open Round 1 findings (#3, #7).
