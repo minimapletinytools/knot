@@ -589,7 +589,13 @@ mod tests {
         match sub.resolve_structure(ty)? {
             Structure::App(r, args) => Some((r, args)),
             Structure::VarApp(f, args) => match sub.resolve_structure(f)? {
-                Structure::Ctor(r) => Some((r, args)),
+                // The Ctor's own leading (already-applied) arguments come
+                // first, then the VarApp's own trailing one(s) -- see
+                // `ty::Structure::Ctor`'s own doc comment.
+                Structure::Ctor(r, mut leading) => {
+                    leading.extend(args);
+                    Some((r, leading))
+                }
                 _ => None,
             },
             _ => None,
@@ -779,6 +785,57 @@ mod tests {
                 );
             }
             other => panic!("expected Maybe Int, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn do_notation_over_a_2_parameter_result_type_checks_and_infers_correctly() {
+        // Fix: VarApp only ever built a Ctor with zero leading arguments,
+        // requiring an exact arity match against the concrete App it met --
+        // so a 2-parameter Context like `Result e a` (unlike 1-parameter
+        // `Maybe`/`List`) always failed to unify at all, breaking Result's
+        // own do-notation and any map/bind/pure use entirely. Now the
+        // error type `e` becomes the Ctor's own one leading argument,
+        // leaving only the value type `a` for bind/pure's own VarApp
+        // argument to vary over -- exactly like `Maybe`, just with an
+        // extra fixed parameter carried alongside.
+        let mut sub = Substitution::new();
+        let (mut env, table) = seed(&mut sub);
+        let cs = decls(concat!(
+            "type ParseError = ParseError String\n",
+            "result = do\n",
+            "  x <- Ok 1\n",
+            "  y <- Ok 2\n",
+            "  pure (x + y)\n",
+            "annotated :: Result ParseError Int\n",
+            "annotated = result\n",
+        ));
+        let (tree, _members) = constrain_module(&mut sub, &cs);
+        let (pending, mut errors) = crate::solve::solve(&mut sub, &mut env, &tree);
+        assert!(errors.is_empty(), "{errors:?}");
+        check_pending(
+            &mut sub,
+            &table,
+            &std::collections::HashMap::new(),
+            pending,
+            &mut errors,
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+
+        let scheme = env
+            .get(&SchemeKey::TopLevel("result".to_string()))
+            .unwrap()
+            .clone();
+        match resolved_head(&mut sub, scheme.ty) {
+            Some((r, args)) if r == Ref::Builtin("Result".to_string()) => {
+                assert_eq!(args.len(), 2);
+                let int_ty = app0(&mut sub, "Int");
+                assert_eq!(
+                    sub.resolve_structure(args[1]),
+                    sub.resolve_structure(int_ty)
+                );
+            }
+            other => panic!("expected Result _ Int, got {other:?}"),
         }
     }
 

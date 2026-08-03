@@ -643,7 +643,16 @@ fn copy_structure(
             sub.fresh_bound(Structure::Record(new_fields, new_ext))
         }
         Some(Structure::Unit) => sub.fresh_bound(Structure::Unit),
-        Some(Structure::Ctor(r)) => sub.fresh_bound(Structure::Ctor(r)),
+        // The partially-applied leading arguments (see that variant's own
+        // doc comment) go through `copy_structure` too, same reasoning as
+        // `VarApp`'s own `args` just below.
+        Some(Structure::Ctor(r, args)) => {
+            let new_args = args
+                .iter()
+                .map(|a| copy_structure(sub, *a, mapping))
+                .collect();
+            sub.fresh_bound(Structure::Ctor(r, new_args))
+        }
         // The constructor-variable head goes through `copy_structure` too,
         // exactly like any other child -- if it's one of `scheme.vars`
         // (the common case: `map`'s own `f`), the `mapping` check at the

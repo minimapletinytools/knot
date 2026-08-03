@@ -28,12 +28,19 @@ pub enum Structure {
     Record(BTreeMap<String, TypeVarId>, Option<TypeVarId>),
     Unit,
     /// A *resolved* type constructor, standing for the constructor itself
-    /// (`List`, `Map`, ...) rather than any particular application of it —
-    /// what a constructor-sorted variable (see `VarApp`) gets bound to once
+    /// (`List`, `Map`, ...), *partially applied* to whichever of its own
+    /// leading arguments are already fixed — empty for a 1-parameter
+    /// constructor like `List`/`Maybe` (nothing precedes the one argument a
+    /// `VarApp` itself ever varies over), one element for a 2-parameter one
+    /// like `Map k v`/`Result e a` (`k`/`e`, with only `v`/`a` left for the
+    /// `VarApp` to vary over) — see `unify.rs`'s own `VarApp`-vs-`App` case
+    /// for where this actually gets built, by splitting a concrete `App`'s
+    /// own argument list at `own_len - VarApp's own arg count`. What a
+    /// constructor-sorted variable (see `VarApp`) gets bound to once
     /// unification pins it down. Never appears anywhere a `map`/`foldl`/...
     /// caller's own code can see directly; only ever the target of a
     /// `VarApp` head.
-    Ctor(Ref),
+    Ctor(Ref, Vec<TypeVarId>),
     /// A type application headed by a constructor *variable* rather than a
     /// fixed `Ref` — `f a`, `f b`, ... in `map :: (a -> b) -> f a -> f b`
     /// (spec §6.3/§6.4's `Collection`/`Context` interfaces). The head is an

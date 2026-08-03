@@ -112,7 +112,11 @@ pub(crate) fn structure_children(structure: &Structure) -> Vec<TypeVarId> {
             children
         }
         Structure::Unit => Vec::new(),
-        Structure::Ctor(_) => Vec::new(),
+        // A partially-applied constructor's own leading arguments (see
+        // that variant's own doc comment) are real type variables too --
+        // needed just like `VarApp`'s own `args` below, for the same
+        // reason.
+        Structure::Ctor(_, args) => args.clone(),
         // The constructor-variable head counts as a child too, exactly
         // like an ordinary type argument -- that's what lets both the
         // occurs check and `solve::free_vars` see it (see
@@ -155,7 +159,14 @@ fn unify_structure(
         (Structure::Record(fields1, ext1), Structure::Record(fields2, ext2)) => {
             unify_record(sub, a, b, fields1, ext1, fields2, ext2)
         }
-        (Structure::Ctor(ra), Structure::Ctor(rb)) if ra == rb => Ok(()),
+        (Structure::Ctor(ra, args_a), Structure::Ctor(rb, args_b))
+            if ra == rb && args_a.len() == args_b.len() =>
+        {
+            for (x, y) in args_a.into_iter().zip(args_b) {
+                unify(sub, x, y)?;
+            }
+            Ok(())
+        }
         // Two constructor-variable-headed applications: the heads unify
         // like any other pair of type variables (through the ordinary
         // top-level `unify`, which naturally lands back on the `Ctor`-vs-
@@ -172,16 +183,27 @@ fn unify_structure(
             Ok(())
         }
         // A constructor variable meeting a concrete application: pin the
-        // variable to that head (via the ordinary `unify` -- correctly
-        // erroring if it was already resolved to some *other* head), then
-        // unify arguments pairwise.
+        // variable to that head, *partially applied* to whatever leading
+        // arguments are left over once the `VarApp`'s own trailing ones
+        // are split off the end (`ty::Structure::Ctor`'s own doc comment)
+        // -- for a 1-parameter constructor like `List`/`Maybe` this is
+        // exactly the same "0 leading, all trailing" shape as before this
+        // fix; for a 2-parameter one like `Map k v`/`Result e a`, `k`/`e`
+        // becomes the one leading argument, with `v`/`a` the one the
+        // `VarApp` itself varies over. `args_b.len() < args_a.len()`
+        // (fewer concrete arguments than the `VarApp` needs, e.g. `map f
+        // 5` against `Int`'s own zero arguments) correctly falls through
+        // to the mismatch case below instead -- there's nothing to split.
         (Structure::VarApp(f, args_a), Structure::App(r, args_b))
         | (Structure::App(r, args_b), Structure::VarApp(f, args_a))
-            if args_a.len() == args_b.len() =>
+            if args_b.len() >= args_a.len() =>
         {
-            let ctor = sub.fresh_bound(Structure::Ctor(r));
+            let split = args_b.len() - args_a.len();
+            let leading = args_b[..split].to_vec();
+            let trailing = &args_b[split..];
+            let ctor = sub.fresh_bound(Structure::Ctor(r, leading));
             unify(sub, f, ctor)?;
-            for (x, y) in args_a.into_iter().zip(args_b) {
+            for (x, y) in args_a.into_iter().zip(trailing.iter().copied()) {
                 unify(sub, x, y)?;
             }
             Ok(())
@@ -464,8 +486,42 @@ mod tests {
         assert!(unify(&mut sub, fa, list_int).is_ok());
         assert_eq!(
             sub.resolve_structure(f),
-            Some(Structure::Ctor(Ref::Builtin("List".to_string())))
+            Some(Structure::Ctor(Ref::Builtin("List".to_string()), vec![]))
         );
+        assert_eq!(sub.resolve_structure(a), Some(builtin_app(&mut sub, "Int")));
+    }
+
+    #[test]
+    fn ctor_var_pins_to_a_2_parameter_head_leaving_the_last_argument_free() {
+        // f a ~ Result String Int (a 2-parameter constructor, unlike the
+        // 1-parameter `List` above) should bind f := Result *partially
+        // applied to String* and a := Int -- the exact-arity-match bug
+        // this used to hit unconditionally rejected any concrete head
+        // whose own argument count didn't match the VarApp's single
+        // argument, which every 2-parameter Collection/Context instance
+        // (`Result e a`, `Map k v`) always failed.
+        let mut sub = Substitution::new();
+        let f = sub.fresh_ctor_unbound();
+        let a = sub.fresh_unbound();
+        let fa = sub.fresh_bound(Structure::VarApp(f, vec![a]));
+        let string_ty = app0(&mut sub, "String");
+        let int_ty = app0(&mut sub, "Int");
+        let result_string_int = sub.fresh_bound(Structure::App(
+            Ref::Builtin("Result".to_string()),
+            vec![string_ty, int_ty],
+        ));
+        assert!(unify(&mut sub, fa, result_string_int).is_ok());
+        match sub.resolve_structure(f) {
+            Some(Structure::Ctor(r, leading)) => {
+                assert_eq!(r, Ref::Builtin("Result".to_string()));
+                assert_eq!(leading.len(), 1);
+                assert_eq!(
+                    sub.resolve_structure(leading[0]),
+                    Some(builtin_app(&mut sub, "String"))
+                );
+            }
+            other => panic!("expected a partially-applied Result Ctor, got {other:?}"),
+        }
         assert_eq!(sub.resolve_structure(a), Some(builtin_app(&mut sub, "Int")));
     }
 

@@ -83,15 +83,30 @@ other changes needed, confirming both fixes landed exactly where expected.
    = f 1 2`: the literals' shared variable unifies with `f`'s own `a`, but
    `result`'s own inferred type is just `Bool`, so nothing ever quantifies
    over it) -- which would otherwise silently stay `StillAbstract` forever.
-3. **`Collection`/`Context` are broken for both of their 2-parameter
-   built-ins** — the `VarApp` mechanism only ever constructs a ctor
-   application with exactly one argument and requires exact arity match
-   against the concrete type, so it silently can't handle a constructor
-   that takes two parameters where only the last one varies. Confirmed via
-   real code this round: `do`-notation over `Result` fails in both
-   `errors/parse-pipeline.knot` and `errors/validate-user.knot`.
-   **Not yet fixed** — needs a real design for partially-applied
-   constructors in `VarApp`, not a quick patch.
+3. **Fixed. `Collection`/`Context` were broken for both of their
+   2-parameter built-ins** — the `VarApp` mechanism only ever constructed a
+   `Ctor` with zero leading arguments and required an *exact* arity match
+   against the concrete `App` it met, so it silently couldn't handle a
+   constructor that takes two parameters where only the last one varies.
+   Hit `do`-notation over `Result` in both `errors/parse-pipeline.knot` and
+   `errors/validate-user.knot` — both now pass. **Fix**: `ty::Structure::
+   Ctor(Ref)` became `Ctor(Ref, Vec<TypeVarId>)`, carrying whichever
+   *leading* arguments are already fixed (empty for a 1-parameter
+   constructor like `List`/`Maybe` — the same shape as before this fix;
+   one element, `e`, for `Result e a`/`k` for `Map k v`). `unify.rs`'s own
+   `VarApp`-vs-`App` case now splits the concrete side's own argument list
+   at `own_len - VarApp's own arg count` instead of demanding they already
+   match: the leading remainder becomes the `Ctor`'s own partially-applied
+   arguments, the trailing remainder (always exactly as many as the
+   `VarApp` itself has) unifies pairwise as before. `check_instance`'s own
+   `Ctor` lookup is unaffected (a `Collection`/`Context` instance is
+   registered by name alone, regardless of how many arguments happen to
+   already be applied) — this was purely a unification-arity bug, not an
+   instance-resolution one, and doesn't touch this language's own,
+   separate, still-standing decision to support no *user-defined*
+   higher-kinded signatures at all (`ty::Structure::VarApp`'s own doc
+   comment) — `VarApp` remains something only this crate's own hand-built
+   `Collection`/`Context` prelude schemes ever produce.
 4. **Fixed (Fix #12). `given` facts were never closed over superclass
    relationships** — a signature's own `Ord a =>` only ever inserted
    `"Ord"` into `a`'s `given` set, never the implied `"Eq"`, even though
@@ -285,7 +300,7 @@ root cause, **not yet fixed**:
 
 After that fix, 71 of 80 pass. After also fixing finding #6, 72 of 80
 pass. After also fixing finding #5 (see its own updated text above), 76 of
-80 pass; the remaining 4 are exactly the still-open Round 1 findings (#3,
-#7) -- every fixture written across all three rounds so far now passes
-except the `Map` API gap and the `Collection`/`Context` 2-parameter arity
-mismatch.
+80 pass. After also fixing finding #3 (also see its own updated text
+above), 78 of 80 pass; the remaining 2 are exactly Round 1's own
+still-open finding #7 -- every fixture written across all three rounds so
+far now passes except the `Map` API gap itself.

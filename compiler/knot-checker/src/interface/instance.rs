@@ -412,7 +412,13 @@ pub fn check_instance(
             }),
             None => false,
         },
-        Some(Structure::Ctor(head)) => table.has_instance(interface, &head),
+        // A Collection/Context instance is registered by name alone
+        // (`prelude::seed_instances`), regardless of how many of the
+        // constructor's own arguments are already applied -- the leading
+        // ones (`ty::Structure::Ctor`'s own doc comment) don't change
+        // *which* instance answers, only what `map`/`bind`/... themselves
+        // thread through separately.
+        Some(Structure::Ctor(head, _leading_args)) => table.has_instance(interface, &head),
         // Structural facts, not table lookups -- gated to exactly `Eq`/
         // `Ord`/`Show` (same as `Unit` below), so a dangling `Num (Int,
         // Int)` obligation (nonsensical -- Knot has no tuple arithmetic)
@@ -651,7 +657,7 @@ mod tests {
         let mut sub = Substitution::new();
         let mut table = InstanceTable::new();
         table.insert_builtin("Collection", Ref::Builtin("List".to_string()), vec![]);
-        let ty = sub.fresh_bound(Structure::Ctor(Ref::Builtin("List".to_string())));
+        let ty = sub.fresh_bound(Structure::Ctor(Ref::Builtin("List".to_string()), vec![]));
         let pending = vec![PendingInstance {
             span: knot_syntax::span::Span::new(0, 0),
             interface: "Collection".to_string(),
@@ -666,7 +672,7 @@ mod tests {
     fn check_pending_flags_a_ctor_headed_obligation_with_no_instance() {
         let mut sub = Substitution::new();
         let table = InstanceTable::new();
-        let ty = sub.fresh_bound(Structure::Ctor(Ref::Builtin("IO".to_string())));
+        let ty = sub.fresh_bound(Structure::Ctor(Ref::Builtin("IO".to_string()), vec![]));
         let pending = vec![PendingInstance {
             span: knot_syntax::span::Span::new(0, 0),
             interface: "Collection".to_string(),
