@@ -16,6 +16,7 @@
 //! strictly past it.
 
 use crate::ast::expr::{BinOp, DoStmt, Expr};
+use crate::ast::pattern::Pattern;
 use crate::error::{ErrorKind, ParseError};
 use crate::lex::literal::NumberLiteral;
 use crate::span::{Span, Spanned};
@@ -367,6 +368,9 @@ impl<'a> ParseState<'a> {
                 Expr::Unit,
             ));
         }
+        if let Some(section) = self.try_operator_section(start)? {
+            return Ok(section);
+        }
         let first = self.expr()?;
         self.skip_trivia()?;
         if self.peek() == Some(b',') {
@@ -386,6 +390,90 @@ impl<'a> ParseState<'a> {
             self.expect_byte(b')')?;
             Ok(first)
         }
+    }
+
+    /// A bare operator section (`(+)`, `(::`-shaped `(:)`, `(<>)`, ...): a
+    /// first-class reference to that operator's own function, `\x y -> x op
+    /// y`. Elm-style only -- no Haskell partial sections (`(+ 1)`/`(1 +)`),
+    /// by spec decision. Must be called with the cursor immediately after
+    /// `(` (trivia already skipped, already confirmed not to be `)`, i.e.
+    /// not the unit case) -- returns `Ok(None)` with the cursor untouched if
+    /// what follows isn't a recognized operator token at all, so the caller
+    /// falls through to parsing an ordinary parenthesized expression.
+    ///
+    /// Reuses `peek_binop` (the same table `expr_binop_prec`'s own operator-
+    /// continuation loop consults) rather than a separate operator list, so
+    /// this can never drift out of sync with what's actually a real binary
+    /// operator. A bare `(-)` (nothing between the `-` and the following
+    /// `)`) is unambiguously the subtraction function, matching Haskell's
+    /// own convention -- but `-` immediately followed by anything *else*
+    /// (`(-40.0)`'s own zero-spacing shape) is deliberately *not* treated
+    /// as a failed section attempt here, since `peek_binop`'s own `-` arm
+    /// answers `Subtraction` for that exact spacing regardless of position;
+    /// falling through to `Ok(None)` lets the ordinary `self.expr()` path
+    /// (which already special-cases this shape as negation) take over
+    /// instead, rather than misreporting a perfectly ordinary parenthesized
+    /// negative literal as an unsupported partial section.
+    ///
+    /// `div`/`mod` never trigger this at all, bare or otherwise: unlike
+    /// every other entry in `peek_binop`'s table, they're ordinary lowercase
+    /// identifiers that also happen to double as infix operators (`div n
+    /// 2`), so they're already usable as a first-class value with zero new
+    /// syntax (`div` alone *is* the section) -- and treating them like the
+    /// symbolic operators here would misidentify a perfectly ordinary
+    /// parenthesized application like `(div n 2)` as a failed section
+    /// attempt on `div` immediately followed by `n 2)`.
+    fn try_operator_section(
+        &mut self,
+        start: crate::span::Cursor,
+    ) -> Result<Option<Spanned<Expr>>, ParseError> {
+        let checkpoint = self.clone();
+        let Some(m) = self.peek_binop() else {
+            return Ok(None);
+        };
+        if matches!(m.op, BinOp::IntDiv | BinOp::Mod) {
+            return Ok(None);
+        }
+        let op_start = self.pos;
+        for _ in 0..m.len {
+            self.bump();
+        }
+        let op_end = self.pos;
+        self.skip_trivia()?;
+        if self.peek() != Some(b')') {
+            if m.op == BinOp::Sub {
+                *self = checkpoint;
+                return Ok(None);
+            }
+            return Err(ParseError::new(
+                ErrorKind::Custom(
+                    "operator sections only support the bare form `(op)` -- partial \
+                     application like `(+ 1)` isn't supported; write a lambda instead, \
+                     e.g. `(\\x -> x + 1)`"
+                        .to_string(),
+                ),
+                Span::new(op_start.offset, op_end.offset),
+            )
+            .fatal());
+        }
+        self.bump(); // ')'
+        let span = Span::new(start.offset, self.pos.offset);
+        let params = vec![
+            Spanned::new(span, Pattern::Var("x".to_string())),
+            Spanned::new(span, Pattern::Var("y".to_string())),
+        ];
+        let body = Spanned::new(
+            span,
+            Expr::BinOp(
+                m.op,
+                Box::new(Spanned::new(span, Expr::Var("x".to_string()))),
+                Box::new(Spanned::new(span, Expr::Var("y".to_string()))),
+            ),
+        );
+        Ok(Some(Spanned::new(
+            span,
+            Expr::Lambda(params, Box::new(body)),
+        )))
     }
 
     fn expr_list(&mut self) -> Result<Spanned<Expr>, ParseError> {
@@ -892,6 +980,84 @@ mod tests {
                 Box::new(Spanned::new(Span::new(4, 5), Expr::Var("g".to_string())))
             )
         );
+    }
+
+    #[test]
+    fn bare_operator_section_desugars_to_a_two_arg_lambda() {
+        // "(+)" -- Elm-style bare section only, no Haskell partial sections.
+        let Expr::Lambda(params, body) = ex("(+)") else {
+            panic!("expected Lambda")
+        };
+        assert_eq!(params.len(), 2);
+        assert!(matches!(params[0].node, Pattern::Var(ref n) if n == "x"));
+        assert!(matches!(params[1].node, Pattern::Var(ref n) if n == "y"));
+        assert_eq!(
+            body.node,
+            Expr::BinOp(
+                BinOp::Add,
+                Box::new(Spanned::new(body.span, Expr::Var("x".to_string()))),
+                Box::new(Spanned::new(body.span, Expr::Var("y".to_string())))
+            )
+        );
+    }
+
+    #[test]
+    fn cons_and_append_sections_use_their_own_operator() {
+        let Expr::Lambda(_, body) = ex("(:)") else {
+            panic!("expected Lambda")
+        };
+        assert!(matches!(body.node, Expr::BinOp(BinOp::Cons, _, _)));
+
+        let Expr::Lambda(_, body) = ex("(<>)") else {
+            panic!("expected Lambda")
+        };
+        assert!(matches!(body.node, Expr::BinOp(BinOp::Append, _, _)));
+    }
+
+    #[test]
+    fn bare_minus_section_is_subtraction_not_negation() {
+        // "(-)" -- immediately followed by `)`, so unambiguously the
+        // subtraction function, matching Haskell's own convention (never
+        // negation, which always needs a following operand).
+        let Expr::Lambda(_, body) = ex("(-)") else {
+            panic!("expected Lambda")
+        };
+        assert!(matches!(body.node, Expr::BinOp(BinOp::Sub, _, _)));
+    }
+
+    #[test]
+    fn operator_section_used_as_an_application_argument() {
+        // "zipWith (+) xs ys" -- the whole motivating use case.
+        let Expr::App(f, arg) = ex("zipWith (+) xs") else {
+            panic!("expected App")
+        };
+        let Expr::App(f2, arg1) = f.node else {
+            panic!("expected nested App")
+        };
+        assert_eq!(f2.node, Expr::Var("zipWith".to_string()));
+        assert!(matches!(arg1.node, Expr::Lambda(_, _)));
+        assert_eq!(arg.node, Expr::Var("xs".to_string()));
+    }
+
+    #[test]
+    fn partial_section_is_a_fatal_parse_error_not_silently_dropped() {
+        // "(+ 1)" -- Knot deliberately doesn't support Haskell-style partial
+        // sections; this must hard-fail with a helpful message, not silently
+        // parse as something else or leave confusing leftover input.
+        let mut s = ParseState::new("(+ 1)");
+        let e = s.expr().unwrap_err();
+        assert!(e.fatal);
+    }
+
+    #[test]
+    fn negative_literal_in_parens_is_unaffected_by_section_support() {
+        // "(-40.0)" must still mean negation, not an attempted `(-...)`
+        // section -- guards against try_operator_section over-firing on
+        // `-`'s own dual meaning (regression check for this exact fix).
+        let Expr::Negate(inner) = ex("(-40.0)") else {
+            panic!("expected Negate")
+        };
+        assert_eq!(inner.node, Expr::FloatLit(40.0));
     }
 
     #[test]

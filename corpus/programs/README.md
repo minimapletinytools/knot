@@ -202,25 +202,37 @@ confirmed for `Num` via `interfaces/vector2-custom-num.knot` — see finding
 #5's own updated text above). The other 5 all trace back to one single
 root cause, **not yet fixed**:
 
-11. **Operator sections aren't parseable as expressions at all** — `(+)`,
-    `(-)`, etc. are valid *method names* inside an `interface`/`instance`
-    declaration (spec §6.2's own `(+) :: a -> a -> a`), but there's no
-    corresponding expression-level syntax for referencing one as a
-    first-class value the way `zipWith (+) xs ys` or `combine (+) l r`
-    need to. `expr_paren_tuple_or_unit` only ever tries a full `self.expr()`
-    for whatever follows `(` (or treats an immediate `)` as `Unit`) — a
-    bare `+` there fails to start an atom, non-fatally, so `expr_app`'s own
-    trailing-argument loop quietly backs off and stops collecting
-    arguments right there, rather than surfacing a real error. The
-    enclosing binding ends up defined as just the un-applied head (e.g.
-    `sampleSums = zipWith`, dropping `(+) [1, 2, 3] [10, 20, 30]`
-    entirely), and everything after it is reported as leftover input —
-    the same *symptom* as round 2's own negation bug, but a different,
-    unrelated cause (a genuinely missing grammar rule, not a misclassified
-    existing one). Hits `collections/zip-and-unzip-manual.knot` and
-    `interpreter/calculator-with-errors.knot`, both extremely ordinary
-    higher-order-function idioms in an ML-family language. Neither the
-    language spec nor `knot-ast-parser-plan.md` mention operator sections
-    at all — an unaddressed gap, not a documented non-goal, and worth a
-    real design decision (Elm-style bare `(op)` only, vs. Haskell-style
-    partial sections `(op x)`/`(x op)` too) before implementing.
+11. **Fixed. Operator sections weren't parseable as expressions at all** —
+    `(+)`, `(-)`, etc. were valid *method names* inside an
+    `interface`/`instance` declaration (spec §6.2's own `(+) :: a -> a ->
+    a`), but there was no corresponding expression-level syntax for
+    referencing one as a first-class value the way `zipWith (+) xs ys` or
+    `combine (+) l r` need to. `expr_paren_tuple_or_unit` only ever tried a
+    full `self.expr()` for whatever followed `(` (or treated an immediate
+    `)` as `Unit`) — a bare `+` there failed to start an atom, non-fatally,
+    so `expr_app`'s own trailing-argument loop quietly backed off and
+    stopped collecting arguments right there, rather than surfacing a real
+    error. The enclosing binding ended up defined as just the un-applied
+    head (e.g. `sampleSums = zipWith`, dropping `(+) [1, 2, 3] [10, 20,
+    30]` entirely), and everything after it was reported as leftover
+    input. Hit `collections/zip-and-unzip-manual.knot` and
+    `interpreter/calculator-with-errors.knot` — both now pass.
+    **Decided Elm-style, not Haskell-style**: only the bare `(op)` form is
+    supported (desugars to `\x y -> x op y` at parse time, in
+    `try_operator_section`, reusing `expr_binop_prec`'s own `peek_binop`
+    table so it can't drift out of sync) — no partial sections like
+    `(+ 1)`/`(1 +)`, which now hard-fail with a message pointing at the
+    lambda-form alternative. Two things needed care: a bare `(-)` is
+    unambiguously the *subtraction* function (never negation, matching
+    Haskell's own rule there), while `-` immediately followed by anything
+    *other* than `)` (e.g. `(-40.0)`'s own zero-spacing shape) must fall
+    through to the ordinary negation path from round 2's own fix, not be
+    misreported as a failed section; and `div`/`mod` never trigger section
+    parsing at all, since (unlike every symbolic operator) they're already
+    ordinary lowercase identifiers usable as a value with zero new syntax
+    — treating them the same way misidentified plain applications like
+    `(div n 2)` as a failed section attempt during testing, caught before
+    landing.
+
+After this fix, 71 of 80 pass; the remaining 9 are exactly finding #5 (now
+broadened) and the still-open Round 1 findings (#3, #6, #7).
