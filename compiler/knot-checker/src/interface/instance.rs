@@ -74,11 +74,17 @@ pub enum InstanceKind {
 /// a built-in in `prelude.rs`). `requires` is empty for a non-parametric
 /// instance (`instance Eq Shape`, or any of the numeric primitives) — never
 /// having to consult anything further is just the zero-argument case of
-/// the same rule.
+/// the same rule. `field_requires` is the record-target counterpart —
+/// keyed by field *name* rather than positional index, since a record has
+/// no positions, only names — populated only for a `record_entries` entry;
+/// always empty for an ordinary `entries` one (a single entry only ever
+/// has one shape of obligation, never both, so this is simpler than an
+/// enum for what's mutually exclusive anyway).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstanceEntry {
     pub kind: InstanceKind,
     pub requires: Vec<(usize, String)>,
+    pub field_requires: Vec<(String, String)>,
 }
 
 /// A closed record's own field-name set, sorted, standing in for `Ref` as
@@ -122,6 +128,11 @@ impl InstanceTable {
             .contains_key(&(interface.to_string(), key.clone()))
     }
 
+    fn record_entry(&self, interface: &str, key: &RecordKey) -> Option<&InstanceEntry> {
+        self.record_entries
+            .get(&(interface.to_string(), key.clone()))
+    }
+
     fn entry(&self, interface: &str, head: &Ref) -> Option<&InstanceEntry> {
         self.entries.get(&(interface.to_string(), head.clone()))
     }
@@ -136,6 +147,7 @@ impl InstanceTable {
             InstanceEntry {
                 kind: InstanceKind::BuiltIn,
                 requires,
+                field_requires: Vec::new(),
             },
         );
     }
@@ -175,23 +187,28 @@ impl InstanceTable {
             InstanceEntry {
                 kind: InstanceKind::Declared,
                 requires,
+                field_requires: Vec::new(),
             },
         );
     }
 
     /// The record-keyed counterpart of `insert_declared_unchecked` — same
-    /// no-checking-here contract, same two-pass caller.
+    /// no-checking-here contract, same two-pass caller. `field_requires`
+    /// is this record target's own declared context, if any (`instance Eq
+    /// a => Eq { value : a }`'s `Eq a` becomes `[("value", "Eq")]`) — see
+    /// `instance_field_requires`.
     fn insert_declared_record_unchecked(
         &mut self,
         interface: &str,
         key: RecordKey,
-        requires: Vec<(usize, String)>,
+        field_requires: Vec<(String, String)>,
     ) {
         self.record_entries.insert(
             (interface.to_string(), key),
             InstanceEntry {
                 kind: InstanceKind::Declared,
-                requires,
+                requires: Vec::new(),
+                field_requires,
             },
         );
     }
@@ -256,24 +273,50 @@ fn instance_requires(target: &CType, constraints: &[CConstraint]) -> Vec<(usize,
     requires
 }
 
-/// Which of `InstanceTable`'s two parallel key spaces one declared
-/// instance's own target resolved to — see `head_ref`/`record_key`.
-#[derive(Debug, Clone)]
-enum DeclaredHead {
-    Nominal(Ref),
-    Record(RecordKey),
+/// The record-target counterpart of `instance_requires` — maps each of a
+/// closed record target's own field type-variable names to whichever
+/// interface `constraints` requires of that name, e.g. `instance Eq a =>
+/// Eq { value : a }`'s `value : a` matched against `{interface: "Eq",
+/// type_var: "a"}` produces `[("value", "Eq")]`. A field whose own type
+/// isn't a bare type variable (a concrete nested type) simply needs
+/// nothing extra, exactly like `instance_requires`'s own positional case
+/// — this is the fix for the gap that function's own doc comment used to
+/// leave silent: a record target's declared context was accepted into the
+/// table but never actually recorded anywhere, so `check_instance` could
+/// never re-check it against a real call site's own field type.
+fn instance_field_requires(target: &CType, constraints: &[CConstraint]) -> Vec<(String, String)> {
+    let CType::Record(fields, _, None) = target else {
+        return Vec::new();
+    };
+    let mut requires = Vec::new();
+    for (field_name, field_ty) in fields {
+        if let CType::Var(name) = field_ty {
+            for c in constraints {
+                if c.type_var == *name {
+                    requires.push((field_name.clone(), c.interface.clone()));
+                }
+            }
+        }
+    }
+    requires
 }
 
-/// `(interface, head, requires, span)` for one declared instance this table
-/// can key by either `Ref` or `RecordKey` — `build_instance_table`'s own
+/// Which of `InstanceTable`'s two parallel key spaces one declared
+/// instance's own target resolved to — see `head_ref`/`record_key` — paired
+/// with that target's own `requires` in whichever shape matches (positional
+/// for `Nominal`, field-keyed for `Record`), so the two can never end up
+/// mismatched the way carrying them as two separate values would risk.
+#[derive(Debug, Clone)]
+enum DeclaredHead {
+    Nominal(Ref, Vec<(usize, String)>),
+    Record(RecordKey, Vec<(String, String)>),
+}
+
+/// `(interface, head, span)` for one declared instance this table can key
+/// by either `Ref` or `RecordKey` — `build_instance_table`'s own
 /// intermediate shape between collecting every such declaration and its two
 /// checking passes.
-type DeclaredInstance<'a> = (
-    &'a str,
-    DeclaredHead,
-    Vec<(usize, String)>,
-    knot_syntax::span::Span,
-);
+type DeclaredInstance<'a> = (&'a str, DeclaredHead, knot_syntax::span::Span);
 
 /// Builds the table from every `CDecl::Instance` in `decls`. Unknown
 /// interfaces are skipped (`knot-canonical` already reported that error);
@@ -306,15 +349,22 @@ pub fn build_instance_table(decls: &[Spanned<CDecl>]) -> (InstanceTable, Vec<Typ
             continue;
         }
         let head = head_ref(&inst.target)
-            .map(|r| DeclaredHead::Nominal(r.clone()))
-            .or_else(|| record_key(&inst.target).map(DeclaredHead::Record));
+            .map(|r| {
+                DeclaredHead::Nominal(
+                    r.clone(),
+                    instance_requires(&inst.target, &inst.constraints),
+                )
+            })
+            .or_else(|| {
+                record_key(&inst.target).map(|key| {
+                    DeclaredHead::Record(
+                        key,
+                        instance_field_requires(&inst.target, &inst.constraints),
+                    )
+                })
+            });
         match head {
-            Some(head) => declared.push((
-                inst.interface.as_str(),
-                head,
-                instance_requires(&inst.target, &inst.constraints),
-                d.span,
-            )),
+            Some(head) => declared.push((inst.interface.as_str(), head, d.span)),
             None => errors.push(TypeError {
                 span: d.span,
                 kind: TypeErrorKind::InstanceTargetNotNominal {
@@ -325,10 +375,10 @@ pub fn build_instance_table(decls: &[Spanned<CDecl>]) -> (InstanceTable, Vec<Typ
     }
 
     let mut accepted = vec![false; declared.len()];
-    for (i, (interface, head, requires, span)) in declared.iter().enumerate() {
+    for (i, (interface, head, span)) in declared.iter().enumerate() {
         let already_exists = match head {
-            DeclaredHead::Nominal(r) => table.has_instance(interface, r),
-            DeclaredHead::Record(key) => table.has_record_instance(interface, key),
+            DeclaredHead::Nominal(r, _) => table.has_instance(interface, r),
+            DeclaredHead::Record(key, _) => table.has_record_instance(interface, key),
         };
         if already_exists {
             errors.push(TypeError {
@@ -339,25 +389,28 @@ pub fn build_instance_table(decls: &[Spanned<CDecl>]) -> (InstanceTable, Vec<Typ
             });
         } else {
             match head {
-                DeclaredHead::Nominal(r) => {
+                DeclaredHead::Nominal(r, requires) => {
                     table.insert_declared_unchecked(interface, r.clone(), requires.clone())
                 }
-                DeclaredHead::Record(key) => {
-                    table.insert_declared_record_unchecked(interface, key.clone(), requires.clone())
-                }
+                DeclaredHead::Record(key, field_requires) => table
+                    .insert_declared_record_unchecked(
+                        interface,
+                        key.clone(),
+                        field_requires.clone(),
+                    ),
             }
             accepted[i] = true;
         }
     }
 
-    for (i, (interface, head, _, span)) in declared.iter().enumerate() {
+    for (i, (interface, head, span)) in declared.iter().enumerate() {
         if !accepted[i] {
             continue;
         }
         for superclass in superclasses(interface) {
             let has_superclass = match head {
-                DeclaredHead::Nominal(r) => table.has_instance(superclass, r),
-                DeclaredHead::Record(key) => table.has_record_instance(superclass, key),
+                DeclaredHead::Nominal(r, _) => table.has_instance(superclass, r),
+                DeclaredHead::Record(key, _) => table.has_record_instance(superclass, key),
             };
             if !has_superclass {
                 errors.push(TypeError {
@@ -430,19 +483,43 @@ pub fn check_instance(
         // A *closed* record first checks for a matching custom instance
         // (Fix, this session: `RecordKey`-keyed, see that type's own doc
         // comment) -- letting a real declaration override the structural
-        // fallback below, exactly as a user would expect. An open/row-
-        // polymorphic one (`ext.is_some()`) skips that lookup entirely: a
-        // use site that hasn't pinned down every field yet can't possibly
-        // match one exact, fixed instance target soundly.
+        // fallback below, exactly as a user would expect. Its own
+        // `field_requires` (the instance's declared context, e.g. `Eq a`
+        // on `instance Eq a => Eq { value : a }`) gets checked recursively
+        // against each named field's own real argument type here, exactly
+        // like `Structure::App`'s own positional `requires` above -- this
+        // is the fix for a real, demonstrated unsoundness: `field_requires`
+        // used to always be empty (`instance_requires` only ever populated
+        // it for a `CType::Named` target), so a record instance's own
+        // declared context was accepted into the table but never actually
+        // enforced against anything. An open/row-polymorphic record
+        // (`ext.is_some()`) skips the whole lookup: a use site that hasn't
+        // pinned down every field yet can't possibly match one exact,
+        // fixed instance target soundly.
         Some(Structure::Record(fields, ext)) => {
             let key: RecordKey = fields.keys().cloned().collect();
-            if ext.is_none() && table.has_record_instance(interface, &key) {
-                true
-            } else {
-                matches!(interface, "Eq" | "Ord" | "Show")
-                    && fields
-                        .values()
-                        .all(|f| check_instance(sub, table, given, interface, *f))
+            let matched_custom_instance = ext
+                .is_none()
+                .then(|| table.record_entry(interface, &key))
+                .flatten()
+                .map(|entry| {
+                    entry
+                        .field_requires
+                        .iter()
+                        .all(|(field_name, req_interface)| {
+                            fields.get(field_name).is_some_and(|field_ty| {
+                                check_instance(sub, table, given, req_interface, *field_ty)
+                            })
+                        })
+                });
+            match matched_custom_instance {
+                Some(satisfied) => satisfied,
+                None => {
+                    matches!(interface, "Eq" | "Ord" | "Show")
+                        && fields
+                            .values()
+                            .all(|f| check_instance(sub, table, given, interface, *f))
+                }
             }
         }
         // One value, trivially all three.
@@ -600,6 +677,75 @@ mod tests {
         assert!(table.has_record_instance(
             "Semigroup",
             &std::collections::BTreeSet::from(["x".to_string()])
+        ));
+    }
+
+    #[test]
+    fn a_record_instances_own_declared_context_is_recorded_as_field_requires() {
+        let cs =
+            decls("instance Eq a => Eq { value : a } where\n  (==) x y = x.value == y.value\n");
+        let (table, errors) = build_instance_table(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+        let key: RecordKey = std::collections::BTreeSet::from(["value".to_string()]);
+        let entry = table
+            .record_entry("Eq", &key)
+            .expect("Eq { value : a } should be registered");
+        assert_eq!(
+            entry.field_requires,
+            vec![("value".to_string(), "Eq".to_string())]
+        );
+        assert!(entry.requires.is_empty());
+    }
+
+    #[test]
+    fn check_instance_rejects_a_record_instance_whose_own_context_isnt_satisfied() {
+        // The exact unsoundness this fix closes: Eq { value : a } declares
+        // `Eq a =>`, but NoEqType has no Eq instance at all -- check_instance
+        // must now recurse into `value`'s own real argument type and find
+        // it lacking, not just confirm the record *shape* has an instance.
+        let mut sub = Substitution::new();
+        let mut table = InstanceTable::new();
+        table.insert_declared_record_unchecked(
+            "Eq",
+            std::collections::BTreeSet::from(["value".to_string()]),
+            vec![("value".to_string(), "Eq".to_string())],
+        );
+        let no_eq_ty = sub.fresh_bound(Structure::App(
+            Ref::TopLevel("NoEqType".to_string()),
+            vec![],
+        ));
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert("value".to_string(), no_eq_ty);
+        let record_ty = sub.fresh_bound(Structure::Record(fields, None));
+        assert!(!check_instance(
+            &mut sub,
+            &table,
+            &HashMap::new(),
+            "Eq",
+            record_ty
+        ));
+    }
+
+    #[test]
+    fn check_instance_accepts_a_record_instance_whose_own_context_is_satisfied() {
+        let mut sub = Substitution::new();
+        let mut table = InstanceTable::new();
+        table.insert_builtin("Eq", Ref::Builtin("Int".to_string()), vec![]);
+        table.insert_declared_record_unchecked(
+            "Eq",
+            std::collections::BTreeSet::from(["value".to_string()]),
+            vec![("value".to_string(), "Eq".to_string())],
+        );
+        let int_ty = sub.fresh_bound(Structure::App(Ref::Builtin("Int".to_string()), vec![]));
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert("value".to_string(), int_ty);
+        let record_ty = sub.fresh_bound(Structure::Record(fields, None));
+        assert!(check_instance(
+            &mut sub,
+            &table,
+            &HashMap::new(),
+            "Eq",
+            record_ty
         ));
     }
 

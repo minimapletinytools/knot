@@ -1,0 +1,15 @@
+-- expect: a record instance's own declared context (`Eq a =>` on
+-- `instance Eq a => Eq { value : a }`) must be enforced against a real
+-- call site's own field type, not just accepted into the table and
+-- forgotten -- NoEqType has no Eq instance at all, so comparing two
+-- `{ value : NoEqType }` records must fail, not silently type-check.
+-- Was known_gaps/record-instance-generic-constraint-not-enforced.knot
+-- (a real, demonstrated unsoundness) before this got fixed.
+-- error-kind: NoInstance
+type NoEqType = NoEqType Float
+
+instance Eq a => Eq { value : a } where
+  (==) x y = x.value == y.value
+
+badCompare :: { value : NoEqType } -> { value : NoEqType } -> Bool
+badCompare x y = x == y

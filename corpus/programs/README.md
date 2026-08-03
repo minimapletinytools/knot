@@ -48,24 +48,25 @@ corpus_report` reports one of these as a failure, that's expected and
 correct (the checker rejecting something `checker_impl_summary.md` says
 should currently still be rejected); when it reports one as `OK`, that
 does *not* mean the fixture is fine — several of these are deliberately
-*silently-wrong-acceptance* gaps (most notably `record-instance-generic-
-constraint-not-enforced.knot`, a real, demonstrated unsoundness, not just
-an incompleteness), so `OK` there means "confirmed still silently
-accepting something it shouldn't," not "passing." If a fixture in this
-directory ever *changes* which of these it reports, that's a signal the
-underlying gap moved (fixed, or newly broken worse) — update
+*silently-wrong-acceptance* gaps, so `OK` there means "confirmed still
+silently accepting something it shouldn't," not "passing." If a fixture
+in this directory ever *changes* which of these it reports, that's a
+signal the underlying gap moved (fixed, or newly broken worse) — update
 `checker_impl_summary.md`'s own "Known gaps" section and this fixture's
 own comment together, in the same change, rather than letting them drift
-apart. As of this writing: 5 fixtures, covering custom instances still not
-being able to target a `Tuple`, a record instance's own declared context
-never being enforced against a real argument type, the new record-instance
-table's field-name-only (not field-type-aware) keying, re-declaring an
-instance a builtin type already has not being flagged, and annotation
-values never being type-checked against their own derived expected type.
-A sixth, exhaustiveness checking never being wired into `check_module`,
-graduated out of this directory once fixed — see `patterns/non-
-exhaustive-case-warns.knot`, and `checker_impl_summary.md`'s own "Known
-gaps" section for the rest of this graduation story.
+apart. As of this writing: 4 fixtures, covering custom instances still not
+being able to target a `Tuple`, the new record-instance table's field-
+name-only (not field-type-aware) keying, re-declaring an instance a
+builtin type already has not being flagged, and annotation values never
+being type-checked against their own derived expected type. Two have
+graduated out of this directory once fixed: exhaustiveness checking never
+being wired into `check_module` (see `patterns/non-exhaustive-case-
+warns.knot`), and a record instance's own declared context never being
+enforced against a real argument type — a real, demonstrated unsoundness,
+not just an incompleteness (see `corpus/semantic/invalid/interfaces/
+record-instance-context-not-satisfied.knot` and its own `valid/`
+companion). `checker_impl_summary.md`'s own "Known gaps" section has the
+rest of both graduation stories.
 
 ## Findings log
 

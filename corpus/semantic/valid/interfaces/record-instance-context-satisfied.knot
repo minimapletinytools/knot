@@ -1,0 +1,16 @@
+-- expect: the same shape as invalid/interfaces/record-instance-context-
+-- not-satisfied.knot, except HasEqType really does have an Eq instance --
+-- confirming the new field_requires enforcement isn't overly
+-- conservative, only rejecting a record instance's own declared context
+-- when it's genuinely unsatisfied, not whenever one exists at all.
+type HasEqType = HasEqType Float
+
+instance Eq HasEqType where
+  (==) a b = case (a, b) of
+    (HasEqType x, HasEqType y) -> x == y
+
+instance Eq a => Eq { value : a } where
+  (==) x y = x.value == y.value
+
+goodCompare :: { value : HasEqType } -> { value : HasEqType } -> Bool
+goodCompare x y = x == y

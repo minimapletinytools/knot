@@ -460,17 +460,24 @@ exercise.
   warning here). `corpus_report` now prints `OK*` plus the warning list
   for a fixture that type-checks cleanly but still has one; see
   `corpus/programs/patterns/non-exhaustive-case-warns.knot`.
-- **A record instance's own declared context is accepted but never
-  enforced at use sites — a real, demonstrated unsoundness, not just an
-  incompleteness.** `instance Eq a => Eq { value : a } where ...` type-
-  checks and is accepted into the table, but `interface::instance::
-  instance_requires` only ever populates `requires` for a `CType::Named`
-  target — a `CType::Record` target's own declared constraints are
-  silently dropped. The result: `check_instance` confirms `Eq { value :
-  SomeTypeWithNoEqInstance }` holds (the *shape* has an instance) without
-  ever verifying `SomeTypeWithNoEqInstance` itself has `Eq` — a value
-  whose field type provably can't be compared type-checks as comparable
-  anyway.
+- **Fixed. A record instance's own declared context is now enforced at use
+  sites** — was a real, demonstrated unsoundness, not just an
+  incompleteness: `instance Eq a => Eq { value : a } where ...` type-
+  checked and was accepted into the table, but `interface::instance::
+  instance_requires` only ever populated `requires` for a `CType::Named`
+  target, so a `CType::Record` target's own declared constraints were
+  silently dropped — `check_instance` confirmed `Eq { value :
+  SomeTypeWithNoEqInstance }` held (the *shape* has an instance) without
+  ever verifying `SomeTypeWithNoEqInstance` itself has `Eq`. New
+  `instance_field_requires` (the record-target counterpart of
+  `instance_requires`, keyed by field *name* instead of positional index)
+  populates a new `InstanceEntry.field_requires`, which `check_instance`'s
+  own `Structure::Record` arm now checks recursively against each named
+  field's real argument type, exactly like `Structure::App`'s existing
+  positional `requires` check. Moved from `known_gaps/` to
+  `corpus/semantic/invalid/interfaces/record-instance-context-not-
+  satisfied.knot` (plus a `valid/` companion proving the fix isn't overly
+  conservative when the context genuinely is satisfied).
 - **The new record-instance table keys on field *names* only, not field
   *types*** (documented at the time, in `InstanceTable`'s own doc
   comment) — two unrelated record aliases that happen to share an
