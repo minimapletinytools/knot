@@ -26,29 +26,28 @@
 //! (`build_instance_table`'s own superclass/duplicate passes) only ever
 //! needs that shallow question, not the recursive one.
 //!
-//! **A user can't declare an instance *for* a `Var`/`Fn`/`Tuple`/`Unit`
-//! shape, or an *open* `Record`, directly** (`head_ref` returns `None` for
-//! those `CType`s — no `Ref` to key an instance-table entry by at all) —
-//! this table's own hardcoded structural rule is the only thing that ever
-//! answers for `Eq`/`Ord`/`Show` on `Tuple`/`Unit`, and no interface at all
-//! can be given to a bare `Fn`/`Var` target or an open row. This used to be
-//! silent (the declaration just vanished with no diagnostic, surfacing
-//! only as a confusing `NoInstance` wherever a caller tried to use it) —
-//! `build_instance_table` now reports a real `InstanceTargetNotNominal` at
-//! the declaration site instead. A *closed* `Record` target is the one
-//! exception: `record_key` gives `InstanceTable`'s own separate `record_
-//! entries` a `RecordKey` (sorted field-name set) to key by instead of a
-//! `Ref` — since `knot-canonical::resolve::alias::expand_aliases` erases
-//! every `type alias` reference before this ever runs, a record's field
-//! names are the only handle left to declare (and later look up) a custom
-//! instance by, letting it override the structural Eq/Ord/Show fallback
-//! and, more importantly, giving records access to interfaces (`Num`,
-//! `Semigroup`, anything user-defined) that have no structural fallback at
-//! all. See `InstanceTable`'s own doc comment on `record_entries` for the
-//! one accepted limitation this brings (field-*name* keying, not
-//! field-*type* keying). A `VarApp` whose head is still unresolved (a
-//! genuine kind error, spec §6.3/§6.4) is never confirmed by anything —
-//! see `check_instance`'s own doc comment.
+//! **A user can't declare an instance *for* a `Var`/`Fn`/`Unit` shape, or
+//! an *open* `Record`, directly** (`head_ref` returns `None` for those
+//! `CType`s — no `Ref` to key an instance-table entry by at all) — no
+//! interface at all can be given to a bare `Fn`/`Var` target or an open
+//! row. This used to be silent (the declaration just vanished with no
+//! diagnostic, surfacing only as a confusing `NoInstance` wherever a
+//! caller tried to use it) — `build_instance_table` now reports a real
+//! `InstanceTargetNotNominal` at the declaration site instead. A *closed*
+//! `Record` or a `Tuple` target are the two exceptions: `record_key`/
+//! `tuple_key` give `InstanceTable`'s own separate `record_entries`/
+//! `tuple_entries` a `RecordKey`/`TupleKey` to key by instead of a `Ref` —
+//! since `knot-canonical::resolve::alias::expand_aliases` erases every
+//! `type alias` reference before this ever runs, a record's field names
+//! (paired with each field's own *type*, not just its name — see
+//! `CanonicalType`) or a tuple's own element types are the only handle
+//! left to declare (and later look up) a custom instance by, letting
+//! either override the structural `Eq`/`Ord`/`Show` fallback and, more
+//! importantly, giving both access to interfaces (`Num`, `Semigroup`,
+//! anything user-defined) that have no structural fallback at all. A
+//! `VarApp` whose head is still unresolved (a genuine kind error, spec
+//! §6.3/§6.4) is never confirmed by anything — see `check_instance`'s own
+//! doc comment.
 
 use std::collections::{HashMap, HashSet};
 
@@ -87,30 +86,55 @@ pub struct InstanceEntry {
     pub field_requires: Vec<(String, String)>,
 }
 
-/// A closed record's own field-name set, sorted, standing in for `Ref` as
-/// the key for a record-shaped instance target (`instance Num Vector2`
-/// where `Vector2` is a `type alias` for `{ x : Float, y : Float }`) --
-/// see `record_key`'s own doc comment for why records need a wholly
-/// separate table from `entries` rather than a new `Ref` variant.
-type RecordKey = std::collections::BTreeSet<String>;
+/// A `CType`/`Structure`'s own shape with every type *variable* replaced by
+/// a canonical, first-occurrence-order index — what makes `RecordKey`/
+/// `TupleKey` meaningfully *type*-aware (not just name/arity-aware) without
+/// accidentally distinguishing `{ value : a }` from `{ value : b }` (same
+/// shape, arbitrary variable spelling) while still correctly distinguishing
+/// `{ value : Int }` from `{ value : String }` (genuinely different, both
+/// fully concrete) and `{ x : a, y : a }` from `{ x : a, y : b }` (whether
+/// two positions share the *same* variable is real structure, not just
+/// naming). Two separate walks build one of these — `canonicalize_ctype`
+/// (a fresh, not-yet-inferred instance *declaration*'s own `CType`, keyed
+/// by each variable's own name) and `canonicalize_structure` (a real call
+/// site's own resolved `Structure`, post type-inference, keyed by
+/// `TypeVarId` instead since a use site's variables have no name at all)
+/// — but both produce this same target shape, which is all `RecordKey`/
+/// `TupleKey` equality/hashing ever needs to agree on.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum CanonicalType {
+    Var(usize),
+    Named(Ref, Vec<CanonicalType>),
+    Fn(Box<CanonicalType>, Box<CanonicalType>),
+    Tuple(Vec<CanonicalType>),
+    /// Sorted by field name — only ever built from a *closed* record (no
+    /// row-extension case at all, unlike `CType::Record`/`Structure::
+    /// Record` themselves), since only a closed record can be a
+    /// well-defined instance target in the first place (`record_key`'s own
+    /// doc comment).
+    Record(Vec<(String, CanonicalType)>),
+    Unit,
+}
+
+/// A closed record's own canonical shape (sorted field names, each paired
+/// with its own alpha-equivalence-normalized type — see `CanonicalType`),
+/// standing in for `Ref` as the key for a record-shaped instance target
+/// (`instance Num Vector2` where `Vector2` is a `type alias` for `{ x :
+/// Float, y : Float }`) -- see `record_key`'s own doc comment for why
+/// records need a wholly separate table from `entries` rather than a new
+/// `Ref` variant.
+type RecordKey = Vec<(String, CanonicalType)>;
+
+/// The tuple-target counterpart of `RecordKey` — positional (a tuple has
+/// no field names to sort by), each element's own canonical shape in
+/// order.
+type TupleKey = Vec<CanonicalType>;
 
 #[derive(Debug, Default)]
 pub struct InstanceTable {
     entries: HashMap<(String, Ref), InstanceEntry>,
-    /// **Known limitation**, documented rather than silently wrong: this
-    /// keys purely on field *names*, not field types, so `instance Show {
-    /// x : Int }` and a hypothetical `instance Show { x : String }`
-    /// declared elsewhere in the same module would collide as
-    /// "duplicate" even though they're genuinely different record shapes.
-    /// Real field-type-aware keying would need `RecordKey` to carry each
-    /// field's own resolved type too, which pulls in the same
-    /// `Substitution`-dependent equality this table otherwise has no
-    /// reason to know about — an edge case narrow enough (two *unrelated*
-    /// record aliases sharing an identical field-name set, both wanting
-    /// the *same* interface, in the *same* module) to accept for now
-    /// rather than block a real, common pattern (a domain record wanting
-    /// its own `Eq`/`Ord`/`Show`/anything else) on it.
     record_entries: HashMap<(String, RecordKey), InstanceEntry>,
+    tuple_entries: HashMap<(String, TupleKey), InstanceEntry>,
 }
 
 impl InstanceTable {
@@ -130,6 +154,16 @@ impl InstanceTable {
 
     fn record_entry(&self, interface: &str, key: &RecordKey) -> Option<&InstanceEntry> {
         self.record_entries
+            .get(&(interface.to_string(), key.clone()))
+    }
+
+    fn has_tuple_instance(&self, interface: &str, key: &TupleKey) -> bool {
+        self.tuple_entries
+            .contains_key(&(interface.to_string(), key.clone()))
+    }
+
+    fn tuple_entry(&self, interface: &str, key: &TupleKey) -> Option<&InstanceEntry> {
+        self.tuple_entries
             .get(&(interface.to_string(), key.clone()))
     }
 
@@ -167,6 +201,9 @@ impl InstanceTable {
         }
         for (key, entry) in other.record_entries {
             self.record_entries.entry(key).or_insert(entry);
+        }
+        for (key, entry) in other.tuple_entries {
+            self.tuple_entries.entry(key).or_insert(entry);
         }
     }
 
@@ -212,17 +249,127 @@ impl InstanceTable {
             },
         );
     }
+
+    /// The tuple-keyed counterpart of `insert_declared_unchecked` — same
+    /// no-checking-here contract, same two-pass caller. `requires` here is
+    /// positional, exactly like an ordinary `Ref`-keyed entry's own (a
+    /// tuple's elements already have positions, unlike a record's named
+    /// fields) — see `tuple_requires`.
+    fn insert_declared_tuple_unchecked(
+        &mut self,
+        interface: &str,
+        key: TupleKey,
+        requires: Vec<(usize, String)>,
+    ) {
+        self.tuple_entries.insert(
+            (interface.to_string(), key),
+            InstanceEntry {
+                kind: InstanceKind::Declared,
+                requires,
+                field_requires: Vec::new(),
+            },
+        );
+    }
 }
 
 /// The head type constructor an instance's `target` names —
 /// `instance Eq Shape` -> `Shape`'s `Ref`; `instance Eq (List a)` ->
 /// `List`'s. `None` for a target this can't key by `Ref` at all
-/// (`Tuple`/`Fn`/`Unit`/a bare type variable, or a `Record` -- see
-/// `record_key` for that last one's own separate path) — see module docs.
+/// (`Var`/`Fn`/`Unit`, or a `Record`/`Tuple` -- see `record_key`/
+/// `tuple_key` for those two's own separate paths) — see module docs.
 fn head_ref(target: &CType) -> Option<&Ref> {
     match target {
         CType::Named(r, _) => Some(r),
         CType::Var(_) | CType::Fn(..) | CType::Tuple(_) | CType::Record(..) | CType::Unit => None,
+    }
+}
+
+/// `canonicalize_ctype`'s own state: which type-variable *name* has
+/// already been assigned which canonical index, in first-occurrence order
+/// across the whole walk (so a shared name across two positions — `{ x :
+/// a, y : a }` — correctly gets the *same* index both times, and
+/// `instance_requires`/`instance_field_requires`/`tuple_requires`'s own
+/// name-matching stays meaningful alongside it).
+fn canonicalize_ctype(ty: &CType, seen: &mut HashMap<String, usize>) -> CanonicalType {
+    match ty {
+        CType::Var(name) => {
+            let next = seen.len();
+            CanonicalType::Var(*seen.entry(name.clone()).or_insert(next))
+        }
+        CType::Named(r, args) => CanonicalType::Named(
+            r.clone(),
+            args.iter().map(|a| canonicalize_ctype(a, seen)).collect(),
+        ),
+        CType::Fn(a, b) => CanonicalType::Fn(
+            Box::new(canonicalize_ctype(a, seen)),
+            Box::new(canonicalize_ctype(b, seen)),
+        ),
+        CType::Tuple(elems) => {
+            CanonicalType::Tuple(elems.iter().map(|e| canonicalize_ctype(e, seen)).collect())
+        }
+        // Only ever reached for a *nested* record (e.g. one of a `Tuple`'s
+        // own elements) -- the top-level-target case has its own direct
+        // handling in `record_key`, which needs the closedness check
+        // `record_key`'s own doc comment already explains applies only at
+        // the target's own top level, never nested inside it.
+        CType::Record(fields, _, _) => {
+            let mut sorted: Vec<&(String, CType)> = fields.iter().collect();
+            sorted.sort_by(|a, b| a.0.cmp(&b.0));
+            CanonicalType::Record(
+                sorted
+                    .into_iter()
+                    .map(|(name, t)| (name.clone(), canonicalize_ctype(t, seen)))
+                    .collect(),
+            )
+        }
+        CType::Unit => CanonicalType::Unit,
+    }
+}
+
+/// `canonicalize_structure`'s own state — keyed by `TypeVarId` rather than
+/// a name (a real call site's own variables have none), same
+/// first-occurrence-order rule as `canonicalize_ctype`.
+fn canonicalize_structure(
+    sub: &mut Substitution,
+    ty: TypeVarId,
+    seen: &mut HashMap<TypeVarId, usize>,
+) -> CanonicalType {
+    let root = sub.find(ty);
+    match sub.resolve_structure(root) {
+        Some(Structure::App(r, args)) => CanonicalType::Named(
+            r,
+            args.iter()
+                .map(|a| canonicalize_structure(sub, *a, seen))
+                .collect(),
+        ),
+        Some(Structure::Fn(a, b)) => CanonicalType::Fn(
+            Box::new(canonicalize_structure(sub, a, seen)),
+            Box::new(canonicalize_structure(sub, b, seen)),
+        ),
+        Some(Structure::Tuple(elems)) => CanonicalType::Tuple(
+            elems
+                .iter()
+                .map(|e| canonicalize_structure(sub, *e, seen))
+                .collect(),
+        ),
+        Some(Structure::Record(fields, _)) => CanonicalType::Record(
+            fields
+                .iter()
+                .map(|(name, t)| (name.clone(), canonicalize_structure(sub, *t, seen)))
+                .collect(),
+        ),
+        Some(Structure::Unit) => CanonicalType::Unit,
+        // A still-unresolved variable (`Unbound`/`Rigid`), or a
+        // constructor-sorted position (`Ctor`/`VarApp` — never actually
+        // reachable as a real tuple/record element in practice, since
+        // those only ever arise from `Collection`/`Context`'s own
+        // machinery, not an ordinary structural position) — all "generic,
+        // not a concrete named type" for this purpose, exactly like a bare
+        // `CType::Var`.
+        None | Some(Structure::Ctor(..)) | Some(Structure::VarApp(..)) => {
+            let next = seen.len();
+            CanonicalType::Var(*seen.entry(root).or_insert(next))
+        }
     }
 }
 
@@ -238,15 +385,36 @@ fn head_ref(target: &CType) -> Option<&Ref> {
 /// aliases` has already substituted away every `type alias` reference
 /// (`Vector2` in `instance Num Vector2` is already this literal `CType::
 /// Record`, not a nominal name any more) — a `RecordKey` is genuinely the
-/// *only* handle left for "which declaration is this," see `InstanceTable`'s
-/// own `record_entries` doc comment for the resulting, accepted limitation.
+/// *only* handle left for "which declaration is this."
 fn record_key(target: &CType) -> Option<RecordKey> {
-    match target {
-        CType::Record(fields, _, None) => {
-            Some(fields.iter().map(|(name, _)| name.clone()).collect())
-        }
-        _ => None,
-    }
+    let CType::Record(fields, _, None) = target else {
+        return None;
+    };
+    let mut seen = HashMap::new();
+    let mut sorted: Vec<&(String, CType)> = fields.iter().collect();
+    sorted.sort_by(|a, b| a.0.cmp(&b.0));
+    Some(
+        sorted
+            .into_iter()
+            .map(|(name, t)| (name.clone(), canonicalize_ctype(t, &mut seen)))
+            .collect(),
+    )
+}
+
+/// The `TupleKey` counterpart of `record_key` — every `CType::Tuple` is
+/// already "closed" by construction (no row-polymorphism analog exists for
+/// tuples at all), so there's no openness check to make here.
+fn tuple_key(target: &CType) -> Option<TupleKey> {
+    let CType::Tuple(elems) = target else {
+        return None;
+    };
+    let mut seen = HashMap::new();
+    Some(
+        elems
+            .iter()
+            .map(|e| canonicalize_ctype(e, &mut seen))
+            .collect(),
+    )
 }
 
 /// Maps each of `target`'s own type-variable-named positional arguments to
@@ -301,15 +469,38 @@ fn instance_field_requires(target: &CType, constraints: &[CConstraint]) -> Vec<(
     requires
 }
 
-/// Which of `InstanceTable`'s two parallel key spaces one declared
-/// instance's own target resolved to — see `head_ref`/`record_key` — paired
-/// with that target's own `requires` in whichever shape matches (positional
-/// for `Nominal`, field-keyed for `Record`), so the two can never end up
-/// mismatched the way carrying them as two separate values would risk.
+/// The tuple-target counterpart of `instance_requires` — positional, and
+/// mirrors that function almost exactly since a tuple's own elements are
+/// already positional, same as a nominal target's own type arguments (no
+/// field-name indirection like `instance_field_requires` needs).
+fn tuple_requires(target: &CType, constraints: &[CConstraint]) -> Vec<(usize, String)> {
+    let CType::Tuple(elems) = target else {
+        return Vec::new();
+    };
+    let mut requires = Vec::new();
+    for (pos, elem) in elems.iter().enumerate() {
+        if let CType::Var(name) = elem {
+            for c in constraints {
+                if c.type_var == *name {
+                    requires.push((pos, c.interface.clone()));
+                }
+            }
+        }
+    }
+    requires
+}
+
+/// Which of `InstanceTable`'s three parallel key spaces one declared
+/// instance's own target resolved to — see `head_ref`/`record_key`/
+/// `tuple_key` — paired with that target's own `requires` in whichever shape
+/// matches (positional for `Nominal`/`Tuple`, field-keyed for `Record`), so
+/// the two can never end up mismatched the way carrying them as two
+/// separate values would risk.
 #[derive(Debug, Clone)]
 enum DeclaredHead {
     Nominal(Ref, Vec<(usize, String)>),
     Record(RecordKey, Vec<(String, String)>),
+    Tuple(TupleKey, Vec<(usize, String)>),
 }
 
 /// `(interface, head, span)` for one declared instance this table can key
@@ -362,6 +553,11 @@ pub fn build_instance_table(decls: &[Spanned<CDecl>]) -> (InstanceTable, Vec<Typ
                         instance_field_requires(&inst.target, &inst.constraints),
                     )
                 })
+            })
+            .or_else(|| {
+                tuple_key(&inst.target).map(|key| {
+                    DeclaredHead::Tuple(key, tuple_requires(&inst.target, &inst.constraints))
+                })
             });
         match head {
             Some(head) => declared.push((inst.interface.as_str(), head, d.span)),
@@ -379,6 +575,7 @@ pub fn build_instance_table(decls: &[Spanned<CDecl>]) -> (InstanceTable, Vec<Typ
         let already_exists = match head {
             DeclaredHead::Nominal(r, _) => table.has_instance(interface, r),
             DeclaredHead::Record(key, _) => table.has_record_instance(interface, key),
+            DeclaredHead::Tuple(key, _) => table.has_tuple_instance(interface, key),
         };
         if already_exists {
             errors.push(TypeError {
@@ -398,6 +595,9 @@ pub fn build_instance_table(decls: &[Spanned<CDecl>]) -> (InstanceTable, Vec<Typ
                         key.clone(),
                         field_requires.clone(),
                     ),
+                DeclaredHead::Tuple(key, requires) => {
+                    table.insert_declared_tuple_unchecked(interface, key.clone(), requires.clone())
+                }
             }
             accepted[i] = true;
         }
@@ -411,6 +611,7 @@ pub fn build_instance_table(decls: &[Spanned<CDecl>]) -> (InstanceTable, Vec<Typ
             let has_superclass = match head {
                 DeclaredHead::Nominal(r, _) => table.has_instance(superclass, r),
                 DeclaredHead::Record(key, _) => table.has_record_instance(superclass, key),
+                DeclaredHead::Tuple(key, _) => table.has_tuple_instance(superclass, key),
             };
             if !has_superclass {
                 errors.push(TypeError {
@@ -472,37 +673,58 @@ pub fn check_instance(
         // *which* instance answers, only what `map`/`bind`/... themselves
         // thread through separately.
         Some(Structure::Ctor(head, _leading_args)) => table.has_instance(interface, &head),
-        // Structural facts, not table lookups -- gated to exactly `Eq`/
-        // `Ord`/`Show` (same as `Unit` below), so a dangling `Num (Int,
-        // Int)` obligation (nonsensical -- Knot has no tuple arithmetic)
-        // correctly still fails instead of wrongly inheriting `Int`'s own
-        // `Num` instance through the recursion.
-        Some(Structure::Tuple(elems)) if matches!(interface, "Eq" | "Ord" | "Show") => elems
-            .iter()
-            .all(|e| check_instance(sub, table, given, interface, *e)),
-        // A *closed* record first checks for a matching custom instance
-        // (Fix, this session: `RecordKey`-keyed, see that type's own doc
-        // comment) -- letting a real declaration override the structural
-        // fallback below, exactly as a user would expect. Its own
-        // `field_requires` (the instance's declared context, e.g. `Eq a`
-        // on `instance Eq a => Eq { value : a }`) gets checked recursively
-        // against each named field's own real argument type here, exactly
-        // like `Structure::App`'s own positional `requires` above -- this
-        // is the fix for a real, demonstrated unsoundness: `field_requires`
-        // used to always be empty (`instance_requires` only ever populated
-        // it for a `CType::Named` target), so a record instance's own
-        // declared context was accepted into the table but never actually
-        // enforced against anything. An open/row-polymorphic record
+        // A tuple first checks for a matching custom instance (Task #39:
+        // `TupleKey`-keyed, mirroring the `Record` arm below exactly) --
+        // letting a real declaration (`instance Num (Int, Int)`, say) give
+        // a tuple target access to an interface with no structural fallback
+        // at all, not just override `Eq`/`Ord`/`Show`'s own derivation. No
+        // custom instance falls back to the old structural rule, gated to
+        // exactly those three (same as `Unit` below), so a dangling `Num
+        // (Int, Int)` obligation (nonsensical -- Knot has no tuple
+        // arithmetic) correctly still fails instead of wrongly inheriting
+        // `Int`'s own `Num` instance through the recursion.
+        Some(Structure::Tuple(elems)) => {
+            let mut seen = HashMap::new();
+            let key: TupleKey = elems
+                .iter()
+                .map(|e| canonicalize_structure(sub, *e, &mut seen))
+                .collect();
+            match table.tuple_entry(interface, &key) {
+                Some(entry) => entry.requires.iter().all(|(pos, req_interface)| {
+                    check_instance(sub, table, given, req_interface, elems[*pos])
+                }),
+                None => {
+                    matches!(interface, "Eq" | "Ord" | "Show")
+                        && elems
+                            .iter()
+                            .all(|e| check_instance(sub, table, given, interface, *e))
+                }
+            }
+        }
+        // A *closed* record first checks for a matching custom instance,
+        // keyed by `canonicalize_structure`'s own type-aware `RecordKey`
+        // (Task #39 -- previously keyed by field *name* alone, so `{ value
+        // : Int }` and `{ value : String }` wrongly collided into the same
+        // table slot; see `CanonicalType`'s own doc comment) -- letting a
+        // real declaration override the structural fallback below, exactly
+        // as a user would expect. Its own `field_requires` (the instance's
+        // declared context, e.g. `Eq a` on `instance Eq a => Eq { value : a
+        // }`) gets checked recursively against each named field's own real
+        // argument type here, exactly like `Structure::App`'s own
+        // positional `requires` above. An open/row-polymorphic record
         // (`ext.is_some()`) skips the whole lookup: a use site that hasn't
         // pinned down every field yet can't possibly match one exact,
         // fixed instance target soundly.
         Some(Structure::Record(fields, ext)) => {
-            let key: RecordKey = fields.keys().cloned().collect();
-            let matched_custom_instance = ext
-                .is_none()
-                .then(|| table.record_entry(interface, &key))
-                .flatten()
-                .map(|entry| {
+            let matched_custom_instance = if ext.is_some() {
+                None
+            } else {
+                let mut seen = HashMap::new();
+                let key: RecordKey = fields
+                    .iter()
+                    .map(|(name, ty)| (name.clone(), canonicalize_structure(sub, *ty, &mut seen)))
+                    .collect();
+                table.record_entry(interface, &key).map(|entry| {
                     entry
                         .field_requires
                         .iter()
@@ -511,7 +733,8 @@ pub fn check_instance(
                                 check_instance(sub, table, given, req_interface, *field_ty)
                             })
                         })
-                });
+                })
+            };
             match matched_custom_instance {
                 Some(satisfied) => satisfied,
                 None => {
@@ -674,10 +897,16 @@ mod tests {
         let (table, errors) = build_instance_table(&cs);
         assert!(errors.is_empty(), "{errors:?}");
         assert!(table.entries.is_empty());
-        assert!(table.has_record_instance(
-            "Semigroup",
-            &std::collections::BTreeSet::from(["x".to_string()])
-        ));
+        let key = record_key(&CType::Record(
+            vec![(
+                "x".to_string(),
+                CType::Named(Ref::Builtin("Float".to_string()), vec![]),
+            )],
+            vec![],
+            None,
+        ))
+        .unwrap();
+        assert!(table.has_record_instance("Semigroup", &key));
     }
 
     #[test]
@@ -686,7 +915,12 @@ mod tests {
             decls("instance Eq a => Eq { value : a } where\n  (==) x y = x.value == y.value\n");
         let (table, errors) = build_instance_table(&cs);
         assert!(errors.is_empty(), "{errors:?}");
-        let key: RecordKey = std::collections::BTreeSet::from(["value".to_string()]);
+        let key = record_key(&CType::Record(
+            vec![("value".to_string(), CType::Var("a".to_string()))],
+            vec![],
+            None,
+        ))
+        .unwrap();
         let entry = table
             .record_entry("Eq", &key)
             .expect("Eq { value : a } should be registered");
@@ -707,7 +941,10 @@ mod tests {
         let mut table = InstanceTable::new();
         table.insert_declared_record_unchecked(
             "Eq",
-            std::collections::BTreeSet::from(["value".to_string()]),
+            vec![(
+                "value".to_string(),
+                CanonicalType::Named(Ref::TopLevel("NoEqType".to_string()), vec![]),
+            )],
             vec![("value".to_string(), "Eq".to_string())],
         );
         let no_eq_ty = sub.fresh_bound(Structure::App(
@@ -733,7 +970,10 @@ mod tests {
         table.insert_builtin("Eq", Ref::Builtin("Int".to_string()), vec![]);
         table.insert_declared_record_unchecked(
             "Eq",
-            std::collections::BTreeSet::from(["value".to_string()]),
+            vec![(
+                "value".to_string(),
+                CanonicalType::Named(Ref::Builtin("Int".to_string()), vec![]),
+            )],
             vec![("value".to_string(), "Eq".to_string())],
         );
         let int_ty = sub.fresh_bound(Structure::App(Ref::Builtin("Int".to_string()), vec![]));
@@ -750,19 +990,68 @@ mod tests {
     }
 
     #[test]
-    fn an_eq_instance_targeting_a_tuple_is_also_reported_even_though_eq_derives_structurally() {
-        // Eq/Ord/Show *do* derive automatically for Tuple/Record/Unit via
-        // check_instance's own hardcoded rule, with no declaration needed
-        // -- so an explicit one here would be unreachable dead code, not a
-        // working instance. Reported the same way as any other
-        // non-nominal target, for the same reason: silence would be
-        // actively misleading (it'd look like the explicit body matters).
+    fn two_record_instances_with_the_same_field_name_but_different_types_dont_collide() {
+        // The unsoundness/over-rejection Task #39 fixes: RecordKey used to
+        // be keyed by field *name* alone, so `{ value : Int }` and `{
+        // value : String }` wrongly shared one table slot -- whichever was
+        // declared second would either collide as a spurious
+        // DuplicateInstance or silently shadow the first.
+        let cs = decls(
+            "instance Show { value : Int } where\n  show x = \"int\"\n\
+             instance Show { value : String } where\n  show x = \"string\"\n",
+        );
+        let (table, errors) = build_instance_table(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+        let int_key = record_key(&CType::Record(
+            vec![(
+                "value".to_string(),
+                CType::Named(Ref::Builtin("Int".to_string()), vec![]),
+            )],
+            vec![],
+            None,
+        ))
+        .unwrap();
+        let string_key = record_key(&CType::Record(
+            vec![(
+                "value".to_string(),
+                CType::Named(Ref::Builtin("String".to_string()), vec![]),
+            )],
+            vec![],
+            None,
+        ))
+        .unwrap();
+        assert!(table.has_record_instance("Show", &int_key));
+        assert!(table.has_record_instance("Show", &string_key));
+    }
+
+    #[test]
+    fn a_custom_instance_can_now_target_a_tuple() {
+        // Task #39: a Tuple target used to be unconditionally rejected as
+        // InstanceTargetNotNominal, even for an interface with no
+        // structural fallback at all (Num has no derived tuple instance
+        // the way Eq/Ord/Show do) -- now accepted into `tuple_entries`.
+        let cs = decls("instance Num (Int, Int) where\n  (+) a b = a\n");
+        let (table, errors) = build_instance_table(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+        let key = tuple_key(&CType::Tuple(vec![
+            CType::Named(Ref::Builtin("Int".to_string()), vec![]),
+            CType::Named(Ref::Builtin("Int".to_string()), vec![]),
+        ]))
+        .unwrap();
+        assert!(table.has_tuple_instance("Num", &key));
+    }
+
+    #[test]
+    fn an_eq_instance_targeting_a_tuple_now_registers_as_a_custom_instance() {
+        // Eq/Ord/Show already derive automatically for Tuple/Record/Unit
+        // via check_instance's own hardcoded structural rule -- an
+        // explicit `instance Eq (Int, Int)` used to be rejected outright
+        // as InstanceTargetNotNominal (unreachable-dead-code reasoning);
+        // now that Tuple is a valid target shape like Record, it's simply
+        // accepted as a (redundant but harmless) custom instance instead.
         let cs = decls("instance Eq (Int, Int) where\n  (==) a b = True\n");
         let (_table, errors) = build_instance_table(&cs);
-        assert!(errors.iter().any(|e| matches!(
-            &e.kind,
-            TypeErrorKind::InstanceTargetNotNominal { interface } if interface == "Eq"
-        )));
+        assert!(errors.is_empty(), "{errors:?}");
     }
 
     #[test]

@@ -1,0 +1,19 @@
+-- expect: InstanceTable's own record_entries now keys a record instance
+-- target on each field's sorted (name, canonical-type) pair, not the
+-- field-name set alone (Task #39, CanonicalType) -- IntBox and StringBox
+-- are genuinely different, unrelated record shapes (one wraps an Int, the
+-- other a String) that happen to share the single field name `value`.
+-- Before this fix, declaring Show for both in the same module collided as
+-- a false-positive DuplicateInstance, purely because "which fields does
+-- this record have" was the only handle left once type-alias expansion
+-- had already erased both names down to their literal record shape. Was
+-- known_gaps/record-instance-keyed-by-name-not-type.knot before this got
+-- fixed.
+type alias IntBox = { value : Int }
+type alias StringBox = { value : String }
+
+instance Show IntBox where
+  show b = "int:" <> show b.value
+
+instance Show StringBox where
+  show b = "str:" <> b.value

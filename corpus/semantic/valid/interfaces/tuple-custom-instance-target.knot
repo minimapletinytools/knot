@@ -1,0 +1,17 @@
+-- expect: a Tuple target can now declare a custom instance, exactly like
+-- a closed Record target already could (Task #39: InstanceTable's own
+-- TupleKey-keyed tuple_entries, mirroring record_entries). Before this
+-- fix, head_ref returned None for CType::Tuple with no tuple analog of
+-- record_key to fall back to, so this was rejected as
+-- InstanceTargetNotNominal even though the exact same shape of
+-- declaration already worked for a record -- Show has no structural
+-- fallback the way Eq/Ord/Show's own hardcoded derivation does for other
+-- interfaces, so there was no way at all to give a tuple a custom Show
+-- instance. Was known_gaps/tuple-instance-target-still-rejected.knot
+-- before this got fixed.
+instance Show (Int, Int) where
+  show pair = case pair of
+    (a, b) -> "(" <> show a <> ", " <> show b <> ")"
+
+describePair :: (Int, Int) -> String
+describePair pair = show pair

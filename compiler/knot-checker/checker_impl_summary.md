@@ -244,22 +244,29 @@ instance's own `requires` (`instance Eq a => Eq (List a)`'s `Eq a`) is
 checked against each corresponding argument, including through a rigid
 variable buried inside an otherwise-concrete type (Fix #14) and through a
 `Collection`/`Context`-style partially-applied `Ctor` (this session).
-`Tuple`/`Unit` (and any `Record` with no matching custom instance) get
-hardcoded structural `Eq`/`Ord`/`Show` rules. **A closed `Record` can now
-declare a real, custom instance for *any* interface** (this session) —
-`InstanceTable` keeps a second key space, `record_entries`, keyed by
-`RecordKey` (a closed record's own sorted field-name set) rather than
-`Ref`, since `type alias` expansion has already erased any nominal name by
-the time this table is built. `check_instance` tries a matching record
-instance first, falling back to the structural derivation only when none
-exists — letting a custom `Eq`/`Ord`/`Show` correctly *override* the
-automatic one, and giving records access to interfaces (`Num`,
-`Semigroup`, anything user-defined) that have no structural fallback at
-all. Two residual gaps in this new machinery, both documented rather than
-silently wrong — see "Known gaps": it keys on field *names* only, not
-field *types*; and a record instance's own declared context (`instance Eq
-a => Eq { value : a }`) is accepted but its `a` obligation is never
-actually re-checked against a real call site's argument type.
+`Unit` (and any `Record`/`Tuple` with no matching custom instance) get
+hardcoded structural `Eq`/`Ord`/`Show` rules. **A closed `Record` or a
+`Tuple` can now declare a real, custom instance for *any* interface**
+(this session) — `InstanceTable` keeps two further key spaces,
+`record_entries` and `tuple_entries`, keyed by `RecordKey`/`TupleKey`
+rather than `Ref`, since `type alias` expansion has already erased any
+nominal name by the time this table is built. Both keys are genuinely
+*type*-aware, not just name/arity-aware: a `CanonicalType` walk replaces
+every type variable with a first-occurrence-order index (so `{ value : a
+}` and `{ value : b }` key identically — same shape — while `{ value :
+Int }` and `{ value : String }` key differently — genuinely different),
+closing the false-positive `DuplicateInstance` collision two same-field-
+name-but-different-type records used to hit. `check_instance` tries a
+matching record/tuple instance first, falling back to the structural
+derivation only when none exists — letting a custom `Eq`/`Ord`/`Show`
+correctly *override* the automatic one, and giving both access to
+interfaces (`Num`, `Semigroup`, anything user-defined) that have no
+structural fallback at all. A record instance's own declared context
+(`instance Eq a => Eq { value : a }`'s `Eq a`) is also now actually
+re-checked against a real call site's own field type, via
+`InstanceEntry.field_requires` — previously accepted into the table but
+never enforced (a real, demonstrated unsoundness before this session's
+fix).
 
 **`annotation::table`**: derives an annotation key's expected type — fixed
 shapes for `nodeId`/`position`/`label`/`doc`/`color`/`group`/`collapsed`,
@@ -478,18 +485,31 @@ exercise.
   `corpus/semantic/invalid/interfaces/record-instance-context-not-
   satisfied.knot` (plus a `valid/` companion proving the fix isn't overly
   conservative when the context genuinely is satisfied).
-- **The new record-instance table keys on field *names* only, not field
-  *types*** (documented at the time, in `InstanceTable`'s own doc
-  comment) — two unrelated record aliases that happen to share an
-  identical field-name set, both wanting the same interface in the same
-  module, are rejected as a `DuplicateInstance` even though they're
-  genuinely different shapes.
-- **A custom instance still can't target a `Tuple` (or bare `Var`/`Fn`)
-  shape, only a closed `Record`** — `instance Semigroup (Int, Int) where
-  ...` still reports `InstanceTargetNotNominal`, even though the
-  equivalent record case now works. `Tuple` still gets automatic
-  structural `Eq`/`Ord`/`Show`, same as before; it just can't be
-  *overridden* or given any other interface the way a record now can.
+- **Fixed. Record/tuple instance keys are now type-aware, and a `Tuple`
+  target can now declare a custom instance too** — previously the
+  record-instance table keyed purely on the sorted field-*name* set, so
+  two unrelated record aliases sharing an identical field-name set but
+  different field *types* (`{ value : Int }` vs `{ value : String }`)
+  wrongly collided as a `DuplicateInstance`; and a `Tuple` target
+  (`instance Semigroup (Int, Int) where ...`) was rejected outright as
+  `InstanceTargetNotNominal`, even though the equivalent record case
+  already worked. Both fixed together, since they share the same root
+  cause: a new `CanonicalType` walk (`canonicalize_ctype` over a fresh
+  declaration's own `CType`, `canonicalize_structure` over a real call
+  site's resolved `Structure`) replaces every type variable with a
+  first-occurrence-order index, giving `RecordKey`
+  (`Vec<(String, CanonicalType)>`) and the new `TupleKey`
+  (`Vec<CanonicalType>`) genuine type-awareness rather than just
+  name/arity-awareness — `{ value : a }`/`{ value : b }` still key
+  identically (same shape, arbitrary variable spelling) while `{ value :
+  Int }`/`{ value : String }` now correctly key differently.
+  `InstanceTable` gained a third parallel key space, `tuple_entries`
+  (mirroring `record_entries`), and `check_instance`'s `Structure::Tuple`
+  arm now tries a matching custom instance first, exactly like the
+  `Record` arm, falling back to the structural `Eq`/`Ord`/`Show`
+  derivation only when none exists. Moved from `known_gaps/` to
+  `corpus/semantic/valid/interfaces/record-instance-keyed-by-type-not-
+  just-name.knot` and `.../tuple-custom-instance-target.knot`.
 - **Annotation *values* are never type-checked against their own derived
   expected type**, and relatedly, **`Sensitivity` stays an opaque,
   non-introspecting stub** (spec §9.6) — `annotation::table` can derive
