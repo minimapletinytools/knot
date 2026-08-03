@@ -1,0 +1,20 @@
+pairs :: List Int -> List Int -> List (Int, Int)
+pairs xs ys = do
+  x <- xs
+  y <- ys
+  pure (x, y)
+
+samplePairs :: List (Int, Int)
+samplePairs = pairs [1, 2] [10, 20]
+
+sumsUnderTen :: List Int -> List Int -> List Int
+sumsUnderTen xs ys = do
+  x <- xs
+  y <- ys
+  if x + y < 10 then
+    pure (x + y)
+  else
+    []
+
+sampleSums :: List Int
+sampleSums = sumsUnderTen [1, 5, 8] [1, 2, 3]

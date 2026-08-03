@@ -1,0 +1,14 @@
+doubleThenShow :: List Int -> List String
+doubleThenShow xs = map show (map (\x -> x * 2) xs)
+
+sumOfDoubled :: List Int -> Int
+sumOfDoubled xs = foldl (+) 0 (map (\x -> x * 2) xs)
+
+filterThenMap :: List Int -> List Int
+filterThenMap xs = map (\x -> x * 10) (filter (\x -> x > 0) xs)
+
+sampleDoubled :: List String
+sampleDoubled = doubleThenShow [1, 2, 3]
+
+sampleFiltered :: List Int
+sampleFiltered = filterThenMap [-2, -1, 0, 1, 2]

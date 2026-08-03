@@ -1,0 +1,28 @@
+sumAll :: List Int -> Int
+sumAll xs = foldl (+) 0 xs
+
+productAll :: List Int -> Int
+productAll xs = foldl (*) 1 xs
+
+allTrue :: List Bool -> Bool
+allTrue flags = foldl (&&) True flags
+
+anyTrue :: List Bool -> Bool
+anyTrue flags = foldl (||) False flags
+
+concatAll :: List String -> String
+concatAll strs = foldl (<>) "" strs
+
+pairwiseSums :: List Int -> List Int -> List Int
+pairwiseSums xs ys = zipWith (+) xs ys
+
+zipWith :: (a -> b -> c) -> List a -> List b -> List c
+zipWith f xs ys = case (xs, ys) of
+  (x : xt, y : yt) -> f x y : zipWith f xt yt
+  _ -> []
+
+sampleSum :: Int
+sampleSum = sumAll [1, 2, 3, 4]
+
+sampleConcat :: String
+sampleConcat = concatAll ["a", "b", "c"]

@@ -1,0 +1,50 @@
+type FormError
+    = MissingField String
+    | InvalidNumber String
+
+type alias RawForm =
+    { username : String
+    , ageText : String
+    }
+
+type alias ParsedForm =
+    { username : String
+    , age : Int
+    }
+
+parseAge :: String -> Result FormError Int
+parseAge text = case text of
+  "0" -> Ok 0
+  "18" -> Ok 18
+  "21" -> Ok 21
+  "65" -> Ok 65
+  _ -> Err (InvalidNumber text)
+
+requireNonEmpty :: String -> String -> Result FormError String
+requireNonEmpty fieldName value =
+  if value == "" then
+    Err (MissingField fieldName)
+  else
+    Ok value
+
+parseForm :: RawForm -> Result FormError ParsedForm
+parseForm raw = do
+  username <- requireNonEmpty "username" raw.username
+  age <- parseAge raw.ageText
+  pure { username = username, age = age }
+
+instance Show FormError where
+  show e = case e of
+    MissingField field -> "missing field: " <> field
+    InvalidNumber text -> "invalid number: " <> text
+
+describeResult :: RawForm -> String
+describeResult raw = case parseForm raw of
+  Ok form -> form.username <> " (" <> show form.age <> ")"
+  Err e -> "form error: " <> show e
+
+sampleForm :: RawForm
+sampleForm = { username = "ada", ageText = "21" }
+
+sampleDescription :: String
+sampleDescription = describeResult sampleForm

@@ -1,0 +1,38 @@
+type ValidationError
+    = EmptyName
+    | NegativeAge Int
+
+type alias Person =
+    { name : String
+    , age : Int
+    }
+
+validateName :: String -> Result ValidationError String
+validateName name =
+  if name == "" then
+    Err EmptyName
+  else
+    Ok name
+
+validateAge :: Int -> Result ValidationError Int
+validateAge age =
+  if age < 0 then
+    Err (NegativeAge age)
+  else
+    Ok age
+
+makePerson :: String -> Int -> Result ValidationError Person
+makePerson rawName rawAge = do
+  name <- validateName rawName
+  age <- validateAge rawAge
+  pure { name = name, age = age }
+
+instance Show ValidationError where
+  show e = case e of
+    EmptyName -> "name cannot be empty"
+    NegativeAge age -> "age cannot be negative: " <> show age
+
+describePerson :: String -> Int -> String
+describePerson rawName rawAge = case makePerson rawName rawAge of
+  Ok person -> person.name <> " is " <> show person.age
+  Err e -> "invalid person: " <> show e

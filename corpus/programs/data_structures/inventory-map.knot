@@ -1,0 +1,30 @@
+type alias Inventory = Map String Int
+
+addStock :: String -> Int -> Inventory -> Inventory
+addStock item qty inventory = case Map.get item inventory of
+  Just existing -> Map.insert item (existing + qty) inventory
+  Nothing -> Map.insert item qty inventory
+
+removeStock :: String -> Int -> Inventory -> Result String Inventory
+removeStock item qty inventory = case Map.get item inventory of
+  Nothing -> Err ("no such item: " <> item)
+  Just existing ->
+    if existing < qty then
+      Err ("not enough stock of " <> item)
+    else
+      Ok (Map.insert item (existing - qty) inventory)
+
+isInStock :: String -> Inventory -> Bool
+isInStock item inventory = Map.member item inventory
+
+emptyInventory :: Inventory
+emptyInventory = Map.empty
+
+sampleInventory :: Inventory
+sampleInventory =
+    emptyInventory
+        |> addStock "widget" 10
+        |> addStock "gadget" 5
+
+afterSale :: Result String Inventory
+afterSale = removeStock "widget" 3 sampleInventory

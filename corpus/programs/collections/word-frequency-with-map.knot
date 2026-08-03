@@ -1,0 +1,25 @@
+countWord :: String -> Map String Int -> Map String Int
+countWord word counts = case Map.get word counts of
+  Just n -> Map.insert word (n + 1) counts
+  Nothing -> Map.insert word 1 counts
+
+wordFrequency :: List String -> Map String Int
+wordFrequency words = foldl (\counts w -> countWord w counts) Map.empty words
+
+mostCommon :: Map String Int -> Maybe (String, Int)
+mostCommon counts = case Map.toList counts of
+  [] -> Nothing
+  h : t -> Just (foldl (\best pair -> if snd pair > snd best then pair else best) h t)
+
+snd :: (a, b) -> b
+snd pair = case pair of
+  (_, y) -> y
+
+sampleWords :: List String
+sampleWords = ["the", "quick", "fox", "the", "the", "fox"]
+
+sampleFrequency :: Map String Int
+sampleFrequency = wordFrequency sampleWords
+
+sampleMostCommon :: Maybe (String, Int)
+sampleMostCommon = mostCommon sampleFrequency

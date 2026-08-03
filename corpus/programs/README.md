@@ -318,3 +318,34 @@ pass. After also fixing finding #5 (see its own updated text above), 76 of
 above), 78 of 80 pass. After also fixing finding #7 (Round 1's own, see
 its updated text above), all 80 of 80 pass -- every finding logged across
 all three rounds is now fixed.
+
+### Round 4 (2026-08-02)
+
+18 more fixtures (98 total), deliberately weighted toward monad/`do`-
+notation coverage: `Result`-based validation pipelines (chained and
+nested), a hand-declared `Context` instance on a brand-new user type
+(`Box`, the simplest possible custom monad), a second custom `Context` on
+a genuinely 2-parameter user ADT (`Outcome e a`, an `Either`-shaped type,
+directly exercising finding #3's own fix on *user* code, not just the
+builtin `Result`), `List`'s own do-notation (cartesian products, list-
+comprehension style), realistic uses of the now-working `Map` API
+(word-frequency counting, an inventory system, a graph's adjacency map),
+bare operator sections used in real folds (`foldl (+) 0 xs`,
+`foldl (<>) "" strs`), a custom `Num` instance combined with operator
+sections (`foldl (+) origin vectors`), a deliberate numeric-literal-
+polymorphism stress test, and a single record type carrying `Eq`+`Ord`+
+`Show`+`Num` custom instances all at once. 97 of 98 passed initially,
+tracing back to one root cause, **not yet fixed**:
+
+12. **`constrain::decl::constrain_method_body_against` has the identical
+    header-vs-body solve-order bug Fix #13 fixed for ordinary function
+    bindings, in instance methods' own separate code path** —
+    `multi_interface/eq-ord-show-num-all-together.knot`'s own `Show Money`
+    instance computes intermediate values via a local `let` (`dollars =
+    div m.cents 100; remainder = mod m.cents 100`) before formatting them,
+    exactly the same shape as Fix #13's own quicksort `smaller`/`larger`
+    example — misfiring `AmbiguousConstraint("Integral")`. Fix #13 only
+    ever touched `constrain_group_chain` (ordinary top-level/`let`
+    bindings); `constrain_method_body_against` (instance methods'
+    equivalent) independently builds the exact same header-`Equal`-after-
+    body shape, so it never received that fix.

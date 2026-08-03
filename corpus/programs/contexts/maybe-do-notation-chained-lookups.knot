@@ -1,0 +1,33 @@
+type alias Employee =
+    { name : String
+    , managerId : Maybe Int
+    }
+
+lookupEmployee :: Int -> List (Int, Employee) -> Maybe Employee
+lookupEmployee empId directory = case directory of
+  [] -> Nothing
+  (eid, employee) : rest ->
+    if eid == empId then
+      Just employee
+    else
+      lookupEmployee empId rest
+
+managerName :: Int -> List (Int, Employee) -> Maybe String
+managerName empId directory = do
+  employee <- lookupEmployee empId directory
+  managerId <- employee.managerId
+  manager <- lookupEmployee managerId directory
+  pure manager.name
+
+sampleDirectory :: List (Int, Employee)
+sampleDirectory =
+    [ (1, { name = "Ada", managerId = Nothing })
+    , (2, { name = "Grace", managerId = Just 1 })
+    , (3, { name = "Alan", managerId = Just 2 })
+    ]
+
+sampleManagerName :: Maybe String
+sampleManagerName = managerName 3 sampleDirectory
+
+sampleTopManagerName :: Maybe String
+sampleTopManagerName = managerName 1 sampleDirectory

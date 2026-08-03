@@ -1,0 +1,21 @@
+populationsList :: List (String, Int)
+populationsList =
+    [ ("Tokyo", 37400000)
+    , ("Delhi", 30290000)
+    , ("Shanghai", 27058000)
+    ]
+
+populations :: Map String Int
+populations = Map.fromList populationsList
+
+totalPopulation :: Map String Int -> Int
+totalPopulation m = foldl (\acc v -> acc + v) 0 (Map.values m)
+
+cityCount :: Map String Int -> Int
+cityCount m = length (Map.keys m)
+
+allCitiesLarge :: Map String Int -> Bool
+allCitiesLarge m = foldl (\acc v -> acc && v > 1000000) True (Map.values m)
+
+sampleTotal :: Int
+sampleTotal = totalPopulation populations

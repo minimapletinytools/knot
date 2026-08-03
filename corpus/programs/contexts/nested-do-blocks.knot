@@ -1,0 +1,19 @@
+safeDivide :: Int -> Int -> Maybe Int
+safeDivide n d =
+  if d == 0 then
+    Nothing
+  else
+    Just (div n d)
+
+averageOfDivisions :: Int -> Int -> Int -> Int -> Maybe Int
+averageOfDivisions a b c d = do
+  first <- do
+    x <- safeDivide a b
+    pure (x * 2)
+  second <- do
+    y <- safeDivide c d
+    pure (y * 3)
+  pure (div (first + second) 2)
+
+sampleAverage :: Maybe Int
+sampleAverage = averageOfDivisions 10 2 9 3

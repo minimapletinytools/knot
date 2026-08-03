@@ -1,0 +1,58 @@
+type OrderError
+    = OutOfStock String
+    | InvalidQuantity
+
+type alias OrderLine =
+    { item : String
+    , quantity : Int
+    }
+
+type alias Order =
+    { lines : List OrderLine
+    , total : Int
+    }
+
+priceOf :: String -> Int
+priceOf item = case item of
+  "widget" -> 999
+  "gadget" -> 4999
+  _ -> 0
+
+checkQuantity :: OrderLine -> Result OrderError OrderLine
+checkQuantity line =
+  if line.quantity <= 0 then
+    Err InvalidQuantity
+  else if line.quantity > 100 then
+    Err (OutOfStock line.item)
+  else
+    Ok line
+
+lineTotal :: OrderLine -> Int
+lineTotal line = priceOf line.item * line.quantity
+
+processLine :: OrderLine -> Result OrderError Int
+processLine line = do
+  checked <- checkQuantity line
+  pure (lineTotal checked)
+
+processOrder :: List OrderLine -> Result OrderError Order
+processOrder lines = do
+  total <- sumLineTotals lines
+  pure { lines = lines, total = total }
+
+sumLineTotals :: List OrderLine -> Result OrderError Int
+sumLineTotals lines = case lines of
+  [] -> Ok 0
+  h : t -> do
+    lineAmount <- processLine h
+    restAmount <- sumLineTotals t
+    pure (lineAmount + restAmount)
+
+sampleOrderLines :: List OrderLine
+sampleOrderLines =
+    [ { item = "widget", quantity = 3 }
+    , { item = "gadget", quantity = 1 }
+    ]
+
+sampleOrder :: Result OrderError Order
+sampleOrder = processOrder sampleOrderLines

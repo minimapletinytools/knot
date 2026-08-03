@@ -1,0 +1,19 @@
+safeDivide :: Int -> Int -> Result String Int
+safeDivide n d =
+  if d == 0 then
+    Err "division by zero"
+  else
+    Ok (div n d)
+
+chainedDivisions :: Int -> List Int -> Result String Int
+chainedDivisions start divisors = case divisors of
+  [] -> Ok start
+  d : rest -> do
+    next <- safeDivide start d
+    chainedDivisions next rest
+
+sampleChain :: Result String Int
+sampleChain = chainedDivisions 1000 [2, 5, 2]
+
+sampleFailingChain :: Result String Int
+sampleFailingChain = chainedDivisions 1000 [2, 0, 2]

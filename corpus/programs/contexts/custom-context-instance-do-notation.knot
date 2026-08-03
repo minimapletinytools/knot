@@ -1,0 +1,19 @@
+type Box a = Box a
+
+instance Context Box where
+  pure x = Box x
+  bind box f = case box of
+    Box x -> f x
+
+unwrapBox :: Box a -> a
+unwrapBox box = case box of
+  Box x -> x
+
+summed :: Box Int
+summed = do
+  x <- Box 5
+  y <- Box 10
+  pure (x + y)
+
+result :: Int
+result = unwrapBox summed

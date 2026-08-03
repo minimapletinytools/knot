@@ -1,0 +1,35 @@
+type alias Graph = Map Int (List Int)
+
+type PathError
+    = NodeNotFound Int
+
+instance Show PathError where
+  show e = case e of
+    NodeNotFound n -> "node not found: " <> show n
+
+neighborsOf :: Int -> Graph -> Result PathError (List Int)
+neighborsOf node graph = case Map.get node graph of
+  Just ns -> Ok ns
+  Nothing -> Err (NodeNotFound node)
+
+contains :: Int -> List Int -> Bool
+contains x xs = case xs of
+  [] -> False
+  h : t -> if h == x then True else contains x t
+
+sampleGraph :: Graph
+sampleGraph =
+    Map.fromList
+        [ (1, [2, 3])
+        , (2, [1, 4])
+        , (3, [1, 4])
+        , (4, [2, 3])
+        ]
+
+areDirectlyConnected :: Int -> Int -> Graph -> Result PathError Bool
+areDirectlyConnected a b graph = do
+  neighbors <- neighborsOf a graph
+  pure (contains b neighbors)
+
+sampleConnected :: Result PathError Bool
+sampleConnected = areDirectlyConnected 1 2 sampleGraph

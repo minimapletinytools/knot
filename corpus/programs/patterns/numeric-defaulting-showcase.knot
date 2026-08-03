@@ -1,0 +1,26 @@
+plainInt :: Int
+plainInt = 5
+
+asFloat :: Float
+asFloat = 5
+
+mixedArithmetic :: Float
+mixedArithmetic = 3 + 4.5
+
+averageOfInts :: Int -> Int -> Float
+averageOfInts a b = (fromIntegral a + fromIntegral b) / 2
+
+sampleTuple :: (Int, Float)
+sampleTuple = (5, 5)
+
+sampleList :: List Float
+sampleList = [1, 2, 3.5, 4]
+
+applyTwice :: (a -> a) -> a -> a
+applyTwice f x = f (f x)
+
+incremented :: Int
+incremented = applyTwice (\n -> n + 1) 10
+
+incrementedFloat :: Float
+incrementedFloat = applyTwice (\n -> n + 1) 10

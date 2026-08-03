@@ -1,0 +1,54 @@
+type alias Money =
+    { cents : Int
+    }
+
+instance Eq Money where
+  (==) a b = a.cents == b.cents
+
+instance Ord Money where
+  compare a b = compare a.cents b.cents
+
+instance Show Money where
+  show m =
+    let
+        dollars = div m.cents 100
+        remainder = mod m.cents 100
+    in
+    "$" <> show dollars <> "." <> show remainder
+
+instance Num Money where
+  (+) a b = { cents = a.cents + b.cents }
+  (-) a b = { cents = a.cents - b.cents }
+  (*) a b = { cents = a.cents * b.cents }
+  negate m = { cents = 0 - m.cents }
+  abs m = { cents = absInt m.cents }
+  signum m = { cents = signInt m.cents }
+
+absInt :: Int -> Int
+absInt n = if n < 0 then 0 - n else n
+
+signInt :: Int -> Int
+signInt n =
+  if n > 0 then
+    1
+  else if n < 0 then
+    -1
+  else
+    0
+
+total :: List Money -> Money
+total amounts = foldl (+) { cents = 0 } amounts
+
+maxAmount :: List Money -> Money
+maxAmount amounts = case amounts of
+  [] -> { cents = 0 }
+  h : t -> foldl (\best m -> if m > best then m else best) h t
+
+describeAmounts :: List Money -> String
+describeAmounts amounts = "total: " <> show (total amounts) <> ", max: " <> show (maxAmount amounts)
+
+sampleAmounts :: List Money
+sampleAmounts = [{ cents = 500 }, { cents = 1250 }, { cents = 75 }]
+
+sampleDescription :: String
+sampleDescription = describeAmounts sampleAmounts

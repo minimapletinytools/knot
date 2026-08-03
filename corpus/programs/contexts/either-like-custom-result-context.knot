@@ -1,0 +1,36 @@
+type Outcome e a
+    = Failure e
+    | Success a
+
+instance Context (Outcome e) where
+  pure x = Success x
+  bind outcome f = case outcome of
+    Failure e -> Failure e
+    Success x -> f x
+
+type ValidationError
+    = TooShort
+    | TooLong
+
+validateName :: String -> Outcome ValidationError String
+validateName name =
+  if name == "" then
+    Failure TooShort
+  else
+    Success name
+
+validateAge :: Int -> Outcome ValidationError Int
+validateAge age =
+  if age > 150 then
+    Failure TooLong
+  else
+    Success age
+
+processPerson :: String -> Int -> Outcome ValidationError (String, Int)
+processPerson rawName rawAge = do
+  name <- validateName rawName
+  age <- validateAge rawAge
+  pure (name, age)
+
+sampleOutcome :: Outcome ValidationError (String, Int)
+sampleOutcome = processPerson "Ada" 36
