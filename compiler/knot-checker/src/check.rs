@@ -52,7 +52,12 @@ use crate::solve::solve_with_obligations;
 /// module's own doc comment explains), generates and solves constraints
 /// over every top-level binding and instance method body, and checks every
 /// resulting instance obligation. Returns every error found; an empty
-/// `Vec` means `decls` type-checks cleanly.
+/// `Vec` means `decls` type-checks cleanly. Also runs pattern-match
+/// exhaustiveness checking (`exhaustiveness::check_module_exhaustiveness`)
+/// over the same `decls` — see `check_module_with_warnings` for how to
+/// actually get at what that finds; this entry point discards it, matching
+/// every one of its own existing callers not caring (a non-exhaustive
+/// `case` is a warning, never a `TypeError`, so it can't show up here).
 ///
 /// **One known, narrow gap, inherited rather than introduced here**: a
 /// user re-declaring an instance a *builtin* type already has (`instance Eq
@@ -64,6 +69,21 @@ use crate::solve::solve_with_obligations;
 /// rather than silently leaving it ambiguous, but out of scope for this
 /// entry point itself.
 pub fn check_module(decls: &[Spanned<CDecl>]) -> Vec<TypeError> {
+    let (errors, _warnings) = check_module_with_warnings(decls);
+    errors
+}
+
+/// Same as `check_module`, plus every `exhaustiveness::Warning` found along
+/// the way — a wholly separate return value, not folded into the
+/// `Vec<TypeError>` above (see `exhaustiveness`'s own doc comment on why a
+/// non-exhaustive `case` is never a reason to reject an otherwise-valid
+/// program). Split out from `check_module` itself (rather than always
+/// returning both) purely so `check_module`'s own ~30 existing callers,
+/// which have no use for warnings, don't have to change at all — the same
+/// reasoning `solve`/`solve_with_obligations` already established.
+pub fn check_module_with_warnings(
+    decls: &[Spanned<CDecl>],
+) -> (Vec<TypeError>, Vec<crate::exhaustiveness::Warning>) {
     let mut sub = crate::var::Substitution::new();
     let (mut env, prelude_table) = crate::prelude::seed(&mut sub);
     seed_user_constructors(&mut sub, &mut env, decls);
@@ -78,7 +98,9 @@ pub fn check_module(decls: &[Spanned<CDecl>]) -> Vec<TypeError> {
 
     check_pending(&mut sub, &table, &given, pending, &mut errors);
 
-    errors
+    let warnings = crate::exhaustiveness::check_module_exhaustiveness(decls);
+
+    (errors, warnings)
 }
 
 #[cfg(test)]
@@ -456,5 +478,29 @@ mod tests {
         ));
         let errors = check_module(&cs);
         assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn check_module_with_warnings_reports_a_non_exhaustive_case_but_no_type_error() {
+        // known_gaps/non-exhaustive-case-not-flagged.knot's own motivating
+        // case: a case missing an entire constructor arm used to produce
+        // zero diagnostics of any kind. Now a Warning -- but still not a
+        // TypeError, so a caller that only looks at check_module's own
+        // Vec<TypeError> (all ~30 of check_module's own existing callers)
+        // correctly keeps seeing this as a clean type-check.
+        let cs = decls(concat!(
+            "type Shape = Circle Float | Square Float | Triangle Float Float Float\n",
+            "area :: Shape -> Float\n",
+            "area shape = case shape of\n",
+            "  Circle r -> 3.14159 * r * r\n",
+            "  Square s -> s * s\n",
+        ));
+        let (errors, warnings) = check_module_with_warnings(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(
+            warnings[0].kind,
+            crate::exhaustiveness::WarningKind::NonExhaustiveMatch
+        );
     }
 }

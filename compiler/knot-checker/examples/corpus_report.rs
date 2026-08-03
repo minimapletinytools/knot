@@ -5,6 +5,13 @@
 //! per fixture), this tool doesn't know or assert an expected outcome — the
 //! whole point of `corpus/programs/` is finding out what actually happens.
 //!
+//! A fixture that type-checks cleanly but still has an
+//! `exhaustiveness::Warning` (a non-exhaustive `case`, say) prints as `OK*`
+//! rather than plain `OK`, and is listed in its own summary section —
+//! still counted in the pass tally (a warning is never a failure), just
+//! flagged so it doesn't silently blend in with fixtures that have
+//! nothing to say at all.
+//!
 //! Run with `cargo run --example corpus_report -p knot-checker` from
 //! `compiler/`. Exits 0 regardless of how many fixtures fail — this is a
 //! reporting tool for the iterate-and-fix cycle, not a pass/fail test.
@@ -46,7 +53,11 @@ fn walk(dir: &Path) -> Vec<PathBuf> {
 }
 
 enum Outcome {
-    Ok,
+    /// Type-checks cleanly -- still carries any `exhaustiveness::Warning`s
+    /// found along the way (a non-exhaustive `case` etc.), since those are
+    /// never a reason to call a fixture failing (see `check::
+    /// check_module_with_warnings`'s own doc comment).
+    Ok(Vec<String>),
     ParseError(String),
     LeftoverInput(String),
     CanonFailed(Vec<String>),
@@ -70,9 +81,9 @@ fn run(source: &str) -> Outcome {
         }
     };
 
-    let errors = knot_checker::check::check_module(&cdecls);
+    let (errors, warnings) = knot_checker::check::check_module_with_warnings(&cdecls);
     if errors.is_empty() {
-        Outcome::Ok
+        Outcome::Ok(warnings.iter().map(|w| format!("{:?}", w.kind)).collect())
     } else {
         Outcome::CheckFailed(errors.iter().map(|e| format!("{:?}", e.kind)).collect())
     }
@@ -88,15 +99,21 @@ fn main() {
     let files = knot_files(&dir);
     let mut ok_count = 0;
     let mut failures: Vec<(PathBuf, String)> = Vec::new();
+    let mut warned: Vec<(PathBuf, Vec<String>)> = Vec::new();
 
     for path in &files {
         let source = std::fs::read_to_string(path)
             .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         let rel = path.strip_prefix(&dir).unwrap_or(path);
         match run(&source) {
-            Outcome::Ok => {
+            Outcome::Ok(warnings) => {
                 ok_count += 1;
-                println!("OK    {}", rel.display());
+                if warnings.is_empty() {
+                    println!("OK    {}", rel.display());
+                } else {
+                    println!("OK*   {}: {warnings:?}", rel.display());
+                    warned.push((rel.to_path_buf(), warnings));
+                }
             }
             Outcome::ParseError(msg) => {
                 println!("PARSE {}: {msg}", rel.display());
@@ -129,6 +146,13 @@ fn main() {
         println!("Failures:");
         for (path, reason) in &failures {
             println!("  {} -- {reason}", path.display());
+        }
+    }
+    if !warned.is_empty() {
+        println!();
+        println!("{} passed with warnings (marked OK* above):", warned.len());
+        for (path, warnings) in &warned {
+            println!("  {} -- {warnings:?}", path.display());
         }
     }
 }

@@ -56,13 +56,16 @@ directory ever *changes* which of these it reports, that's a signal the
 underlying gap moved (fixed, or newly broken worse) — update
 `checker_impl_summary.md`'s own "Known gaps" section and this fixture's
 own comment together, in the same change, rather than letting them drift
-apart. As of this writing: 6 fixtures, covering exhaustiveness checking
-never being wired into `check_module`, custom instances still not being
-able to target a `Tuple`, a record instance's own declared context never
-being enforced against a real argument type, the new record-instance
+apart. As of this writing: 5 fixtures, covering custom instances still not
+being able to target a `Tuple`, a record instance's own declared context
+never being enforced against a real argument type, the new record-instance
 table's field-name-only (not field-type-aware) keying, re-declaring an
 instance a builtin type already has not being flagged, and annotation
 values never being type-checked against their own derived expected type.
+A sixth, exhaustiveness checking never being wired into `check_module`,
+graduated out of this directory once fixed — see `patterns/non-
+exhaustive-case-warns.knot`, and `checker_impl_summary.md`'s own "Known
+gaps" section for the rest of this graduation story.
 
 ## Findings log
 

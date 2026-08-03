@@ -1,0 +1,18 @@
+-- Was known_gaps/non-exhaustive-case-not-flagged.knot -- FIXED, moved out
+-- of known_gaps/ since it no longer demonstrates an open gap.
+-- exhaustiveness.rs's own Maranget's-algorithm checking is now wired into
+-- check::check_module_with_warnings: this `area` function's own `case`
+-- handles Circle and Square but silently omits Triangle, which now
+-- produces an exhaustiveness::Warning (NonExhaustiveMatch) -- still not a
+-- TypeError (the language spec only ever wants a warning here, never a
+-- hard error), so check_module's own plain Vec<TypeError> stays empty and
+-- every one of its ~30 existing callers is unaffected.
+type Shape
+    = Circle Float
+    | Square Float
+    | Triangle Float Float Float
+
+area :: Shape -> Float
+area shape = case shape of
+  Circle r -> 3.14159 * r * r
+  Square s -> s * s

@@ -349,12 +349,13 @@ principle — `Int`/`String` literals have no enumerable complete set).
 `is_exhaustive` and `redundant_arms` are both just different questions
 asked of the same `is_useful` core.
 
-**Still true, and worth stating plainly rather than leaving implicit**:
-`check_module` never calls this. A `case` missing an entire constructor
-arm (`Circle`/`Square` handled, `Triangle` silently missing) type-checks
-today with zero diagnostics of any kind — not even a warning, even though
-the exact machinery to catch it exists, is fully tested, and needs no
-further design work to wire in. See "Known gaps."
+**Fixed**: `check::check_module_with_warnings` now calls this
+(`check_module_exhaustiveness`, added directly to this module) for every
+binding's own body. A `case` missing an entire constructor arm
+(`Circle`/`Square` handled, `Triangle` silently missing) produces a real
+`Warning` now, never a `TypeError` — see "Known gaps" for why that split
+matters and TM7's own `check_module`/`check_module_with_warnings` split
+this reuses.
 
 ---
 
@@ -448,13 +449,17 @@ writing this revision — see `corpus/programs/known_gaps/` for a runnable
 fixture demonstrating each of the ones a `.knot` program can actually
 exercise.
 
-- **`exhaustiveness.rs` is never wired into `check_module`.** A `case`
-  missing an entire constructor arm produces zero diagnostics — not an
-  error, not even a warning — despite the checker having a complete,
-  tested Maranget's-algorithm implementation sitting right there,
-  needing no further design work to invoke. Arguably the single highest-
-  value remaining gap: this is core, everyday type-checker functionality
-  in any ML-family language, not an edge case.
+- **Fixed. `exhaustiveness.rs` is now wired in** — `check::
+  check_module_with_warnings` (a new sibling of `check_module`, which
+  keeps its own existing signature so its ~30 existing callers don't have
+  to change) walks every binding's body, checks every `CExpr::Case` it
+  finds via `exhaustiveness::check_module_exhaustiveness`, and returns a
+  `Vec<exhaustiveness::Warning>` alongside the usual `Vec<TypeError>` — a
+  wholly separate channel, never able to turn a program `check_module`
+  used to accept into one it now rejects (the spec only ever wants a
+  warning here). `corpus_report` now prints `OK*` plus the warning list
+  for a fixture that type-checks cleanly but still has one; see
+  `corpus/programs/patterns/non-exhaustive-case-warns.knot`.
 - **A record instance's own declared context is accepted but never
   enforced at use sites — a real, demonstrated unsoundness, not just an
   incompleteness.** `instance Eq a => Eq { value : a } where ...` type-
