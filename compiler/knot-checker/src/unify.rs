@@ -227,7 +227,7 @@ fn unify_structure(
 /// an earlier record (from a prior unification), recursing through `unify`
 /// lands back in this same function to merge the two record shapes, instead
 /// of needing a separate explicit row-flattening pass. It's also what makes
-/// a rigid extension variable (spec §3.4/plan §5's row-polymorphic `{ r | x :
+/// a rigid extension variable (spec §5.4/plan §5's row-polymorphic `{ r | x :
 /// Float, y : Float }`) correctly refuse to be forced into a concrete shape:
 /// `unify`'s existing rigid-vs-structure case rejects that uniformly, with
 /// no extra code needed here.
@@ -475,7 +475,7 @@ mod tests {
     fn ctor_var_pins_to_a_concrete_head_it_meets_and_unifies_arguments() {
         // f a ~ List Int should bind f := List and a := Int, mirroring an
         // ordinary generic App's own argument-unification rule, just with
-        // a variable in the head position (spec §6.3's Collection, e.g.
+        // a variable in the head position (spec §10.6's Collection, e.g.
         // `map`'s `f`).
         let mut sub = Substitution::new();
         let f = sub.fresh_ctor_unbound();

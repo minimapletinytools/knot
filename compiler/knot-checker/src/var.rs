@@ -40,7 +40,7 @@ impl Substitution {
     }
 
     /// A constructor-sorted variable — `f` in `map :: (a -> b) -> f a -> f
-    /// b` (spec §6.3/§6.4). Mechanically identical to `fresh_unbound`
+    /// b` (spec §10.6). Mechanically identical to `fresh_unbound`
     /// (same `Slot::Unbound` representation, same union-find plumbing): the
     /// "sort" isn't tracked on the slot at all, only by convention of where
     /// the resulting `TypeVarId` gets placed (a `Structure::VarApp` head,

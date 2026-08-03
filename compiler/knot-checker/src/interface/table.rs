@@ -1,6 +1,6 @@
 //! The closed interface set itself: fixed at `Eq`, `Ord`, `Show`,
-//! `Semigroup`, `Monoid`, `Num`, `Fractional`, `Integral` (spec §2.3/§7),
-//! plus `Collection`/`Context` (spec §6.3/§6.4) — no user-defined interface
+//! `Semigroup`, `Monoid`, `Num`, `Fractional`, `Integral` (spec §2.3/§10),
+//! plus `Collection`/`Context` (spec §10.6) — no user-defined interface
 //! can ever add to this list, so this is a small hardcoded table, not
 //! something built from a module's own declarations (contrast
 //! `instance.rs`'s `InstanceTable`, which is). Each entry's superclasses are
@@ -19,7 +19,7 @@
 //! **Method *shapes*** (Fix #5, `knot-checker-gaps-plan.md`) — `METHODS`
 //! restates each of the eight ordinary (non-`Collection`/`Context`)
 //! interfaces' own methods symbolically, relative to the interface's own
-//! `Self` type, straight from spec §6/§7. `constrain::decl::
+//! `Self` type, straight from spec §2.4/§10.5. `constrain::decl::
 //! constrain_instance` instantiates a method's shape against whatever
 //! concrete type a specific `instance` targets to get the real expected
 //! type to check that method's body against — the same idea as an ordinary
@@ -54,7 +54,7 @@ pub enum MethodShape {
 
 use MethodShape::{Bool, Fn, Ordering, SelfTy, StringTy};
 
-/// `(interface, &[(method name, shape)])` — spec §6.1/§6.2's own tables,
+/// `(interface, &[(method name, shape)])` — spec §2.4/§10.5's own tables,
 /// restated symbolically. Operator methods are keyed by their bare symbol
 /// (`"=="`, not `"(==)"`) — `knot-syntax::parse::decl::decl_name` already
 /// strips the parens when parsing `(==) a b = ...`.
@@ -103,7 +103,7 @@ pub fn method_shape(interface: &str, method: &str) -> Option<&'static MethodShap
         .map(|(_, shape)| shape)
 }
 
-/// A `Collection`/`Context` method's own shape (spec §6.3/§6.4) — see
+/// A `Collection`/`Context` method's own shape (spec §10.6) — see
 /// module docs on why this needs to be a separate type from `MethodShape`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CtorMethodShape {
@@ -124,7 +124,7 @@ pub enum CtorMethodShape {
 use CtorMethodShape::{Fn as CFn, SelfApp, Var};
 
 /// `(interface, &[(method name, shape)])` for `Collection`/`Context`
-/// (spec §6.3/§6.4), the same shape `METHODS` is for the other eight.
+/// (spec §10.6), the same shape `METHODS` is for the other eight.
 pub const CTOR_METHODS: &[(&str, &[(&str, CtorMethodShape)])] = &[
     (
         "Collection",
@@ -193,7 +193,7 @@ pub const INTERFACES: &[(&str, &[&str])] = &[
     ("Monoid", &["Semigroup"]),
     ("Num", &[]),
     ("Fractional", &["Num"]),
-    // spec §6.2: `interface (Num a, Ord a) => Integral a where ...`
+    // spec §10.5: `interface (Num a, Ord a) => Integral a where ...`
     ("Integral", &["Num", "Ord"]),
     ("Collection", &[]),
     ("Context", &[]),

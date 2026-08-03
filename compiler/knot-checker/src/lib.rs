@@ -48,7 +48,7 @@
 //!   `Lookup`/`SchemeEnv` machinery for names `Ref::Local` can't otherwise
 //!   tell apart from an ordinary monomorphic param.
 //! - **Fix #2** (done): `map`/`foldl`/`foldr`/`filter`/`length`/`pure`/
-//!   `bind` (spec §6.3/§6.4) now have real, polymorphic-over-a-type-
+//!   `bind` (spec §10.6) now have real, polymorphic-over-a-type-
 //!   constructor signatures — `ty::Structure::Ctor`/`VarApp`,
 //!   `Substitution::fresh_ctor_unbound`, and two new `Collection`/`Context`
 //!   interfaces (`interface::table`, seeded in `prelude.rs` for `List`/
@@ -162,7 +162,7 @@
 //!   `Context` instance methods (`map`, `bind`, ...) are now real,
 //!   type-checked bodies too. `interface::table::CtorMethodShape`/
 //!   `CTOR_METHODS` restate `map`/`foldl`/`foldr`/`filter`/`length`/`pure`/
-//!   `bind`'s own shapes (spec §6.3/§6.4), as a genuinely separate type from
+//!   `bind`'s own shapes (spec §10.6), as a genuinely separate type from
 //!   `MethodShape` rather than an extension of it — `Self` here is a type
 //!   *constructor*, only ever appearing applied (`SelfApp`), and a method
 //!   can introduce its own extra type variables (`map`'s `a`/`b`) that
@@ -179,7 +179,7 @@
 //!   there, not here, since `BUILTIN_INTERFACES` is `knot-canonical`'s own
 //!   closed list.
 //! - **Fix #7** (done, entirely in `knot-canonical`): an extensible-record
-//!   alias (spec §3.4's `{ r | field : Type }`) applied to a *concrete*
+//!   alias (spec §5.4's `{ r | field : Type }`) applied to a *concrete*
 //!   argument in its own row-extension position — `type alias Selectable a
 //!   = { a | isSelected : Bool }` used as `Selectable Foo` — never actually
 //!   substituted anything into that slot. `CType::Record`'s extension is

@@ -4,7 +4,7 @@
 //! `knot-canonical::prelude` — that crate answers "is this name real,"
 //! this one answers "what type does it have."
 //!
-//! **`Collection`/`Context`** (spec §6.3/§6.4) — `map`, `foldl`, `foldr`,
+//! **`Collection`/`Context`** (spec §10.6) — `map`, `foldl`, `foldr`,
 //! `filter`, `length`, `pure`, `bind` — are seeded with real, higher-kinded
 //! signatures now (`knot-checker-gaps-plan.md`'s Fix #2): each one's `f` is
 //! a `Substitution::fresh_ctor_unbound` variable threaded through a
@@ -31,7 +31,7 @@ fn app0(sub: &mut Substitution, name: &str) -> crate::var::TypeVarId {
     sub.fresh_bound(Structure::App(Ref::Builtin(name.to_string()), vec![]))
 }
 
-/// `f arg` for a constructor-*variable*-headed application (spec §6.3/§6.4)
+/// `f arg` for a constructor-*variable*-headed application (spec §10.6)
 /// -- the higher-kinded counterpart of `app0`/`app1` above, which only ever
 /// build a fixed, concrete head.
 fn var_app(
@@ -70,7 +70,7 @@ pub fn seed(sub: &mut Substitution) -> (SchemeEnv, InstanceTable) {
 }
 
 fn seed_instances(table: &mut InstanceTable) {
-    // spec §6.2: instances built-in for Num Int/Float, Integral Int, Fractional Float.
+    // spec §10.5: instances built-in for Num Int/Float, Integral Int, Fractional Float.
     table.insert_builtin("Num", Ref::Builtin("Int".to_string()), vec![]);
     table.insert_builtin("Num", Ref::Builtin("Float".to_string()), vec![]);
     table.insert_builtin("Integral", Ref::Builtin("Int".to_string()), vec![]);
@@ -130,7 +130,7 @@ fn seed_instances(table: &mut InstanceTable) {
         );
     }
 
-    // spec §6.3/§6.4: Collection (List, Map), Context (Maybe, Result, IO,
+    // spec §10.6: Collection (List, Map), Context (Maybe, Result, IO,
     // List) -- keyed by the constructor's own `Ref`, exactly like every
     // other instance here; no `requires` of their own (the obligation is
     // on the bare constructor variable itself, not on some argument
@@ -149,7 +149,7 @@ fn seed_values(sub: &mut Substitution, env: &mut SchemeEnv) {
     let ordering_ty = app0(sub, "Ordering");
     let int_ty = app0(sub, "Int");
 
-    // not :: Bool -> Bool (spec §4.8's "Boolean Operators" note)
+    // not :: Bool -> Bool (spec §7.4's "Boolean Operators" note)
     let not_ty = sub.fresh_bound(Structure::Fn(bool_ty, bool_ty));
     env.insert(
         SchemeKey::Builtin("not".to_string()),
@@ -228,7 +228,7 @@ fn seed_values(sub: &mut Substitution, env: &mut SchemeEnv) {
         );
     }
 
-    // fromIntegral :: (Integral a, Num b) => a -> b (spec §6.2) -- the return-
+    // fromIntegral :: (Integral a, Num b) => a -> b (spec §10.5) -- the return-
     // type-only variable `b` this whole design already accommodates without
     // any special-casing (see the earlier monomorphism-restriction decision).
     {
@@ -245,7 +245,7 @@ fn seed_values(sub: &mut Substitution, env: &mut SchemeEnv) {
         );
     }
 
-    // empty :: Monoid a => a (spec §6.1)
+    // empty :: Monoid a => a (spec §2.4)
     {
         let a = sub.fresh_unbound();
         env.insert(
@@ -263,8 +263,8 @@ fn seed_values(sub: &mut Substitution, env: &mut SchemeEnv) {
     seed_constructors(sub, env, bool_ty, ordering_ty);
 }
 
-/// Real, higher-kinded signatures for spec §6.3's `Collection` (`map`,
-/// `foldl`, `foldr`, `filter`, `length`) and §6.4's `Context` (`pure`,
+/// Real, higher-kinded signatures for spec §10.6's `Collection` (`map`,
+/// `foldl`, `foldr`, `filter`, `length`) and §10.6's `Context` (`pure`,
 /// `bind`) -- each one's `f` is a `Substitution::fresh_ctor_unbound`
 /// variable, constrained by the relevant interface exactly like an ordinary
 /// type variable elsewhere in this file is constrained by e.g. `Num`.
@@ -378,7 +378,7 @@ fn seed_collection_and_context(
         );
     }
 
-    // bind :: Context f => f a -> (a -> f b) -> f b (also exposed as (>>=), spec §6.4)
+    // bind :: Context f => f a -> (a -> f b) -> f b (also exposed as (>>=), spec §10.6)
     {
         let f = sub.fresh_ctor_unbound();
         let a = sub.fresh_unbound();
@@ -916,7 +916,7 @@ mod tests {
 
     #[test]
     fn map_over_a_non_collection_constructor_is_a_no_instance_error() {
-        // Maybe is a Context, not a Collection (spec §6.3/§6.4) -- map's f
+        // Maybe is a Context, not a Collection (spec §10.6) -- map's f
         // still happily unifies structurally with Maybe (unify doesn't
         // check instances), but check_pending must reject it.
         let mut sub = Substitution::new();

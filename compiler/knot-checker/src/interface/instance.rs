@@ -46,7 +46,7 @@
 //! importantly, giving both access to interfaces (`Num`, `Semigroup`,
 //! anything user-defined) that have no structural fallback at all. A
 //! `VarApp` whose head is still unresolved (a genuine kind error, spec
-//! §6.3/§6.4) is never confirmed by anything — see `check_instance`'s own
+//! §10.6) is never confirmed by anything — see `check_instance`'s own
 //! doc comment.
 
 use std::collections::{HashMap, HashSet};

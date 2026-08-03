@@ -46,7 +46,7 @@ pub fn constrain_pattern(
     let wrap = |ty, node| Typed { span, ty, node };
     match &pattern.node {
         // A named wildcard (`_name`) is a discard exactly like `_` -- spec
-        // §12.2/§12.3: the name is a mnemonic for the reader only, never
+        // §15.1/§15.2: the name is a mnemonic for the reader only, never
         // compiler-checked, so it's never bound into scope.
         CPattern::Wildcard(name) => wrap(
             sub.fresh_unbound(),

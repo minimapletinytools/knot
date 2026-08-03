@@ -4,7 +4,7 @@
 //! checks constructor patterns against the constructor's declared arity.
 //!
 //! Named holes (`_name`) are deliberately never bound here, matching spec
-//! §12.3's "the name carries no compiler-checked meaning" — registering one as
+//! §15.2's "the name carries no compiler-checked meaning" — registering one as
 //! a resolvable local would contradict that, so `_debugValue` used later in a
 //! body correctly still resolves as unbound.
 

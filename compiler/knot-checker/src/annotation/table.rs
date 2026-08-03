@@ -1,4 +1,4 @@
-//! Annotation-key → expected-type derivation (plan §3.5, spec §10.4): what
+//! Annotation-key → expected-type derivation (plan §3.5, spec §13.4): what
 //! type an annotation's value must have. Most keys have a fixed type;
 //! `unravel`'s is *derived* from the signature of whatever binding it's
 //! attached to (plan §3.5's "the hard case"). `solver`'s own shape isn't
@@ -22,9 +22,9 @@ fn app0(sub: &mut Substitution, name: &str) -> TypeVarId {
     sub.fresh_bound(Structure::App(Ref::Builtin(name.to_string()), vec![]))
 }
 
-/// The fixed-type keys (spec §10.4) — everything except `unravel`. `None`
+/// The fixed-type keys (spec §13.4) — everything except `unravel`. `None`
 /// for `unravel` itself (see `derive_unravel_type`) and for any unknown
-/// key (the annotation set is open, spec §10.4 — an unrecognized key isn't
+/// key (the annotation set is open, spec §13.4 — an unrecognized key isn't
 /// an error at this layer, just something this table has nothing to say
 /// about).
 pub fn fixed_expected_type(sub: &mut Substitution, key: &str) -> Option<TypeVarId> {
@@ -46,7 +46,7 @@ pub fn fixed_expected_type(sub: &mut Substitution, key: &str) -> Option<TypeVarI
 /// `Sensitivity Out -> UnravelInput A -> UnravelInput B -> ... -> Maybe
 /// (A, B, ...)`, collapsing the result to a bare `Maybe A` for a single
 /// parameter (matching how a 1-element grouping isn't a real tuple in Knot,
-/// spec §3.8). `None` if `f_ty` isn't a function at all (arity 0 — nothing
+/// spec §5.5). `None` if `f_ty` isn't a function at all (arity 0 — nothing
 /// to unravel), or has more than 3 parameters: spec's tuple-arity cap means
 /// that case needs a record instead of a bare tuple, which the plan's own
 /// §3.5 follow-ups already flagged as an authoring convention to handle

@@ -1,4 +1,4 @@
-//! `Sensitivity`'s own type-level expansion (spec §9.6) — currently a stub,
+//! `Sensitivity`'s own type-level expansion (spec §14.6) — currently a stub,
 //! per this session's explicit decision (2026-08-01): no recursion into
 //! record/tuple shape yet, just an ordinary opaque one-argument type,
 //! exactly like `Maybe`. `sensitivity_of` is the single seam

@@ -7,7 +7,7 @@
 //! on why generation and solving stay separate passes.
 //!
 //! `BinOp`/`Negate` are handled via a small, closed operator → interface
-//! table (`constrain_binop`/spec §4.8, §6.2): what interface (if any) the
+//! table (`constrain_binop`/spec §7.4, §10.5): what interface (if any) the
 //! operator needs, and how its operand/result types relate. This only
 //! emits `HasInstance` obligations — it doesn't check whether a resolvable
 //! instance actually exists (that's `interface/table.rs`'s job, TM6);
@@ -20,11 +20,11 @@
 //! `Let` delegates to `constrain::decl::constrain_let_bindings` (TM4) for
 //! its SCC-based dependency splitting.
 //!
-//! `Do` (spec §6.4/§8) desugars straight to `bind`/`pure` calls
+//! `Do` (spec §10.6/§11) desugars straight to `bind`/`pure` calls
 //! (`desugar_do`) before ever reaching `constrain_expr` proper -- `do { x <-
 //! e1; rest }` becomes `bind e1 (\x -> rest)`, `do { e1; rest }` (a bare
 //! statement, its result discarded) becomes `bind e1 (\_ -> rest)`, exactly
-//! as spec §8 already documents. Reusing `App`/`Lambda`'s own constraint
+//! as spec §11 already documents. Reusing `App`/`Lambda`'s own constraint
 //! generation this way, rather than writing bespoke logic for `Do`, is what
 //! `bind`'s real `Context f => f a -> (a -> f b) -> f b` scheme (`prelude.
 //! rs`, Fix #2) is *for* -- the ordinary `Lookup`+instantiate path already
@@ -136,7 +136,7 @@ fn constrain_binop(
             });
             list_ty
         }
-        // `Bool -> Bool -> Bool` -- concrete, no interface (spec §4.8's
+        // `Bool -> Bool -> Bool` -- concrete, no interface (spec §7.4's
         // "Boolean Operators" note: only `not` is a named function; `&&`/`||`
         // are built-in operators over the one concrete type).
         BinOp::And | BinOp::Or => {
@@ -153,7 +153,7 @@ fn constrain_binop(
             });
             bool_ty
         }
-        // `(Num a, Integral b) => a -> b -> a` (spec §6.2's "Exponentiation")
+        // `(Num a, Integral b) => a -> b -> a` (spec §10.5's "Exponentiation")
         // -- the one operator whose two operands are constrained by two
         // *different* interfaces on two different type variables, rather
         // than needing to be the same type at all.
@@ -283,7 +283,7 @@ pub fn constrain_expr(
         CExpr::Unit => wrap(sub.fresh_bound(Structure::Unit), TExpr::Unit),
         // A hole's own type is unconstrained by design (it could be
         // anything) -- that a hole must always be a compile error (spec
-        // §12.1) is a separate, later diagnostic concern (recording and
+        // §15.1) is a separate, later diagnostic concern (recording and
         // always rejecting every hole span seen), not a typing constraint,
         // so it isn't handled here.
         CExpr::Hole => wrap(sub.fresh_unbound(), TExpr::Hole),
@@ -402,7 +402,7 @@ pub fn constrain_expr(
             )
         }
         // A record literal is always closed -- exactly these fields, spec
-        // §4.7 -- unlike `FieldAccess`/`RecordUpdate` below, which only ever
+        // §7.2 -- unlike `FieldAccess`/`RecordUpdate` below, which only ever
         // need an *open* row (the value being accessed/updated might have
         // more fields than the expression cares about).
         CExpr::Record(fields) => {
@@ -515,7 +515,7 @@ pub fn constrain_expr(
 
 /// `do { stmts...; final_expr }` -> nested `bind`/lambda calls, right-
 /// associatively -- see this module's own doc comment. `final_expr` is the
-/// base case, passed through completely unchanged (spec §8's own example
+/// base case, passed through completely unchanged (spec §11's own example
 /// ends in an explicit `pure (x + y)`; nothing here adds an implicit one).
 fn desugar_do(stmts: &[CDoStmt], final_expr: &Spanned<CExpr>) -> Spanned<CExpr> {
     let Some((stmt, rest)) = stmts.split_first() else {

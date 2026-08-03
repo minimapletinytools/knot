@@ -1,5 +1,5 @@
 //! `@name(args)` / `@{...}` annotation grammar: the stacked single-key form,
-//! the block form, and their shared merge rule (spec §10) — a single argument
+//! the block form, and their shared merge rule (spec §13) — a single argument
 //! desugars to a bare value, more than one desugars to a tuple, and a
 //! `@{...}` block's entries always win over a stacked `@name(...)` entry for
 //! the same key, regardless of which was written first.
@@ -9,7 +9,7 @@
 //! own `annotations` field, wrapping a let-bound value in `Expr::Annotated`,
 //! or wrapping a prefix-annotated expression atom — including the "holes
 //! can't carry annotations" and "binds to the closest *following* atom only"
-//! rules from spec §10.3) is each caller's job, in `expr.rs` and `decl.rs`.
+//! rules from spec §13.3) is each caller's job, in `expr.rs` and `decl.rs`.
 
 use crate::ast::expr::{Annotation, Expr};
 use crate::error::ParseError;
@@ -47,7 +47,7 @@ impl<'a> ParseState<'a> {
 
     /// `name(arg, arg, ...)`, with the `@` already consumed. A single
     /// argument desugars to a bare value; more than one desugars to a tuple
-    /// (spec §10.1's desugaring rule).
+    /// (spec §13.1's desugaring rule).
     fn annotation_single(&mut self) -> Result<(String, Spanned<Expr>), ParseError> {
         let key = self.lower_ident()?.node;
         self.expect_byte(b'(')?;

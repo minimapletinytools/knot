@@ -20,7 +20,7 @@ impl<'a> ParseState<'a> {
     }
 
     /// `x : xs`, right-associative — mirrors `:`'s associativity in the
-    /// expression grammar (spec §4.8). Rejects `::` here the same way the
+    /// expression grammar (spec §7.4). Rejects `::` here the same way the
     /// operator table does (that's the type-signature token, never cons).
     fn pattern_cons(&mut self) -> Result<Spanned<Pattern>, ParseError> {
         let head = self.pattern_as()?;
@@ -119,7 +119,7 @@ impl<'a> ParseState<'a> {
             }
             // A leading `-` immediately before a digit, with nothing preceding it
             // in this atom, is a negative Int literal pattern (not covered by the
-            // spec's §4.9 negation rule, which is expression-only — but the same
+            // spec's §7.5 negation rule, which is expression-only — but the same
             // "no space between sign and digits" spelling is the natural fit here
             // too, and negative-literal patterns are too standard to leave out).
             Some(b'-') if matches!(self.peek_at(1), Some(b) if b.is_ascii_digit()) => {

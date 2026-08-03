@@ -42,7 +42,7 @@ impl<'a> ParseState<'a> {
         })
     }
 
-    /// A leading `@name(args)`/`@{...}` (spec §10.1) attaches to `FnDef`'s own
+    /// A leading `@name(args)`/`@{...}` (spec §13.1) attaches to `FnDef`'s own
     /// `annotations` field. `type`/`type alias`/`instance` declarations don't
     /// carry annotations in v0 (a resolved open question — possible V2
     /// feature), so one appearing there is a clear error rather than being

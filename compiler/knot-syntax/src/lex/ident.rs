@@ -15,8 +15,8 @@ use crate::state::ParseState;
 /// parser's job (M4), not this layer's.
 ///
 /// `interface` and `where` are reserved even though `interface ... where` is never
-/// user-written (it only documents built-ins, per spec §7) — `where` graduated to
-/// real user-facing syntax via `instance ... where` (§7, §13), so it's reserved on
+/// user-written (it only documents built-ins, per spec §10) — `where` graduated to
+/// real user-facing syntax via `instance ... where` (§10), so it's reserved on
 /// that basis regardless.
 pub const RESERVED_WORDS: &[&str] = &[
     "module",
@@ -145,7 +145,7 @@ impl<'a> ParseState<'a> {
 
     /// `_` (anonymous hole) or `_name` (named hole). This layer doesn't enforce
     /// *where* a named hole may appear (pattern/binding-discard only, per spec
-    /// §12) — that's the caller's job, since it depends on grammatical position.
+    /// §15) — that's the caller's job, since it depends on grammatical position.
     pub fn hole(&mut self) -> Result<Spanned<Option<String>>, ParseError> {
         let start = self.pos;
         if self.peek() != Some(b'_') {

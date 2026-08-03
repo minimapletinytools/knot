@@ -1,6 +1,6 @@
 //! Expression grammar: atoms (literals, identifiers, holes, parens/tuple/unit,
 //! list, record/update, field access) -> application -> unary negation ->
-//! precedence-climbing binary ops (spec §4.8) -> the layout-heavy forms
+//! precedence-climbing binary ops (spec §7.4) -> the layout-heavy forms
 //! (`if`/`let`/`case`/lambda/`do`).
 //!
 //! `if`/`let`/`case`/`do`/lambda are only ever dispatched from the top-level
@@ -42,7 +42,7 @@ enum MinusKind {
     Negation,
     /// Same spacing both sides (both present or both absent): binary subtraction.
     Subtraction,
-    /// No space before, but space after: neither pattern, always invalid (spec §4.9).
+    /// No space before, but space after: neither pattern, always invalid (spec §7.5).
     Ambiguous,
 }
 
@@ -66,7 +66,7 @@ impl<'a> ParseState<'a> {
         }
     }
 
-    /// Precedence-climbing over the fixed §4.8 table, producing a properly
+    /// Precedence-climbing over the fixed §7.4 table, producing a properly
     /// nested `BinOp` tree directly (never a flat chain to resolve later, unlike
     /// Elm — see `knot-ast-parser-plan.md` §2).
     fn expr_binop_prec(&mut self, min_prec: u8) -> Result<Spanned<Expr>, ParseError> {
@@ -161,7 +161,7 @@ impl<'a> ParseState<'a> {
     }
 
     /// Classifies a `-` at the current position by its surrounding whitespace,
-    /// per spec §4.9. Must be called with the cursor positioned exactly at the
+    /// per spec §7.5. Must be called with the cursor positioned exactly at the
     /// `-` (after `skip_trivia`, never before).
     fn classify_minus(&self) -> MinusKind {
         debug_assert_eq!(self.peek(), Some(b'-'));
@@ -227,12 +227,12 @@ impl<'a> ParseState<'a> {
     /// this ever runs; this only handles chains on top of a *value*, e.g.
     /// `point.x.y` or `(getPoint x).x`.
     ///
-    /// Also where prefix `@annotation`s attach (spec §10.3): a leading `@`
+    /// Also where prefix `@annotation`s attach (spec §13.3): a leading `@`
     /// here binds only to the single atom this call recurses into next
     /// (including its own field-access chain) — never to a wider application
     /// or operator expression, which is exactly why annotating one of those
     /// needs explicit parens (`@{...} (f a b)`, not `@{...} f a b`). Holes
-    /// can't carry annotations at all (spec §12.5).
+    /// can't carry annotations at all (spec §15.3).
     fn expr_atom(&mut self) -> Result<Spanned<Expr>, ParseError> {
         self.skip_trivia()?;
         if self.peek() == Some(b'@') {
@@ -629,7 +629,7 @@ impl<'a> ParseState<'a> {
     }
 
     /// A `let`-bound value has no dedicated declaration struct to hold
-    /// annotations the way `FnDef` does, so a leading `@` here (spec §10.1's
+    /// annotations the way `FnDef` does, so a leading `@` here (spec §13.1's
     /// stacked/block forms, above the binding just like a top-level
     /// signature) wraps the *value* in `Expr::Annotated` instead — the same
     /// representation prefix inline annotations already use, rather than

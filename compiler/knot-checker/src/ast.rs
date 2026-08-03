@@ -30,7 +30,7 @@
 //!
 //! `Do` has no `TExpr` variant of its own — by the time `constrain_expr`
 //! reaches it, `constrain::expr::desugar_do` has already rewritten it into
-//! ordinary `App`/`Lambda` nodes calling `bind`/`pure` (spec §6.4/§8), which
+//! ordinary `App`/`Lambda` nodes calling `bind`/`pure` (spec §10.6/§11), which
 //! *is* the correct target-language shape once dictionary-passing is real;
 //! do-notation is pure syntax sugar with no runtime meaning of its own.
 //! `Annotated` keeps its `CAnnotation`s completely unelaborated, matching

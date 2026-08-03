@@ -17,13 +17,13 @@ pub enum Structure {
     /// built-in or user-defined, shares this one variant. `Sensitivity` gets
     /// no special case here: per the type-checker plan §3.5/§4's "stub" note,
     /// two `Sensitivity a` unify iff their `a`s do, exactly like `Maybe` —
-    /// the eventual recursive expansion (spec §9.6) is a distinct, later
+    /// the eventual recursive expansion (spec §14.6) is a distinct, later
     /// piece of machinery that hasn't been built yet, not a variant of this
     /// enum.
     App(Ref, Vec<TypeVarId>),
     Fn(TypeVarId, TypeVarId),
     Tuple(Vec<TypeVarId>),
-    /// Fields plus an optional row-extension variable (spec §3.4) — its
+    /// Fields plus an optional row-extension variable (spec §5.4) — its
     /// unification (field-gathering) is TM2, not this milestone.
     Record(BTreeMap<String, TypeVarId>, Option<TypeVarId>),
     Unit,
@@ -43,7 +43,7 @@ pub enum Structure {
     Ctor(Ref, Vec<TypeVarId>),
     /// A type application headed by a constructor *variable* rather than a
     /// fixed `Ref` — `f a`, `f b`, ... in `map :: (a -> b) -> f a -> f b`
-    /// (spec §6.3/§6.4's `Collection`/`Context` interfaces). The head is an
+    /// (spec §10.6's `Collection`/`Context` interfaces). The head is an
     /// ordinary `TypeVarId`, deliberately reusing the exact same
     /// `Unbound`/`Bound` machinery every other type variable already uses
     /// rather than introducing a separate "constructor slot" sort in

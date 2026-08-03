@@ -12,7 +12,7 @@ pub enum CanonErrorKind {
     UnboundConstructor(String),
     UnboundType(String),
     /// A constraint (`Foo a =>`) or `instance Foo ...` names an interface
-    /// outside the closed built-in set (spec §2.3/§7).
+    /// outside the closed built-in set (spec §2.3/§10).
     UnknownInterface(String),
     /// The same variable name bound twice within one pattern, e.g. `(x, x)` or
     /// `\x x -> ...` — always wrong regardless of type, so this is a scope-level

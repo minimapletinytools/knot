@@ -151,7 +151,7 @@ fn check_unbound_type_vars(
 
 /// Annotations are resolved *before* the function's own parameter scope opens:
 /// they're metadata about the binding, evaluated at graph-construction time
-/// (spec §10) in the enclosing scope, not inside the function body's scope —
+/// (spec §13) in the enclosing scope, not inside the function body's scope —
 /// an unravel function given as an annotation value manages its own scope via
 /// the ordinary `Lambda` case instead.
 fn resolve_fndef(env: &mut Env, fndef: &FnDef, errors: &mut Vec<CanonError>) -> CFnDef {

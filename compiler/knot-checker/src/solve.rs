@@ -883,7 +883,7 @@ mod tests {
 
     #[test]
     fn zero_argument_binding_with_a_dangling_constraint_is_ambiguous() {
-        // `empty :: Monoid a => a` (spec §6.1) -- a real prelude name
+        // `empty :: Monoid a => a` (spec §2.4) -- a real prelude name
         // (`knot-canonical` already resolves it as `Ref::Builtin`), just not
         // yet seeded with its real scheme (TM8). A hand-seeded stand-in
         // scheme is enough to exercise the check: a CAF whose type floats
