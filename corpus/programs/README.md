@@ -175,12 +175,26 @@ other changes needed, confirming both fixes landed exactly where expected.
    pattern can take params at all (`let (a, b) c = ...` still correctly
    rejects `c` rather than parsing it as a bogus parameter) -- there's no
    "call" a destructuring pattern makes sense as the head of.
-7. **`Map`'s own key-value API (`get`/`insert`/`empty`/...) doesn't exist**
-   — `collections/build-map.knot`, `collections/word-count-attempt.knot`.
-   Already a documented, known-open design question
-   (`knot-canonical::prelude`'s own doc comment on qualified `List.map`/
-   `Map.lookup`-style access), not a fresh discovery — noted here for
-   completeness since it's exactly what a real program hits immediately.
+7. **Fixed. `Map`'s own key-value API (`get`/`insert`/`empty`/...) didn't
+   exist at all** — `collections/build-map.knot`, `collections/word-count-
+   attempt.knot`. `knot-canonical`'s own name resolution already accepted
+   `Map.get`-style qualified references at face value (trusted, no real
+   `import Map` needed, in the snippet-mode `canonicalize_decls` this
+   corpus and `corpus/semantic` both run through) — the type *checker*
+   simply had no scheme registered for any of them (`UnboundValue`), even
+   though `Map` itself was already a valid `Collection` target for
+   `map`/`filter`/`foldl`/... once finding #3's own fix landed. **Fix**: a
+   new `prelude::seed_map_module`, seeding `Ref::Imported(["Map"], _)`
+   schemes for `empty`, `isEmpty`, `size`, `keys`, `values`, `toList`,
+   `fromList`, `get`, `member`, `insert`, `remove` — concrete, ordinary
+   constrained polymorphism over `k`/`v` (matching `compare`/`show`), not
+   `Collection`/`Context`-generic, since every one of these is specific to
+   `Map`'s own two-visible-parameters shape rather than "any collection."
+   Every key-comparing operation requires `Eq k =>` (there's no other way
+   to test key equality); ones that only touch values or shape don't.
+
+Every finding from all three rounds is now fixed; `corpus/programs` is
+80/80 clean.
 
 ### Round 2 (2026-08-02)
 
@@ -301,6 +315,6 @@ root cause, **not yet fixed**:
 After that fix, 71 of 80 pass. After also fixing finding #6, 72 of 80
 pass. After also fixing finding #5 (see its own updated text above), 76 of
 80 pass. After also fixing finding #3 (also see its own updated text
-above), 78 of 80 pass; the remaining 2 are exactly Round 1's own
-still-open finding #7 -- every fixture written across all three rounds so
-far now passes except the `Map` API gap itself.
+above), 78 of 80 pass. After also fixing finding #7 (Round 1's own, see
+its updated text above), all 80 of 80 pass -- every finding logged across
+all three rounds is now fixed.

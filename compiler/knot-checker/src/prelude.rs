@@ -253,6 +253,7 @@ fn seed_values(sub: &mut Substitution, env: &mut SchemeEnv) {
     }
 
     seed_collection_and_context(sub, env, bool_ty, int_ty);
+    seed_map_module(sub, env);
     seed_constructors(sub, env, bool_ty, ordering_ty);
 }
 
@@ -385,6 +386,201 @@ fn seed_collection_and_context(
             Scheme {
                 vars: vec![f, a, b],
                 constraints: vec![(f, "Context".to_string())],
+                ty,
+            },
+        );
+    }
+}
+
+/// `Map`'s own qualified key-value API (`Map.get`, `Map.insert`, ...) --
+/// closing corpus/programs's own finding #7: these names simply didn't
+/// exist at all (`UnboundValue`), even though `Map` was already usable as
+/// a `Collection` target for `map`/`filter`/`foldl`/... (`seed_
+/// collection_and_context` above) once Fix (this session's own
+/// `ty::Structure::Ctor` change) let a 2-parameter constructor unify with
+/// `Collection`/`Context`'s own 1-argument `VarApp` shape at all.
+/// Concrete, not `Collection`/`Context`-generic, since every one of these
+/// is specific to `Map`'s own two-parameter shape (`k`/`v` both visible at
+/// once), not "any collection" -- there's no VarApp/higher-kinded
+/// machinery involved here, just ordinary constrained polymorphism over
+/// `k`/`v` (matching `compare`/`show`/... above). Every key-comparing
+/// operation needs `Eq k` (this table has no other way to test key
+/// equality); ones that only ever touch values or shape (`empty`, `toList`,
+/// `size`, `isEmpty`, `keys`, `values`) don't. Resolved via `Ref::Imported`
+/// (`knot-canonical::env`'s own qualified-reference handling, trusted at
+/// face value with no real `import Map` needed in the snippet-mode
+/// `corpus/programs`/`corpus/semantic` run their fixtures through) rather
+/// than `Ref::Builtin`, matching how `Map.get` actually canonicalizes.
+fn seed_map_module(sub: &mut Substitution, env: &mut SchemeEnv) {
+    let module = || vec!["Map".to_string()];
+    let map_ty = |sub: &mut Substitution, k, v| {
+        sub.fresh_bound(Structure::App(Ref::Builtin("Map".to_string()), vec![k, v]))
+    };
+
+    // empty :: Map k v
+    {
+        let k = sub.fresh_unbound();
+        let v = sub.fresh_unbound();
+        let ty = map_ty(sub, k, v);
+        env.insert(
+            SchemeKey::Imported(module(), "empty".to_string()),
+            Scheme {
+                vars: vec![k, v],
+                constraints: vec![],
+                ty,
+            },
+        );
+    }
+
+    // isEmpty, size :: Map k v -> Bool / Int
+    for (name, ret_ty) in [("isEmpty", app0(sub, "Bool")), ("size", app0(sub, "Int"))] {
+        let k = sub.fresh_unbound();
+        let v = sub.fresh_unbound();
+        let map_arg = map_ty(sub, k, v);
+        let ty = sub.fresh_bound(Structure::Fn(map_arg, ret_ty));
+        env.insert(
+            SchemeKey::Imported(module(), name.to_string()),
+            Scheme {
+                vars: vec![k, v],
+                constraints: vec![],
+                ty,
+            },
+        );
+    }
+
+    // keys :: Map k v -> List k
+    {
+        let k = sub.fresh_unbound();
+        let v = sub.fresh_unbound();
+        let map_arg = map_ty(sub, k, v);
+        let list_k = sub.fresh_bound(Structure::App(Ref::Builtin("List".to_string()), vec![k]));
+        let ty = sub.fresh_bound(Structure::Fn(map_arg, list_k));
+        env.insert(
+            SchemeKey::Imported(module(), "keys".to_string()),
+            Scheme {
+                vars: vec![k, v],
+                constraints: vec![],
+                ty,
+            },
+        );
+    }
+
+    // values :: Map k v -> List v
+    {
+        let k = sub.fresh_unbound();
+        let v = sub.fresh_unbound();
+        let map_arg = map_ty(sub, k, v);
+        let list_v = sub.fresh_bound(Structure::App(Ref::Builtin("List".to_string()), vec![v]));
+        let ty = sub.fresh_bound(Structure::Fn(map_arg, list_v));
+        env.insert(
+            SchemeKey::Imported(module(), "values".to_string()),
+            Scheme {
+                vars: vec![k, v],
+                constraints: vec![],
+                ty,
+            },
+        );
+    }
+
+    // toList :: Map k v -> List (k, v)
+    {
+        let k = sub.fresh_unbound();
+        let v = sub.fresh_unbound();
+        let map_arg = map_ty(sub, k, v);
+        let pair = sub.fresh_bound(Structure::Tuple(vec![k, v]));
+        let list_pair =
+            sub.fresh_bound(Structure::App(Ref::Builtin("List".to_string()), vec![pair]));
+        let ty = sub.fresh_bound(Structure::Fn(map_arg, list_pair));
+        env.insert(
+            SchemeKey::Imported(module(), "toList".to_string()),
+            Scheme {
+                vars: vec![k, v],
+                constraints: vec![],
+                ty,
+            },
+        );
+    }
+
+    // fromList :: Eq k => List (k, v) -> Map k v
+    {
+        let k = sub.fresh_unbound();
+        let v = sub.fresh_unbound();
+        let pair = sub.fresh_bound(Structure::Tuple(vec![k, v]));
+        let list_pair =
+            sub.fresh_bound(Structure::App(Ref::Builtin("List".to_string()), vec![pair]));
+        let map_ret = map_ty(sub, k, v);
+        let ty = sub.fresh_bound(Structure::Fn(list_pair, map_ret));
+        env.insert(
+            SchemeKey::Imported(module(), "fromList".to_string()),
+            Scheme {
+                vars: vec![k, v],
+                constraints: vec![(k, "Eq".to_string())],
+                ty,
+            },
+        );
+    }
+
+    // get :: Eq k => k -> Map k v -> Maybe v
+    {
+        let k = sub.fresh_unbound();
+        let v = sub.fresh_unbound();
+        let map_arg = map_ty(sub, k, v);
+        let maybe_v = sub.fresh_bound(Structure::App(Ref::Builtin("Maybe".to_string()), vec![v]));
+        let ty = curried(sub, &[k, map_arg], maybe_v);
+        env.insert(
+            SchemeKey::Imported(module(), "get".to_string()),
+            Scheme {
+                vars: vec![k, v],
+                constraints: vec![(k, "Eq".to_string())],
+                ty,
+            },
+        );
+    }
+
+    // member :: Eq k => k -> Map k v -> Bool
+    {
+        let k = sub.fresh_unbound();
+        let v = sub.fresh_unbound();
+        let map_arg = map_ty(sub, k, v);
+        let bool_ty = app0(sub, "Bool");
+        let ty = curried(sub, &[k, map_arg], bool_ty);
+        env.insert(
+            SchemeKey::Imported(module(), "member".to_string()),
+            Scheme {
+                vars: vec![k, v],
+                constraints: vec![(k, "Eq".to_string())],
+                ty,
+            },
+        );
+    }
+
+    // insert :: Eq k => k -> v -> Map k v -> Map k v
+    {
+        let k = sub.fresh_unbound();
+        let v = sub.fresh_unbound();
+        let map_arg = map_ty(sub, k, v);
+        let ty = curried(sub, &[k, v, map_arg], map_arg);
+        env.insert(
+            SchemeKey::Imported(module(), "insert".to_string()),
+            Scheme {
+                vars: vec![k, v],
+                constraints: vec![(k, "Eq".to_string())],
+                ty,
+            },
+        );
+    }
+
+    // remove :: Eq k => k -> Map k v -> Map k v
+    {
+        let k = sub.fresh_unbound();
+        let v = sub.fresh_unbound();
+        let map_arg = map_ty(sub, k, v);
+        let ty = curried(sub, &[k, map_arg], map_arg);
+        env.insert(
+            SchemeKey::Imported(module(), "remove".to_string()),
+            Scheme {
+                vars: vec![k, v],
+                constraints: vec![(k, "Eq".to_string())],
                 ty,
             },
         );

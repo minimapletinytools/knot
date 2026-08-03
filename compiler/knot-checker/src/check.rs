@@ -382,4 +382,56 @@ mod tests {
             "{errors:?}"
         );
     }
+
+    #[test]
+    fn map_fromlist_builds_a_map_end_to_end() {
+        // collections/build-map.knot's own motivating case: Map.fromList
+        // didn't exist at all (UnboundValue).
+        let cs = decls(concat!(
+            "populations :: Map String Int\n",
+            "populations = Map.fromList [(\"Tokyo\", 37400000), (\"Delhi\", 30290000)]\n",
+        ));
+        let errors = check_module(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn map_get_insert_and_empty_type_check_end_to_end() {
+        // collections/word-count-attempt.knot's own motivating case:
+        // Map.get/Map.insert/Map.empty didn't exist at all.
+        let cs = decls(concat!(
+            "countWord :: String -> Map String Int -> Map String Int\n",
+            "countWord word counts =\n",
+            "  case Map.get word counts of\n",
+            "    Just n -> Map.insert word (n + 1) counts\n",
+            "    Nothing -> Map.insert word 1 counts\n",
+            "countAll :: List String -> Map String Int\n",
+            "countAll words = foldl (\\counts w -> countWord w counts) Map.empty words\n",
+        ));
+        let errors = check_module(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn map_key_type_still_needs_eq() {
+        // A key type with no Eq instance must still be rejected -- Map's
+        // own key-comparing functions all declare `Eq k =>`, not silently
+        // accept anything. `NoEqType` is a concrete nominal type here (not
+        // a bare lowercase type variable), so it resolves to an ordinary
+        // `Structure::App`, not a rigid variable -- the obligation is
+        // checked against the real instance table, reporting a plain
+        // `NoInstance`, not `NoInstanceForRigid`.
+        let cs = decls(concat!(
+            "type NoEqType = NoEqType Float\n",
+            "bad :: NoEqType -> Map NoEqType Int -> Maybe Int\n",
+            "bad key m = Map.get key m\n",
+        ));
+        let errors = check_module(&cs);
+        assert!(
+            errors.iter().any(
+                |e| matches!(&e.kind, crate::error::TypeErrorKind::NoInstance { interface } if interface == "Eq")
+            ),
+            "{errors:?}"
+        );
+    }
 }
