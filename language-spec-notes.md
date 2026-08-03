@@ -26,14 +26,7 @@ decision below.
 
 Knot represents a middle ground between Haskell and Elm, tailored specifically to visual node graphs.
 
-### 2.1 From Haskell
-* **Lazy evaluation (call-by-need)**: Values are computed only when demanded (unlike Elm's strict evaluation). This allows for infinite structures and deferred graph computation.
-* **Built-in Interfaces**: Overloaded operations use a typeclass-like interface system (e.g., `Eq`, `Ord`, `Num`, `Integral`, `Fractional`).
-* **Type Signatures**: Standard `::` syntax.
-* **Monadic/List Operators**: Operators like bind (`>>=`) and list cons (`:`) are preserved.
-* **Holes**: `_` and `_somename` can be used in place of expressions as holes
-
-### 2.2 From Elm
+### 2.1 From Elm
 * **Record Syntax**: `{ field = value }` for construction, `{ record | field = value }` for updates, and dot access without spaces (`record.field`).
 * **Type Declarations**: ADTs are defined using the `type` keyword instead of `data`, and aliases use `type alias`.
 * **Module & Import System**: Every file is a module, imports are qualified by default, and namespace control is managed via the `exposing` keyword.
@@ -44,22 +37,32 @@ Knot represents a middle ground between Haskell and Elm, tailored specifically t
 * **Simplified Imports**: No `qualified` or `hiding` keywords (matching Elm's import design).
 * **Pattern Aliases (`as`)**: Pattern aliases use `as` instead of Haskell's `@` to prevent syntactic conflicts with layout annotations.
 * **No Guards**: Pattern matching does not support guards, matching Elm's simpler `case` expressions.
+* **no Partial Sections**: `(+)` supported but not `(+2)` `(2+)`
+
+### 2.2 From Haskell
+* **Lazy evaluation (call-by-need)**: Values are computed only when demanded (unlike Elm's strict evaluation). This allows for infinite structures and deferred graph computation.
+* **Built-in typeclasses**: Overloaded operations use a typeclass-like interface system (e.g., `Eq`, `Ord`, `Num`, `Integral`, `Fractional`). 
+* **Type Signatures**: Standard `::` syntax.
+* **List cons operator**: list cons (`:`) preserved.
+* **Monadic/List Operators**: do syntax and bind operator (`>>=`) preserved.
+* **Holes**: `_` and `_somename` can be used in place of expressions as holes
 
 ### 2.3 Omitted from Haskell/Elm
-* **No user-defined interfaces**: Unlike Haskell's typeclasses (or Elm's extensible record polymorphism), the *set* of interfaces in v0 is closed (fixed at `Eq`, `Ord`, `Show`, `Semigroup`, `Monoid`, `Num`, `Fractional`, `Integral`) to keep compile-time dictionary passing and type checking simple — users cannot declare a brand-new interface. Instances of these existing interfaces are open, though — see §2.4.
+* **No user-defined typeclasses**: Unlike Haskell's typeclasses (or Elm's extensible record polymorphism), the *set* of interfaces in v0 is closed (fixed at `Eq`, `Ord`, `Show`, `Semigroup`, `Monoid`, `Num`, `Fractional`, `Integral`) to keep compile-time dictionary passing and type checking simple — users cannot declare a brand-new interface. Instances of these existing interfaces are open, though — see §2.4.
 * **No custom symbolic operators**: Unlike both Haskell and Elm, users cannot define new operators (e.g., `+++`), ensuring 1-to-1 parsing and node-graph mapping remain clean.
 * **No List Comprehensions**: Haskell's list comprehension syntax (`[x | x <- xs]`) is omitted in favor of standard map/filter functions.
 * **No Record Shorthand Destructuring**: Elm's shorthand record pattern matching (`{ x, y }`) is omitted.
 * **Right to Left functor operators `<|` `<<` `=<<`**: not supported
 * **No `.` function composition operator**
 * **No multi-clause function definitions**: Unlike Haskell's `f 0 = ...` / `f n = ...` style, a function name may be bound by only one equation; branch on argument patterns using `case`, matching Elm.
-* **Basically anything else that's in Haskell but not Elm**
+* **Basically anything else that's in Haskell but not Elm that's not listed in 2.2**
 
 ### 2.4 Different / Custom
 * **Open Instances, Closed Interfaces**: The *set* of interfaces is closed (no new ones), but instances of the existing interfaces are open — users may implement `Eq`/`Ord`/`Show`/etc. for their own types, not just built-in primitives.
 * **Metadata & Annotations (`@name(...)` / `@{...}`)**: A compiler-checked layout and tool annotation system designed for graph coordinates, documentation, and metadata.
 * **Unravel System (Reverse Execution)**: Backwards execution solving rule annotations (`unravel`), allowing changes to flow in reverse through the graph.
 * **Holes in LHS of let bindings**: `let _ = expression` is allowed and dropped by the compiler.
+* **Record Spreads**: A record can be defined to contain all fields of  `A` with `..A` syntax e.g. `type B = { ..A, someField : Int }`. works with row polymorphic constraints to e.g. `{a | ..A}`
 
 ---
 
