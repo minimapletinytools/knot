@@ -41,14 +41,14 @@ Knot represents a middle ground between Haskell and Elm, tailored specifically t
 
 ### 2.2 From Haskell
 * **Lazy evaluation (call-by-need)**: Values are computed only when demanded (unlike Elm's strict evaluation). This allows for infinite structures and deferred graph computation.
-* **Built-in typeclasses**: Overloaded operations use a typeclass-like interface system (e.g., `Eq`, `Ord`, `Num`, `Integral`, `Fractional`). 
+* **Built-in typeclasses**: Overloaded operations use a typeclass-like interface system — see §2.4 for the full, closed interface list.
 * **Type Signatures**: Standard `::` syntax.
 * **List cons operator**: list cons (`:`) preserved.
-* **Monadic/List Operators**: do syntax and bind operator (`>>=`) preserved.
+* **Monadic/List Operators**: `do` syntax and bind operator (`>>=`) preserved — `bind`/`pure` are the `Context` interface's own methods (§2.4).
 * **Holes**: `_` and `_somename` can be used in place of expressions as holes
 
 ### 2.3 Omitted from Haskell/Elm
-* **No user-defined typeclasses**: Unlike Haskell's typeclasses (or Elm's extensible record polymorphism), the *set* of interfaces in v0 is closed (fixed at `Eq`, `Ord`, `Show`, `Semigroup`, `Monoid`, `Num`, `Fractional`, `Integral`) to keep compile-time dictionary passing and type checking simple — users cannot declare a brand-new interface. Instances of these existing interfaces are open, though — see §2.4.
+* **No user-defined typeclasses**: Unlike Haskell's typeclasses (or Elm's extensible record polymorphism), the *set* of interfaces in v0 is closed — fixed, see §2.4 for the full list — to keep compile-time dictionary passing and type checking simple; users cannot declare a brand-new interface. Instances of these existing interfaces are open, though — see §2.4.
 * **No custom symbolic operators**: Unlike both Haskell and Elm, users cannot define new operators (e.g., `+++`), ensuring 1-to-1 parsing and node-graph mapping remain clean.
 * **No List Comprehensions**: Haskell's list comprehension syntax (`[x | x <- xs]`) is omitted in favor of standard map/filter functions.
 * **No Record Shorthand Destructuring**: Elm's shorthand record pattern matching (`{ x, y }`) is omitted.
@@ -58,7 +58,22 @@ Knot represents a middle ground between Haskell and Elm, tailored specifically t
 * **Basically anything else that's in Haskell but not Elm that's not listed in 2.2**
 
 ### 2.4 Different / Custom
-* **Open Instances, Closed Interfaces**: The *set* of interfaces is closed (no new ones), but instances of the existing interfaces are open — users may implement `Eq`/`Ord`/`Show`/etc. for their own types, not just built-in primitives.
+* **Open Instances, Closed Interfaces**: The *set* of interfaces is closed (no new ones), but instances of the existing interfaces are open — users may implement any of the below for their own types, not just built-in primitives. The full, closed interface list:
+
+  | Interface    | Key Operations                                | Haskell Analog                                                                      |
+  |--------------|------------------------------------------------|---------------------------------------------------------------------------------------|
+  | `Eq`         | `(==)`                                          | `Eq`                                                                                   |
+  | `Ord`        | `compare` (implies `Eq`)                        | `Ord`                                                                                  |
+  | `Show`       | `show`                                          | `Show`                                                                                 |
+  | `Semigroup`  | `(<>)`                                          | `Semigroup`                                                                            |
+  | `Monoid`     | `empty` (implies `Semigroup`)                   | `Monoid`                                                                               |
+  | `Num`        | `(+)`, `(-)`, `(*)`, `negate`, `abs`, `signum`   | `Num`                                                                                   |
+  | `Fractional` | `(/)`, `recip` (implies `Num`)                  | `Fractional`                                                                           |
+  | `Integral`   | `div`, `mod` (implies `Num`, `Ord`)              | `Integral`                                                                             |
+  | `Collection` | `map`, `foldl`, `foldr`, `filter`, `length`      | `Functor` + `Foldable`, merged into one interface                                      |
+  | `Context`    | `pure`, `bind`                                  | `Applicative` + `Monad`, merged into one interface — replaces `Monad` and its `>>=`    |
+
+  `Collection` and `Context` work differently from the other eight: a user's own function signature can't be generic over "any `Collection`" or "any `Context`" (this grammar has no higher-kinded type variables), so they're only ever reachable through the built-in `map`/`foldl`/`foldr`/`filter`/`length`/`pure`/`bind` functions themselves — though a user's own type constructor can still have a `Collection`/`Context` **instance** declared for it, exactly like any other interface.
 * **Metadata & Annotations (`@name(...)` / `@{...}`)**: A compiler-checked layout and tool annotation system designed for graph coordinates, documentation, and metadata.
 * **Unravel System (Reverse Execution)**: Backwards execution solving rule annotations (`unravel`), allowing changes to flow in reverse through the graph.
 * **Holes in LHS of let bindings**: `let _ = expression` is allowed and dropped by the compiler.

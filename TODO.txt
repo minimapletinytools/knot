@@ -101,6 +101,7 @@ alternatively, the UI can serialize the state directly into the file with specia
 -knot compiler todo
     DONE-change : to :: for records
     DONE-Option to Maybe
+    -add >>= operator
 -UI spec gaps
     -finish pattern matching node stuff
     -figure out how operator precedence is expressed in graph
