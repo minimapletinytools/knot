@@ -54,22 +54,24 @@ in this directory ever *changes* which of these it reports, that's a
 signal the underlying gap moved (fixed, or newly broken worse) — update
 `checker_impl_summary.md`'s own "Known gaps" section and this fixture's
 own comment together, in the same change, rather than letting them drift
-apart. As of this writing: 2 fixtures, covering re-declaring an instance a
-builtin type already has not being flagged, and annotation values never
-being type-checked against their own derived expected type. Four have
+apart. As of this writing: 1 fixture, covering annotation values never
+being type-checked against their own derived expected type. Five have
 graduated out of this directory once fixed: exhaustiveness checking never
 being wired into `check_module` (see `patterns/non-exhaustive-case-
 warns.knot`); a record instance's own declared context never being
 enforced against a real argument type — a real, demonstrated unsoundness,
 not just an incompleteness (see `corpus/semantic/invalid/interfaces/
 record-instance-context-not-satisfied.knot` and its own `valid/`
-companion); and the record-instance table's field-name-only (not
+companion); the record-instance table's field-name-only (not
 field-type-aware) keying together with custom instances still not being
 able to target a `Tuple` — both fixed together via a new type-aware
 `CanonicalType` keying scheme (see `corpus/semantic/valid/interfaces/
 record-instance-keyed-by-type-not-just-name.knot` and `.../tuple-custom-
-instance-target.knot`). `checker_impl_summary.md`'s own "Known gaps"
-section has the rest of every graduation story.
+instance-target.knot`); and re-declaring an instance a builtin type
+already has not being flagged as a `DuplicateInstance` (see
+`corpus/semantic/invalid/interfaces/redeclare-builtin-instance-is-a-
+duplicate.knot`). `checker_impl_summary.md`'s own "Known gaps" section has
+the rest of every graduation story.
 
 ## Findings log
 

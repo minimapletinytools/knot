@@ -295,7 +295,7 @@ noted `invalid/`):
 - [x] Row 16 — annotations × SCC grouping
       (`valid/misc/annotations-with-mutual-recursion.knot`)
 - [x] Row 17 (new) — re-declaring an instance a *builtin* type already has
-      is currently silently accepted, not flagged as a duplicate (the known
-      gap Fix #10's own doc comment names) — pinned down as `valid/
-      interfaces/redeclare-builtin-instance-known-gap.knot` so a future fix
-      changes this test's expectation deliberately, not by surprise.
+      is now flagged as a duplicate (Task #40 fixed the gap Fix #10's own
+      doc comment used to name) — pinned down as `invalid/interfaces/
+      redeclare-builtin-instance-is-a-duplicate.knot`, moved from `valid/`
+      (where it lived while the gap was still open) once the fix landed.

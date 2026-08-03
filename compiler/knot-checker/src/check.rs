@@ -59,15 +59,13 @@ use crate::solve::solve_with_obligations;
 /// every one of its own existing callers not caring (a non-exhaustive
 /// `case` is a warning, never a `TypeError`, so it can't show up here).
 ///
-/// **One known, narrow gap, inherited rather than introduced here**: a
-/// user re-declaring an instance a *builtin* type already has (`instance Eq
-/// Int where ...`) isn't flagged as a `DuplicateInstance` the way
-/// re-declaring a *user* instance twice is — `build_instance_table`'s own
-/// coherence pass only ever sees the module's own declared instances, not
-/// the builtin table it gets merged with only afterward. Worth a
-/// `corpus/semantic` fixture pinning this down as a known limitation
-/// rather than silently leaving it ambiguous, but out of scope for this
-/// entry point itself.
+/// **Fixed. A user re-declaring an instance a *builtin* type already has**
+/// (`instance Eq Int where ...`) **is now flagged as a `DuplicateInstance`**,
+/// the same as re-declaring a *user* instance twice — `build_instance_
+/// table` now takes the seeded `prelude_table` as its own `builtins`
+/// parameter, so its coherence pass sees both the module's own declared
+/// instances and the builtin table `merge_from` would otherwise have
+/// merged in silently afterward.
 pub fn check_module(decls: &[Spanned<CDecl>]) -> Vec<TypeError> {
     let (errors, _warnings) = check_module_with_warnings(decls);
     errors
@@ -88,7 +86,7 @@ pub fn check_module_with_warnings(
     let (mut env, prelude_table) = crate::prelude::seed(&mut sub);
     seed_user_constructors(&mut sub, &mut env, decls);
 
-    let (mut table, mut errors) = build_instance_table(decls);
+    let (mut table, mut errors) = build_instance_table(decls, &prelude_table);
     table.merge_from(prelude_table);
 
     let (tree, _members) = constrain_module(&mut sub, decls);
@@ -122,6 +120,19 @@ mod tests {
         let cs = decls("addX :: Float -> Float -> Float\naddX a b = a + b\n");
         let errors = check_module(&cs);
         assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn redeclaring_a_builtin_instance_through_the_real_entry_point_is_a_duplicate_error() {
+        // Task #40, end to end through check_module itself (not just
+        // build_instance_table directly) -- confirms the fix reaches all
+        // the way through the real seeded-prelude-table wiring.
+        let cs = decls("instance Eq Int where\n  (==) a b = False\n");
+        let errors = check_module(&cs);
+        assert!(errors.iter().any(|e| matches!(
+            &e.kind,
+            crate::error::TypeErrorKind::DuplicateInstance { interface } if interface == "Eq"
+        )));
     }
 
     #[test]

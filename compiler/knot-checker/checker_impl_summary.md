@@ -531,11 +531,19 @@ exercise.
   (`canonicalize_module`) a qualifier is at least checked against the
   current module's own `import` list, but nothing verifies what that
   import's target module *actually contains*.
-- **Re-declaring an instance a *builtin* type already has isn't flagged
-  as a duplicate** — `build_instance_table`'s own coherence pass only ever
-  sees a module's own declared instances; the builtin table is merged in
-  only afterward, at which point `merge_from` just keeps the user's own
-  entry silently, no error, no warning.
+- **Fixed. Re-declaring an instance a *builtin* type already has is now
+  flagged as a duplicate** — `build_instance_table` (Task #40) now takes
+  the seeded builtin table as its own `builtins` parameter, consulted
+  alongside the module's own table-so-far in pass 1's duplicate check
+  (`instance Eq Int where ...` now correctly reports `DuplicateInstance`
+  rather than being silently accepted and then merged in by `merge_from`
+  afterward with no diagnostic either way). Pass 2's own superclass check
+  deliberately doesn't need the same treatment — every interface this
+  crate currently seeds already seeds its own superclass alongside it, so
+  a newly-accepted instance can never have a superclass obligation only
+  the builtin table could satisfy. Moved from `known_gaps/` to
+  `corpus/semantic/invalid/interfaces/redeclare-builtin-instance-is-a-
+  duplicate.knot`.
 - **Full dictionary-passing codegen doesn't exist** (TM7 above) — not a
   regression, since there is no codegen anywhere in this project yet for
   it to plug into, but worth naming precisely: `elaborate::

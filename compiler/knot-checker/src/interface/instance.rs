@@ -191,10 +191,14 @@ impl InstanceTable {
     /// glue for combining `prelude::seed`'s builtin table with a module's
     /// own `build_instance_table` result. Called with the *declared* table
     /// as `self` so a builtin entry never silently shadows a real user
-    /// declaration; a user "redeclaring" an interface a builtin type
-    /// already has (`instance Eq Int where ...`) is untested, unusual
-    /// territory this doesn't specially diagnose — it just keeps the
-    /// user's own entry, same as any other collision here.
+    /// declaration. By the time this runs, a user "redeclaring" an
+    /// interface a builtin type already has (`instance Eq Int where ...`)
+    /// has already been reported as a `DuplicateInstance` by
+    /// `build_instance_table`'s own pass 1 (given the same `builtins`
+    /// table as this call's own `other`) and left out of `self` entirely
+    /// — so this merge itself never actually needs to resolve that
+    /// collision; it only ever sees genuinely-non-overlapping heads in
+    /// practice.
     pub fn merge_from(&mut self, other: InstanceTable) {
         for (key, entry) in other.entries {
             self.entries.entry(key).or_insert(entry);
@@ -511,7 +515,15 @@ type DeclaredInstance<'a> = (&'a str, DeclaredHead, knot_syntax::span::Span);
 
 /// Builds the table from every `CDecl::Instance` in `decls`. Unknown
 /// interfaces are skipped (`knot-canonical` already reported that error);
-/// `insert_builtin` for the actual built-in seeding happens separately.
+/// `insert_builtin` for the actual built-in seeding happens separately —
+/// `builtins` is that already-seeded table (`prelude::seed`'s own, or
+/// `&InstanceTable::new()` for a caller with none in play), consulted only
+/// by pass 1's own duplicate check (see below for why pass 2 never needs
+/// it too) so re-declaring an instance a builtin type already has
+/// (`instance Eq Int where ...`) is caught here rather than merged in
+/// silently later (`InstanceTable::merge_from`'s own doc comment used to
+/// call this out as untested, unusual territory before this fix — a real,
+/// user-visible gap, not just an edge case).
 ///
 /// **Two passes, deliberately not one.** A single forward pass checking
 /// each instance's own superclasses as it's inserted would make coherence
@@ -521,13 +533,23 @@ type DeclaredInstance<'a> = (&'a str, DeclaredHead, knot_syntax::span::Span);
 /// at the point `Ord` was processed, even though both are declared in this
 /// same module. Elm/Haskell have no such ordering requirement, so neither
 /// should this. Pass 1 registers every instance's own existence first
-/// (first occurrence per `(interface, head)` wins; a later duplicate is
-/// reported via `DuplicateInstance` and otherwise ignored — not inserted,
-/// not superclass-checked in pass 2 either, matching what a single
-/// early-return pass would have done for it). Pass 2 then checks every
-/// *accepted* instance's own superclasses against the now-fully-populated
-/// table, so order within the module no longer matters.
-pub fn build_instance_table(decls: &[Spanned<CDecl>]) -> (InstanceTable, Vec<TypeError>) {
+/// (first occurrence per `(interface, head)` wins, checked against both
+/// `table`-so-far *and* `builtins`; a later or builtin-shadowing duplicate
+/// is reported via `DuplicateInstance` and otherwise ignored — not
+/// inserted, not superclass-checked in pass 2 either, matching what a
+/// single early-return pass would have done for it). Pass 2 then checks
+/// every *accepted* instance's own superclasses against the
+/// now-fully-populated `table` alone, so order within the module no
+/// longer matters — `builtins` is never consulted here too, since every
+/// interface this crate currently seeds already seeds its own superclass
+/// alongside it (e.g. `Ord`/`Eq` together for `Int`/`Float`/`String`/
+/// `Bool`), so a *newly* declared instance (one `builtins` doesn't already
+/// have, or pass 1 would have rejected it as a duplicate) can never have a
+/// superclass obligation only `builtins` could satisfy.
+pub fn build_instance_table(
+    decls: &[Spanned<CDecl>],
+    builtins: &InstanceTable,
+) -> (InstanceTable, Vec<TypeError>) {
     let mut table = InstanceTable::new();
     let mut errors = Vec::new();
 
@@ -573,9 +595,17 @@ pub fn build_instance_table(decls: &[Spanned<CDecl>]) -> (InstanceTable, Vec<Typ
     let mut accepted = vec![false; declared.len()];
     for (i, (interface, head, span)) in declared.iter().enumerate() {
         let already_exists = match head {
-            DeclaredHead::Nominal(r, _) => table.has_instance(interface, r),
-            DeclaredHead::Record(key, _) => table.has_record_instance(interface, key),
-            DeclaredHead::Tuple(key, _) => table.has_tuple_instance(interface, key),
+            DeclaredHead::Nominal(r, _) => {
+                table.has_instance(interface, r) || builtins.has_instance(interface, r)
+            }
+            DeclaredHead::Record(key, _) => {
+                table.has_record_instance(interface, key)
+                    || builtins.has_record_instance(interface, key)
+            }
+            DeclaredHead::Tuple(key, _) => {
+                table.has_tuple_instance(interface, key)
+                    || builtins.has_tuple_instance(interface, key)
+            }
         };
         if already_exists {
             errors.push(TypeError {
@@ -810,7 +840,7 @@ mod tests {
              instance Eq Shape where\n  (==) a b = True\n\
              instance Ord Shape where\n  compare a b = EQ\n",
         );
-        let (table, errors) = build_instance_table(&cs);
+        let (table, errors) = build_instance_table(&cs, &InstanceTable::new());
         assert!(errors.is_empty(), "{errors:?}");
         assert!(table.has_instance("Eq", &Ref::TopLevel("Shape".to_string())));
         assert!(table.has_instance("Ord", &Ref::TopLevel("Shape".to_string())));
@@ -819,7 +849,7 @@ mod tests {
     #[test]
     fn declaring_ord_without_eq_first_is_a_missing_superclass_error() {
         let cs = decls("type Shape = Circle Float\ninstance Ord Shape where\n  compare a b = EQ\n");
-        let (_table, errors) = build_instance_table(&cs);
+        let (_table, errors) = build_instance_table(&cs, &InstanceTable::new());
         assert!(errors.iter().any(|e| matches!(
             &e.kind,
             TypeErrorKind::MissingSuperclassInstance { interface, superclass }
@@ -839,7 +869,7 @@ mod tests {
              instance Ord Shape where\n  compare a b = EQ\n\
              instance Eq Shape where\n  (==) a b = True\n",
         );
-        let (table, errors) = build_instance_table(&cs);
+        let (table, errors) = build_instance_table(&cs, &InstanceTable::new());
         assert!(errors.is_empty(), "{errors:?}");
         assert!(table.has_instance("Eq", &Ref::TopLevel("Shape".to_string())));
         assert!(table.has_instance("Ord", &Ref::TopLevel("Shape".to_string())));
@@ -857,7 +887,7 @@ mod tests {
              instance Ord Shape where\n  compare a b = EQ\n\
              instance Ord Shape where\n  compare a b = EQ\n",
         );
-        let (_table, errors) = build_instance_table(&cs);
+        let (_table, errors) = build_instance_table(&cs, &InstanceTable::new());
         let duplicates = errors
             .iter()
             .filter(|e| matches!(&e.kind, TypeErrorKind::DuplicateInstance { .. }))
@@ -877,10 +907,42 @@ mod tests {
              instance Eq Shape where\n  (==) a b = True\n\
              instance Eq Shape where\n  (==) a b = False\n",
         );
-        let (_table, errors) = build_instance_table(&cs);
+        let (_table, errors) = build_instance_table(&cs, &InstanceTable::new());
         assert!(errors
             .iter()
             .any(|e| matches!(&e.kind, TypeErrorKind::DuplicateInstance { interface } if interface == "Eq")));
+    }
+
+    #[test]
+    fn redeclaring_an_instance_a_builtin_type_already_has_is_a_duplicate_error() {
+        // Task #40: build_instance_table's own coherence pass used to only
+        // ever see a module's own declared instances, not the builtin
+        // table it gets merged with only afterward (InstanceTable::
+        // merge_from) -- so `instance Eq Int where ...` type-checked as if
+        // Int had no Eq instance yet at all. Now `builtins` is consulted
+        // too.
+        let mut builtins = InstanceTable::new();
+        builtins.insert_builtin("Eq", Ref::Builtin("Int".to_string()), vec![]);
+        let cs = decls("instance Eq Int where\n  (==) a b = False\n");
+        let (table, errors) = build_instance_table(&cs, &builtins);
+        assert!(errors
+            .iter()
+            .any(|e| matches!(&e.kind, TypeErrorKind::DuplicateInstance { interface } if interface == "Eq")));
+        // Rejected, not inserted -- table itself stays empty for this head.
+        assert!(!table.has_instance("Eq", &Ref::Builtin("Int".to_string())));
+    }
+
+    #[test]
+    fn declaring_a_new_instance_for_a_builtin_type_is_still_accepted() {
+        // The fix above must not become overly conservative -- a builtin
+        // type genuinely getting a *new* interface it doesn't already have
+        // (Semigroup has no builtin Int instance) is still fine.
+        let mut builtins = InstanceTable::new();
+        builtins.insert_builtin("Eq", Ref::Builtin("Int".to_string()), vec![]);
+        let cs = decls("instance Semigroup Int where\n  (<>) a b = a\n");
+        let (table, errors) = build_instance_table(&cs, &builtins);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(table.has_instance("Semigroup", &Ref::Builtin("Int".to_string())));
     }
 
     #[test]
@@ -894,7 +956,7 @@ mod tests {
         // entries` (keyed by field-name set, `Ref`-keyed `entries` stays
         // untouched either way) rather than `entries` itself.
         let cs = decls("instance Semigroup { x : Float } where\n  (<>) a b = { x = a.x }\n");
-        let (table, errors) = build_instance_table(&cs);
+        let (table, errors) = build_instance_table(&cs, &InstanceTable::new());
         assert!(errors.is_empty(), "{errors:?}");
         assert!(table.entries.is_empty());
         let key = record_key(&CType::Record(
@@ -913,7 +975,7 @@ mod tests {
     fn a_record_instances_own_declared_context_is_recorded_as_field_requires() {
         let cs =
             decls("instance Eq a => Eq { value : a } where\n  (==) x y = x.value == y.value\n");
-        let (table, errors) = build_instance_table(&cs);
+        let (table, errors) = build_instance_table(&cs, &InstanceTable::new());
         assert!(errors.is_empty(), "{errors:?}");
         let key = record_key(&CType::Record(
             vec![("value".to_string(), CType::Var("a".to_string()))],
@@ -1000,7 +1062,7 @@ mod tests {
             "instance Show { value : Int } where\n  show x = \"int\"\n\
              instance Show { value : String } where\n  show x = \"string\"\n",
         );
-        let (table, errors) = build_instance_table(&cs);
+        let (table, errors) = build_instance_table(&cs, &InstanceTable::new());
         assert!(errors.is_empty(), "{errors:?}");
         let int_key = record_key(&CType::Record(
             vec![(
@@ -1031,7 +1093,7 @@ mod tests {
         // structural fallback at all (Num has no derived tuple instance
         // the way Eq/Ord/Show do) -- now accepted into `tuple_entries`.
         let cs = decls("instance Num (Int, Int) where\n  (+) a b = a\n");
-        let (table, errors) = build_instance_table(&cs);
+        let (table, errors) = build_instance_table(&cs, &InstanceTable::new());
         assert!(errors.is_empty(), "{errors:?}");
         let key = tuple_key(&CType::Tuple(vec![
             CType::Named(Ref::Builtin("Int".to_string()), vec![]),
@@ -1050,7 +1112,7 @@ mod tests {
         // now that Tuple is a valid target shape like Record, it's simply
         // accepted as a (redundant but harmless) custom instance instead.
         let cs = decls("instance Eq (Int, Int) where\n  (==) a b = True\n");
-        let (_table, errors) = build_instance_table(&cs);
+        let (_table, errors) = build_instance_table(&cs, &InstanceTable::new());
         assert!(errors.is_empty(), "{errors:?}");
     }
 
@@ -1333,7 +1395,7 @@ mod tests {
             "type Box a = Box a\n\
              instance Eq a => Eq (Box a) where\n  (==) x y = True\n",
         );
-        let (table, errors) = build_instance_table(&cs);
+        let (table, errors) = build_instance_table(&cs, &InstanceTable::new());
         assert!(errors.is_empty(), "{errors:?}");
 
         let mut sub = Substitution::new();
@@ -1372,7 +1434,7 @@ mod tests {
              compareShapes :: Shape -> Shape -> Bool\n\
              compareShapes a b = a == b\n",
         );
-        let (table, table_errors) = build_instance_table(&cs);
+        let (table, table_errors) = build_instance_table(&cs, &InstanceTable::new());
         assert!(table_errors.is_empty(), "{table_errors:?}");
 
         let mut sub = Substitution::new();
@@ -1401,7 +1463,7 @@ mod tests {
              compareShapes :: Shape -> Shape -> Bool\n\
              compareShapes a b = a == b\n",
         );
-        let (table, table_errors) = build_instance_table(&cs);
+        let (table, table_errors) = build_instance_table(&cs, &InstanceTable::new());
         assert!(table_errors.is_empty(), "{table_errors:?}");
 
         let mut sub = Substitution::new();
@@ -1429,7 +1491,7 @@ mod tests {
         // real Haskell `f :: Bool; f = 5` reports (`No instance for (Num
         // Bool)`), not a unification mismatch.
         let cs = decls("type Shape = Circle Float\ninstance Eq Shape where\n  (==) a b = 5\n");
-        let (table, table_errors) = build_instance_table(&cs);
+        let (table, table_errors) = build_instance_table(&cs, &InstanceTable::new());
         assert!(table_errors.is_empty(), "{table_errors:?}");
 
         let mut sub = Substitution::new();
@@ -1611,7 +1673,7 @@ mod tests {
         // error` above, just against a compound `Box b` shape instead of
         // a plain nominal `Bool`.
         let cs = decls("type Box a = Box a\ninstance Collection Box where\n  map f b = 5\n");
-        let (table, table_errors) = build_instance_table(&cs);
+        let (table, table_errors) = build_instance_table(&cs, &InstanceTable::new());
         assert!(table_errors.is_empty(), "{table_errors:?}");
 
         let mut sub = Substitution::new();
