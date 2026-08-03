@@ -110,6 +110,13 @@ alternatively, the UI can serialize the state directly into the file with specia
 -knot compiler todo
     DONE-change : to :: for records
     DONE-Option to Maybe
+    -operators are implement as a prelude file thing, but it's also built and and users aren't allowed to add more.
+        -add >>= Operators & Precedence
+    -remove automatic derivtaino for Eq, Ord, Show
+    - NOT TRUE, FIX:
+  `Collection` and `Context` work differently from the other eight: a user's own function signature can't be generic over "any `Collection`" or "any `Context`" (this grammar has no higher-kinded type variables), so they're only ever reachable through the built-in `map`/`foldl`/`foldr`/`filter`/`length`/`pure`/`bind` functions themselves — though a user's own type constructor can still have a `Collection`/`Context` **instance** declared for it, exactly like any other interface.
+
+
     -string as an opaque bulit in type like elm (or just mke it an alias for bytestring)
     -I think some of the prelude stuff got mistaken for bulit in so remove it from the parser
     -**TODO** trailing `'` (not valid in elm, valid in haskell, choose)

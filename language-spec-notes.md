@@ -72,8 +72,6 @@ Knot represents a middle ground between Haskell and Elm, tailored specifically t
   | `Integral`   | `div`, `mod` (implies `Num`, `Ord`)              | `Integral`                                                                             |
   | `Collection` | `map`, `foldl`, `foldr`, `filter`, `length`      | `Functor` + `Foldable`, merged into one interface                                      |
   | `Context`    | `pure`, `bind`                                  | `Applicative` + `Monad`, merged into one interface — replaces `Monad` and its `>>=`    |
-
-  `Collection` and `Context` work differently from the other eight: a user's own function signature can't be generic over "any `Collection`" or "any `Context`" (this grammar has no higher-kinded type variables), so they're only ever reachable through the built-in `map`/`foldl`/`foldr`/`filter`/`length`/`pure`/`bind` functions themselves — though a user's own type constructor can still have a `Collection`/`Context` **instance** declared for it, exactly like any other interface.
 * **Metadata & Annotations (`@name(...)` / `@{...}`)**: A compiler-checked layout and tool annotation system designed for graph coordinates, documentation, and metadata.
 * **Unravel System (Reverse Execution)**: Backwards execution solving rule annotations (`unravel`), allowing changes to flow in reverse through the graph.
 * **Holes in LHS of let bindings**: `let _ = expression` is allowed and dropped by the compiler.
@@ -255,9 +253,16 @@ runtime dictionary.
 ## 7. Expressions
 
 ### 7.1 Literals
-`Int`, `Float`, `String`, and `Bool` (`True`/`False`) literals, standard syntax.
+
+**Matching Haskell/Elm**
+- `Int` e.g. `5`
+- `Float` e.g. `3.14`
+- `Char` e.g. `'a'`
+- `String` e.g. `"meow meow meow"`
 
 ### 7.2 Records, Lists, Tuples
+
+**Matching Haskell/Elm**
 
 ```knot
 [1, 2, 3]
@@ -266,11 +271,18 @@ myMap :: Map String Int
 myMap = Map.fromList [ ("apple", 1), ("banana", 2) ]
 
 pair = (42, "hello")
+```
 
+**Matching Elm**
+```knot
 point = { x = 1.0, y = 2.0 }
 ```
 
+knot records can remain anonymous like Elm
+
 ### 7.3 Let, If/Else, Case
+
+**Matching Haskell/Elm**
 
 ```knot
 let
@@ -289,6 +301,8 @@ case shape of
 See §8 for the full pattern-matching story.
 
 ### 7.4 Operators & Precedence
+
+**Differs from Haskell/Elm**
 
 To ensure unambiguous parsing and 1-to-1 visual node graph mapping, Knot defines a strict set of built-in operators and precedence rules:
 
@@ -311,10 +325,10 @@ f >> g                    -- forward composition, equivalent to \x -> g (f x)
 Because Knot's operator set is closed (§2.3 — no user-defined operators), this table is exhaustive and fixed at parse time; unlike Elm, a parser never needs to consult import declarations to learn an operator's fixity.
 
 #### Boolean Operators
-- `not :: Bool -> Bool` — logical negation (prefix function; `&&`/`||` are in the table above and short-circuit as usual).
 
 ### 7.5 Unary Negation
 
+**Matching Elm**
 `-` is overloaded between subtraction and negation; Knot resolves this exactly like Elm
 does — a `-` with whitespace before but none after is unary negation binding tighter than
 application (`f -1` is `f (-1)`, not `f - 1`). Symmetric spacing (`a - 1` or `a-1`) is
@@ -323,8 +337,7 @@ ordinary subtraction. The remaining case — whitespace *after* `-` but not befo
 with parentheses or by fixing the spacing.
 
 ### 7.6 Operator Sections
-A bare operator in parens is a first-class function: `(+)` is `\x y -> x + y`. Unlike
-Haskell, there are no *partial* sections — `(+2)`/`(2+)` are both unsupported; write
+**Matching Elm** A bare operator in parens is a first-class function: `(+)` is `\x y -> x + y`. Unlike Haskell, there are no *partial* sections — `(+2)`/`(2+)` are both unsupported; write
 the lambda out (`\x -> x + 2`) instead.
 
 ---
@@ -332,54 +345,57 @@ the lambda out (`\x -> x + 2`) instead.
 ## 8. Pattern Matching
 
 ### 8.1 Supported Patterns
+**Matching Haskell/Elm**
 
+e.g.
 ```knot
 case shape of
   Circle r       -> 3.14159 * r * r
   Rectangle w h  -> w * h
   Triangle a b c -> ...
 ```
-
-- **List patterns** via `:` cons:
-  ```knot
-  case list of
-    []     -> 0
-    x : xs -> x + sum xs
-  ```
-- **Tuple patterns**:
-  ```knot
+```knot
+case list of
+  []     -> 0
+  x : xs -> x + sum xs
+```
+```knot
   case pair of
     (x, y) -> x
-  ```
+```
+
+**Matching Elm**
 - **Pattern aliases** (`as`, see §2.1):
   ```knot
   case list of
     (x : xs) as fullList -> fullList
   ```
-- **No record shorthand** (see §2.3): match via alias + dot notation instead: `r as point -> point.x`.
 - **No Float literal patterns** (matches Elm — float equality is unsound): compare explicitly with `if` inside the match arm instead. `Int` and `String` literal patterns are both fine (also matching Elm).
 
+**Differs from Haskell/Elm**
+
+- **No record shorthand** (see §2.3): match via alias + dot notation instead: `r as point -> point.x`.
+- **No `@` aliases** use `as` instead
+
+
 ### 8.2 No Guards
+**Matching Elm**
 Pattern matching does not support guards (§2.1) — use nested `if...then...else` inside a match arm instead.
 
 ### 8.3 Exhaustiveness Checking
-The compiler checks whether a `case`'s patterns cover every possible value of the
-scrutinee's type — recursively, through nested constructor/tuple patterns — and
-whether any arm is unreachable because an earlier arm already covers everything it
-would match. Both are reported, but only ever as a **warning**, never a hard error,
-matching §1's "partial functions allowed" principle — an incomplete or redundant
-match still compiles. This applies uniformly everywhere a `case` can appear,
-including inside an interface instance's own method body (§10).
+**Matching Haskell**
+The compiler checks case patterns are all reachable and exhaustive and reports as warnings if not.
 
 ---
 
 ## 9. Function & Value Definitions
-
+**Matching Hasell/Elm**
 ```knot
 name :: Type
 name arg1 arg2 = expr
 ```
 
+**Matching Elm**
 A name is bound by exactly one equation (§2.3 — no multi-clause definitions);
 branch on argument shape with `case` (§8) inside the body instead.
 
@@ -387,17 +403,19 @@ branch on argument shape with `case` (§8) inside the body instead.
 
 ## 10. Interfaces (Typeclasses)
 
+### 10.1 The Closed Interface Set
+**Unique**
 The interface set is fixed (§2.4) — user-defined interfaces are not supported in v0
 (planned for v2, §18). Instances of these interfaces are open, though: both built-in
 and user-defined types may implement them. Users may also write their own function
 signatures constrained by these interfaces, e.g. `myMax :: Ord a => a -> a -> a`,
 usable with any type that has an `Ord` instance.
 
-### 10.1 The Closed Interface Set
 See §2.4 for the full, authoritative table of all ten interfaces and their Haskell
 analogs — not repeated here to avoid the two copies drifting apart.
 
 ### 10.2 Instance Declarations & Coherence
+**Matching Haskell**
 ```knot
 instance Eq Shape where
   (==) a b = ...
@@ -407,26 +425,24 @@ type variable, a function type, or an *open* (row-polymorphic) record, since the
 no fixed, exact shape to key an instance by in those cases.
 
 At most one instance may exist per `(interface, type)` pair, across the whole program
-— this includes builtin types: re-declaring an instance a builtin type already has
-(`instance Eq Int where ...`) is a duplicate, the same as declaring the same instance
-twice for a user's own type.
+— this includes builtin types.
 
 ### 10.3 Superclasses
+**Matching Haskell**
 Some interfaces imply another: `Ord` implies `Eq`, `Monoid` implies `Semigroup`,
 `Fractional` and `Integral` both imply `Num`, and `Integral` additionally implies
 `Ord` (see §2.4's table for methods). Declaring an instance for an interface without
 its superclass instance already existing *somewhere* in the same program is a
 compile error — order of declaration within a module doesn't matter.
 
-### 10.4 Structural Derivation
-`Eq`, `Ord`, and `Show` derive automatically, field-by-field/element-by-element, for
-any `Tuple`, `Record` (closed or open), or `Unit` value with no declared instance —
-no user declaration needed for the common case. A custom instance for one of these
-three targets *overrides* the automatic derivation rather than conflicting with it.
-Every other interface (`Num`, `Semigroup`, and anything the target type doesn't have
-a structural instance for) has no such fallback — an explicit `instance` is required.
+### 10.4 Structural Automatic Derivation
+
+**Differs from Hasell** 
+Not supported right now, must always manually derive with `instance ...`.
+Support for `deriving` is a V2 feature, omit for now.
 
 ### 10.5 Numeric Interfaces: Exponentiation & Conversion
+**Similar to Haskell**
 The three numeric interfaces, shown here in interface-block notation purely to
 document their built-in signatures (users never write `interface ... where`
 themselves — §4.2, §18):
@@ -459,34 +475,32 @@ standalone built-in signature, matching Haskell exactly:
 (^) :: (Num a, Integral b) => a -> b -> a
 ```
 
-Base and exponent may differ in type — `2.5 ^ 3` is a `Float` base raised to an `Int`
-exponent.
-
 Conversion: `fromIntegral :: (Integral a, Num b) => a -> b` converts an integral
 value (e.g. `Int`) to any other numeric type (e.g. `Float`).
 
 ### 10.6 `Collection` & `Context`: Signatures and Restrictions
 
 ```knot
+-- Collection
 map    :: (a -> b) -> f a -> f b
 foldl  :: (b -> a -> b) -> b -> f a -> b
 foldr  :: (a -> b -> b) -> b -> f a -> b
 filter :: (a -> Bool) -> f a -> f a
 length :: f a -> Int
 
+-- Contextxt  
 pure :: a -> f a
 bind :: f a -> (a -> f b) -> f b   -- also exposed as (>>=)
 ```
 
 Built-in `Collection` instances: `List`, `Map`. Built-in `Context` instances:
-`Maybe`, `Result`, `IO`, `List`. As noted in §2.4, a user's own signature can't be
-generic over "any `Collection`"/"any `Context`" — these are only reachable through
-the built-in functions above — but a user's own type constructor can still have a
-`Collection`/`Context` instance declared for it.
+`Maybe`, `Result`, `IO`, `List`. 
 
 ---
 
 ## 11. Do-Notation & Built-in Contexts
+
+**Matching Haskell**
 
 `do` notation sequences chained computations over any `Context` instance (§10.6),
 desugaring to `bind`/`pure`:
@@ -497,13 +511,6 @@ do
   y <- anotherOption
   pure (x + y)
 ```
-
-| Type         | Purpose                                      |
-|--------------|-----------------------------------------------|
-| `Maybe a`    | Nullable / missing values                    |
-| `Result e a` | Fallible computations with typed errors      |
-| `IO a`       | Side effects (file I/O, printer comms, etc.) |
-| `List a`     | Nondeterminism / list-comprehension-style chaining |
 
 ---
 
