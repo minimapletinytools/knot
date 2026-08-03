@@ -829,23 +829,39 @@ fn constrain_method_body_against(
 ) -> Constraint {
     let mut scope = LocalScope::new();
     scope.push();
-    let mut constraints = Vec::new();
+    let mut body_constraints = Vec::new();
     let typed_params: Vec<crate::ast::TypedPattern> = method
         .params
         .iter()
-        .map(|p| constrain_pattern(sub, &mut scope, p, &mut constraints))
+        .map(|p| constrain_pattern(sub, &mut scope, p, &mut body_constraints))
         .collect();
-    let typed_body = constrain_expr(sub, &mut scope, &method.body, &mut constraints);
+    let typed_body = constrain_expr(sub, &mut scope, &method.body, &mut body_constraints);
     scope.pop();
 
     let inferred = typed_params.iter().rev().fold(typed_body.ty, |acc, p| {
         sub.fresh_bound(Structure::Fn(p.ty, acc))
     });
-    constraints.push(Constraint::Equal {
+    // Solve the header/signature <-> inferred-type link *before*
+    // `body_constraints`, not after (same fix as Fix #13's own
+    // `constrain_group_chain`, applied here too since instance methods
+    // build this same shape independently): `expected_ty` is built from
+    // the instance's own rigid variables (`instantiate_method_shape`/
+    // `instantiate_ctor_method_shape`, sharing `constrain_instance`'s own
+    // `rigids` map), but each param pattern's own type is still a fresh,
+    // unconnected unbound variable at this point. If `body_constraints`
+    // were solved first, a nested `let` inside the method body
+    // generalizing over a param-derived variable would see it as
+    // ambient-free rather than the (soon-to-be) rigid one this instance
+    // declares, wrongly making it look quantifiable -- misfiring
+    // `AmbiguousConstraint` on an ordinary local `let` inside a method
+    // body, e.g. a `Show` instance computing intermediate values via
+    // `div`/`mod` before formatting them.
+    let mut constraints = vec![Constraint::Equal {
         span: method.body.span,
         expected: expected_ty,
         actual: inferred,
-    });
+    }];
+    constraints.extend(body_constraints);
     Constraint::And(constraints)
 }
 

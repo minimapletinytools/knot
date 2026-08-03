@@ -334,12 +334,11 @@ bare operator sections used in real folds (`foldl (+) 0 xs`,
 `foldl (<>) "" strs`), a custom `Num` instance combined with operator
 sections (`foldl (+) origin vectors`), a deliberate numeric-literal-
 polymorphism stress test, and a single record type carrying `Eq`+`Ord`+
-`Show`+`Num` custom instances all at once. 97 of 98 passed initially,
-tracing back to one root cause, **not yet fixed**:
+`Show`+`Num` custom instances all at once. 97 of 98 passed initially.
 
-12. **`constrain::decl::constrain_method_body_against` has the identical
-    header-vs-body solve-order bug Fix #13 fixed for ordinary function
-    bindings, in instance methods' own separate code path** —
+12. **Fixed. `constrain::decl::constrain_method_body_against` had the
+    identical header-vs-body solve-order bug Fix #13 fixed for ordinary
+    function bindings, in instance methods' own separate code path** —
     `multi_interface/eq-ord-show-num-all-together.knot`'s own `Show Money`
     instance computes intermediate values via a local `let` (`dollars =
     div m.cents 100; remainder = mod m.cents 100`) before formatting them,
@@ -348,4 +347,10 @@ tracing back to one root cause, **not yet fixed**:
     ever touched `constrain_group_chain` (ordinary top-level/`let`
     bindings); `constrain_method_body_against` (instance methods'
     equivalent) independently builds the exact same header-`Equal`-after-
-    body shape, so it never received that fix.
+    body shape, so it never received that fix. **Fixed** the same way:
+    solve the header `Equal` before `body_constraints`, so a param-derived
+    variable is already unioned with the instance's own rigid target by
+    the time a nested `let` inside the method body might otherwise
+    misgeneralize over it.
+
+After this fix, 98 of 98 pass.

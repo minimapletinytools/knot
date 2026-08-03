@@ -434,4 +434,27 @@ mod tests {
             "{errors:?}"
         );
     }
+
+    #[test]
+    fn an_instance_methods_local_let_over_an_integral_rigid_is_not_ambiguous() {
+        // Round 4's own corpus/programs finding: `constrain::decl::
+        // constrain_method_body_against` had the identical header-vs-body
+        // solve-order bug Fix #13 fixed for ordinary function bindings
+        // (`constrain_group_chain`), just in instance methods' own,
+        // separate code path -- a `let` inside a `Show` instance's own
+        // method body, computing intermediate values via `div`/`mod`
+        // before formatting them, used to misfire `AmbiguousConstraint`.
+        let cs = decls(concat!(
+            "type alias Money = { cents : Int }\n",
+            "instance Show Money where\n",
+            "  show m =\n",
+            "    let\n",
+            "        dollars = div m.cents 100\n",
+            "        remainder = mod m.cents 100\n",
+            "    in\n",
+            "    \"$\" <> show dollars <> \".\" <> show remainder\n",
+        ));
+        let errors = check_module(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
 }
