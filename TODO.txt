@@ -98,10 +98,27 @@ alternatively, the UI can serialize the state directly into the file with specia
 
 :: TODO
 -actually go over type checker implementation details seems to be kinda broken a lot
+-create prelude section in language spec, here is stuff tha is not prelude
+    -List syntax — [], :, and [a, b, c] literal syntax are special-cased by the parser, though the [] type itself (data [] a = [] | a : [a]) is defined in GHC.Types, just with compiler magic for the syntax.
+    - Tuple syntax — (a, b), (a, b, c), etc., and their types, are built-in syntax (arbitrarily-sized tuples aren't expressible as a normal user-defined type family).
+    - Numeric literals — 5 desugars to fromInteger 5, 3.2 desugars to fromRational ... — this desugaring rule is compiler-built-in, though fromInteger/Num themselves are just a class.
+    - Char, Int, Integer, Double, Word primitive types — these need compiler/runtime support (unboxed representations, etc.) even though their interfaces look like ordinary types.
+    - IO — needs special compiler/runtime treatment to sequence real-world effects (though the Monad IO instance itself is just ordinary type class code).
+
+-make prelude file
+-you probabyl need some special annotation to indicate something is treated lie a bulit in in the language
 -knot compiler todo
     DONE-change : to :: for records
     DONE-Option to Maybe
-    -add >>= operator
+    -string as an opaque bulit in type like elm (or just mke it an alias for bytestring)
+    -I think some of the prelude stuff got mistaken for bulit in so remove it from the parser
+    -**TODO** trailing `'` (not valid in elm, valid in haskell, choose)
+    -consider switching to data for type, and type for type alias (matchig hassell)
+    -consider ading deriving (probably a V2 feature though)
+    -consider renaming Record Spreads or getting rid of it  
+    
+    -mention that unboxed types are not supported (or should you just support them? IDK what tha even means, look into it)
+-do linter rules
 -UI spec gaps
     -finish pattern matching node stuff
     -figure out how operator precedence is expressed in graph

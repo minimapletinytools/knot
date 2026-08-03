@@ -83,27 +83,24 @@ Knot represents a middle ground between Haskell and Elm, tailored specifically t
 
 ## 3. Node Graph Model
 
-*(Placeholder — needs its own design pass. The premise on this document's very first
-page is that every language feature maps onto a visual node graph, but nothing yet
-defines the actual vocabulary: what is a node, what is an edge/strand, how does a
-`let` binding, function application, or `case` expression turn into graph structure,
-and how do the forward/reverse (§14 Unravel) execution models relate to it. Sections
-13 (Annotations) and 14 (Unravel) already lean on this vocabulary informally — this
-section should make it precise. To fill in together.)*
+TODO brief outline that all lanugage features must map to node spec, (reverse mapping need not be complete)
+TODO mention something about reverse mapping enforces canonical linter
 
 ---
 
 ## 4. Lexical Syntax & Layout
 
 ### 4.1 Comments
-Line comments start with `--` and run to end of line. Block comments are `{- ... -}`
-and nest (`{- outer {- inner -} still outer -}` is one comment), matching Haskell.
+**Matching Haskell** Line comments start with `--` and run to end of line. Block comments are `{- ... -}`
+and nest (`{- outer {- inner -} still outer -}` is one comment).
 
 ### 4.2 Identifiers & Keywords
-Identifiers are ASCII-only: a leading letter, then letters/digits/`_`. Case
-distinguishes the two identifier namespaces, matching Haskell/Elm — lowercase-leading
+**Matching Haskell/Elm** Identifiers are ASCII-only: a leading letter, then letters/digits/`_`. Case
+distinguishes the two identifier namespaces — lowercase-leading
 for values, function names, type variables, and record fields; uppercase-leading for
-types, constructors, and modules. There is no trailing `'` convention (Haskell's `x'`).
+types, constructors, and modules. 
+
+**TODO** trailing `'` (not valid in elm, valid in haskell, choose)
 
 Reserved words (never usable as an identifier): `module`, `exposing`, `import`, `as`,
 `type`, `alias`, `let`, `in`, `if`, `then`, `else`, `case`, `of`, `do`, `True`, `False`,
@@ -112,11 +109,10 @@ never writes an `interface ... where` block themselves — see §10 — since `w
 real, user-facing syntax via `instance ... where`.)
 
 ### 4.3 Layout / Indentation Rule
-Knot is layout-sensitive, in the tradition of Haskell/Elm: a block-forming construct
+**Matching Haskell/Elm** Knot is layout-sensitive, in the tradition of Haskell/Elm: a block-forming construct
 (`let`, `case`/`of` arms, `do`, and top-level declarations) establishes a reference
 indent column, and every subsequent item at that block's level must align to it —
-there's no explicit block-closing token. Ported conceptually from Elm's own layout
-algorithm.
+there's no explicit block-closing token. 
 
 ### 4.4 File & Module Structure
 Every `.knot` file is exactly one module (§12). A module's declared name should match
@@ -137,12 +133,14 @@ its file path, dot-separated (`Geometry.Shapes` lives at `Geometry/Shapes.knot`)
 | `Unit`   | `()` — the unit type  |
 
 ### 5.2 Type Aliases
-`type alias Name = Type` gives an existing type a new name — a naming convenience,
+**Matching Elm** `type alias Name = Type` gives an existing type a new name — a naming convenience,
 not a new nominal type. Aliases are expanded away entirely before type checking, so
 two different aliases naming the same underlying shape (e.g. two record aliases with
 identical fields) are the same type as far as the checker is concerned.
 
 ### 5.3 Algebraic Data Types
+
+**Matching Elm** 
 
 ```knot
 type Shape
@@ -159,8 +157,11 @@ type Result e a
   | Err e
 ```
 
+using the `type` keyword, and current Haskell's `deriving` is not supported.
+
 ### 5.4 Records
-Construction, update, and access all use Elm's syntax (§2.1):
+
+**Matching Elm** Recorld construction, update, and access all use Elm's syntax (§2.1):
 
 ```knot
 p  = { x = 1.0, y = 2.0 }
@@ -176,6 +177,8 @@ variable in record position instead means "any record with at least these fields
 distance :: { r | x : Float, y : Float } -> Float
 ```
 
+Note that Elm's record pattern matching syntax e.g. `{ x, y }` is not supported.
+
 **Record Spreads**: a record type can be defined to contain all of another's fields via
 `..Name`, and this composes with row polymorphism:
 
@@ -185,6 +188,8 @@ distance2 :: { a | ..GraphicsElement, label : String } -> Float
 ```
 
 ### 5.5 Tuples
+
+**Matching Elm** 
 
 ```knot
 pair :: (Int, String)
@@ -199,6 +204,8 @@ fixed-size groupings should use a record instead.
 
 ### 5.6 Built-in Generic Containers
 
+TODO move this section to builtin section or prelude seciton or whatever
+
 | Type         | Description                               |
 |--------------|--------------------------------------------|
 | `List a`     | Ordered sequence                          |
@@ -209,6 +216,8 @@ fixed-size groupings should use a record instead.
 
 ### 5.7 `Ordering`
 
+TODO move this section to builtin section or prelude seciton or whatever
+
 ```knot
 type Ordering
   = LT
@@ -218,9 +227,6 @@ type Ordering
 
 The result type of `compare` (§10). `Ordering` has its own `Eq`/`Ord`/`Show`
 instances, same as any other primitive-shaped built-in type.
-
-### 5.8 Unit-Aware Numeric Types
-Deferred to v2 (§18) — all physical quantities are represented as plain `Float` for now.
 
 ---
 
