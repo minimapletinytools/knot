@@ -1,0 +1,24 @@
+type Token
+    = Text String
+    | Var String
+
+render :: (String -> Maybe String) -> List Token -> String
+render lookupVar tokens = case tokens of
+  [] -> ""
+  Text s : rest -> s <> render lookupVar rest
+  Var name : rest ->
+    case lookupVar name of
+      Just value -> value <> render lookupVar rest
+      Nothing -> "{{" <> name <> "}}" <> render lookupVar rest
+
+sampleTokens :: List Token
+sampleTokens = [Text "Hello, ", Var "name", Text "! You have ", Var "count", Text " messages."]
+
+lookupSample :: String -> Maybe String
+lookupSample name = case name of
+  "name" -> Just "Ada"
+  "count" -> Just "3"
+  _ -> Nothing
+
+rendered :: String
+rendered = render lookupSample sampleTokens

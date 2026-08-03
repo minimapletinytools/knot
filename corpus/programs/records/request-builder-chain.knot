@@ -1,0 +1,25 @@
+type alias Request =
+    { method : String
+    , url : String
+    , headers : List (String, String)
+    , body : Maybe String
+    }
+
+emptyRequest :: String -> Request
+emptyRequest url = { method = "GET", url = url, headers = [], body = Nothing }
+
+withMethod :: String -> Request -> Request
+withMethod method req = { req | method = method }
+
+withHeader :: String -> String -> Request -> Request
+withHeader key value req = { req | headers = (key, value) : req.headers }
+
+withBody :: String -> Request -> Request
+withBody body req = { req | body = Just body, method = "POST" }
+
+buildSampleRequest :: Request
+buildSampleRequest =
+    emptyRequest "https://example.com/api"
+        |> withHeader "Accept" "application/json"
+        |> withHeader "Authorization" "Bearer-token"
+        |> withBody "key=value"

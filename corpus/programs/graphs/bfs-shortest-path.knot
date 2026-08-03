@@ -1,0 +1,64 @@
+type alias Graph = List (Int, List Int)
+
+neighborsOf :: Int -> Graph -> List Int
+neighborsOf node graph = case graph of
+  [] -> []
+  (n, ns) : rest ->
+    if n == node then
+      ns
+    else
+      neighborsOf node rest
+
+contains :: Int -> List Int -> Bool
+contains x xs = case xs of
+  [] -> False
+  h : t ->
+    if h == x then
+      True
+    else
+      contains x t
+
+dedupeAgainst :: List Int -> List Int -> List Int
+dedupeAgainst candidates visited = case candidates of
+  [] -> []
+  h : t ->
+    if contains h visited then
+      dedupeAgainst t visited
+    else
+      h : dedupeAgainst t visited
+
+expandFrontier :: Graph -> List Int -> List Int -> List Int
+expandFrontier graph visited frontier = case frontier of
+  [] -> []
+  h : t -> dedupeAgainst (neighborsOf h graph) visited <> expandFrontier graph visited t
+
+bfs :: Graph -> List Int -> List Int -> Int -> Maybe Int
+bfs graph visited frontier target =
+  if contains target frontier then
+    Just 0
+  else
+    case frontier of
+      [] -> Nothing
+      _ ->
+        let
+            newVisited = frontier <> visited
+            nextFrontier = expandFrontier graph newVisited frontier
+        in
+        case bfs graph newVisited nextFrontier target of
+          Nothing -> Nothing
+          Just depth -> Just (depth + 1)
+
+shortestPath :: Graph -> Int -> Int -> Maybe Int
+shortestPath graph start target = bfs graph [] [start] target
+
+sampleGraph :: Graph
+sampleGraph =
+    [ (1, [2, 3])
+    , (2, [1, 4])
+    , (3, [1, 4])
+    , (4, [2, 3, 5])
+    , (5, [4])
+    ]
+
+sampleDistance :: Maybe Int
+sampleDistance = shortestPath sampleGraph 1 5

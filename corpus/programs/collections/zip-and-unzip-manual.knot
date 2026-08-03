@@ -1,0 +1,25 @@
+zip :: List a -> List b -> List (a, b)
+zip xs ys = case (xs, ys) of
+  (x : xt, y : yt) -> (x, y) : zip xt yt
+  _ -> []
+
+unzip :: List (a, b) -> (List a, List b)
+unzip pairs = case pairs of
+  [] -> ([], [])
+  (x, y) : rest ->
+    case unzip rest of
+      (xs, ys) -> (x : xs, y : ys)
+
+zipWith :: (a -> b -> c) -> List a -> List b -> List c
+zipWith f xs ys = case (xs, ys) of
+  (x : xt, y : yt) -> f x y : zipWith f xt yt
+  _ -> []
+
+sampleZipped :: List (Int, String)
+sampleZipped = zip [1, 2, 3] ["one", "two", "three"]
+
+sampleSums :: List Int
+sampleSums = zipWith (+) [1, 2, 3] [10, 20, 30]
+
+sampleUnzipped :: (List Int, List String)
+sampleUnzipped = unzip sampleZipped

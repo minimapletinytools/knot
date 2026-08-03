@@ -1,0 +1,33 @@
+type alias Vector2 =
+    { x : Float
+    , y : Float
+    }
+
+absFloat :: Float -> Float
+absFloat n = if n < 0.0 then 0.0 - n else n
+
+signFloat :: Float -> Float
+signFloat n =
+  if n > 0.0 then
+    1.0
+  else if n < 0.0 then
+    -1.0
+  else
+    0.0
+
+instance Num Vector2 where
+  (+) a b = { x = a.x + b.x, y = a.y + b.y }
+  (-) a b = { x = a.x - b.x, y = a.y - b.y }
+  (*) a b = { x = a.x * b.x, y = a.y * b.y }
+  negate v = { x = 0.0 - v.x, y = 0.0 - v.y }
+  abs v = { x = absFloat v.x, y = absFloat v.y }
+  signum v = { x = signFloat v.x, y = signFloat v.y }
+
+origin :: Vector2
+origin = { x = 0.0, y = 0.0 }
+
+sampleSum :: Vector2
+sampleSum = { x = 1.0, y = 2.0 } + { x = 3.0, y = 4.0 }
+
+sampleDiff :: Vector2
+sampleDiff = sampleSum - origin

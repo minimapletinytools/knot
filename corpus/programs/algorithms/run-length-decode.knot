@@ -1,0 +1,19 @@
+type alias Encoded a = List (Int, a)
+
+repeatValue :: Int -> a -> List a
+repeatValue count value =
+  if count <= 0 then
+    []
+  else
+    value : repeatValue (count - 1) value
+
+decode :: Encoded a -> List a
+decode pairs = case pairs of
+  [] -> []
+  (count, value) : rest -> repeatValue count value <> decode rest
+
+sampleEncoded :: Encoded String
+sampleEncoded = [(3, "a"), (2, "b"), (1, "c")]
+
+sampleDecoded :: List String
+sampleDecoded = decode sampleEncoded

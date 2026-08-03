@@ -1,0 +1,60 @@
+type alias UnionFind = List Int
+
+initUnionFindHelper :: Int -> Int -> UnionFind
+initUnionFindHelper i n =
+  if i >= n then
+    []
+  else
+    i : initUnionFindHelper (i + 1) n
+
+initUnionFind :: Int -> UnionFind
+initUnionFind n = initUnionFindHelper 0 n
+
+nth :: Int -> List Int -> Int
+nth i xs = case xs of
+  [] -> i
+  h : t ->
+    if i == 0 then
+      h
+    else
+      nth (i - 1) t
+
+setAt :: Int -> Int -> List Int -> List Int
+setAt i value xs = case xs of
+  [] -> []
+  h : t ->
+    if i == 0 then
+      value : t
+    else
+      h : setAt (i - 1) value t
+
+find :: UnionFind -> Int -> Int
+find uf x =
+  let
+      parent = nth x uf
+  in
+  if parent == x then
+    x
+  else
+    find uf parent
+
+union :: UnionFind -> Int -> Int -> UnionFind
+union uf a b =
+  let
+      rootA = find uf a
+      rootB = find uf b
+  in
+  if rootA == rootB then
+    uf
+  else
+    setAt rootA rootB uf
+
+connected :: UnionFind -> Int -> Int -> Bool
+connected uf a b = find uf a == find uf b
+
+sampleUnionFind :: UnionFind
+sampleUnionFind =
+    union (union (union (initUnionFind 6) 0 1) 1 2) 3 4
+
+areConnected :: Bool
+areConnected = connected sampleUnionFind 0 2

@@ -1,0 +1,35 @@
+type alias CartItem =
+    { name : String
+    , price : Float
+    , quantity : Int
+    }
+
+lineTotal :: CartItem -> Float
+lineTotal item = item.price * fromIntegral item.quantity
+
+cartSubtotal :: List CartItem -> Float
+cartSubtotal items = foldl (\acc item -> acc + lineTotal item) 0.0 items
+
+applyDiscount :: Float -> Float -> Float
+applyDiscount rate subtotal = subtotal - (subtotal * rate)
+
+taxRate :: Float
+taxRate = 0.08
+
+cartTotal :: List CartItem -> Float
+cartTotal items =
+  let
+      subtotal = cartSubtotal items
+      discounted = if subtotal > 100.0 then applyDiscount 0.1 subtotal else subtotal
+      tax = discounted * taxRate
+  in
+  discounted + tax
+
+sampleCart :: List CartItem
+sampleCart =
+    [ { name = "widget", price = 19.99, quantity = 3 }
+    , { name = "gadget", price = 49.5, quantity = 1 }
+    ]
+
+total :: Float
+total = cartTotal sampleCart

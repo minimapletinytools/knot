@@ -1,0 +1,48 @@
+type alias Matrix = List (List Float)
+
+headOf :: List Float -> Float
+headOf xs = case xs of
+  h : _ -> h
+  [] -> 0.0
+
+tailOf :: List Float -> List Float
+tailOf xs = case xs of
+  _ : t -> t
+  [] -> []
+
+allEmpty :: Matrix -> Bool
+allEmpty rows = case rows of
+  [] -> True
+  [] : rest -> allEmpty rest
+  _ : _ -> False
+
+transpose :: Matrix -> Matrix
+transpose rows =
+  if allEmpty rows then
+    []
+  else
+    map headOf rows : transpose (map tailOf rows)
+
+addRows :: List Float -> List Float -> List Float
+addRows a b = case (a, b) of
+  (x : xs, y : ys) -> (x + y) : addRows xs ys
+  _ -> []
+
+addMatrices :: Matrix -> Matrix -> Matrix
+addMatrices a b = case (a, b) of
+  (rowA : restA, rowB : restB) -> addRows rowA rowB : addMatrices restA restB
+  _ -> []
+
+dotProduct :: List Float -> List Float -> Float
+dotProduct a b = case (a, b) of
+  (x : xs, y : ys) -> x * y + dotProduct xs ys
+  _ -> 0.0
+
+sampleMatrix :: Matrix
+sampleMatrix = [[1.0, 2.0], [3.0, 4.0]]
+
+sampleTransposed :: Matrix
+sampleTransposed = transpose sampleMatrix
+
+sampleSum :: Matrix
+sampleSum = addMatrices sampleMatrix sampleMatrix

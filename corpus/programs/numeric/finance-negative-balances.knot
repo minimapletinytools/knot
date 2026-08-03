@@ -1,0 +1,36 @@
+type alias Transaction =
+    { description : String
+    , amount : Int
+    }
+
+sampleTransactions :: List Transaction
+sampleTransactions =
+    [ { description = "paycheck", amount = 2500 }
+    , { description = "rent", amount = -1200 }
+    , { description = "groceries", amount = -85 }
+    , { description = "refund", amount = 20 }
+    ]
+
+runningTotal :: List Transaction -> Int
+runningTotal txs = foldl (\acc t -> acc + t.amount) 0 txs
+
+isOverdrawn :: Int -> Bool
+isOverdrawn balance = balance < 0
+
+clampToZero :: Int -> Int
+clampToZero balance = if balance < 0 then 0 else balance
+
+negativeOffsets :: List Int
+negativeOffsets = [-3, -2, -1, 0, 1, 2, 3]
+
+pairWithNegativeOffset :: Int -> (Int, Int)
+pairWithNegativeOffset n = (n, -n)
+
+sampleOffsetPairs :: List (Int, Int)
+sampleOffsetPairs = [(-1, 1), (-2, 2), (-3, 3)]
+
+applyNegativeAdjustment :: Int -> Int
+applyNegativeAdjustment balance = balance + (-50)
+
+sampleBalance :: Int
+sampleBalance = runningTotal sampleTransactions

@@ -1,0 +1,38 @@
+type Expr
+    = Num Float
+    | Add Expr Expr
+    | Sub Expr Expr
+    | Mul Expr Expr
+    | Div Expr Expr
+
+combine :: (Float -> Float -> Float) -> Expr -> Expr -> Result String Float
+combine op l r =
+  case eval l of
+    Err e -> Err e
+    Ok lv ->
+      case eval r of
+        Err e -> Err e
+        Ok rv -> Ok (op lv rv)
+
+eval :: Expr -> Result String Float
+eval expr = case expr of
+  Num n -> Ok n
+  Add l r -> combine (+) l r
+  Sub l r -> combine (-) l r
+  Mul l r -> combine (*) l r
+  Div l r ->
+    case eval r of
+      Err e -> Err e
+      Ok rv ->
+        if rv == 0.0 then
+          Err "division by zero"
+        else
+          case eval l of
+            Err e -> Err e
+            Ok lv -> Ok (lv / rv)
+
+sampleExpr :: Expr
+sampleExpr = Div (Add (Num 4.0) (Num 6.0)) (Sub (Num 5.0) (Num 5.0))
+
+sampleResult :: Result String Float
+sampleResult = eval sampleExpr

@@ -93,6 +93,15 @@ other changes needed, confirming both fixes landed exactly where expected.
    specifically, where a real fallback exists that an explicit instance
    should be allowed to *override*, not just duplicate. A likely
    overcorrection in that fix, found by using the feature it changed.
+   **Broader than first documented (round 3, `interfaces/vector2-custom-
+   num.knot`)**: `head_ref` rejects *any* record target regardless of
+   interface, not just `Eq`/`Ord`/`Show` — a hand-declared `instance Num
+   Vector2` (operator-overloaded 2D vector math, `Num` having no
+   structural fallback at all) is blocked exactly the same way, then
+   every use of `+`/`-` on a `Vector2` additionally reports its own
+   `NoInstance("Num")` once the instance itself never made it into the
+   table. Same root cause, wider blast radius than "Eq/Ord/Show on
+   records" alone suggested.
 6. **`let`-bound local functions can't take parameters** — `let go acc
    rest = ... in ...` is a hard parse error (`expected \`=\``);
    `let_binding` in `knot-syntax` only ever parses a bare pattern then `=`,
@@ -173,3 +182,45 @@ other 5 traced back to three distinct root causes, all now fixed:
 
 After all three fixes, 56 of 62 pass; the remaining 6 are exactly the
 Round-1-numbered failures above, unchanged.
+
+### Round 3 (2026-08-02)
+
+Another 18 fixtures (80 total), reaching into territory the first two
+rounds hadn't touched: graph algorithms over association-list-encoded
+graphs (BFS shortest path, union-find), a small arithmetic-expression
+interpreter with `Result`-based error handling, deeply nested tuple/case
+patterns, a fluent record-builder chain via `|>`, a hand-declared
+`instance Num` overloading `+`/`-`/`*` on a custom `Vector2` record, and a
+deliberate stress test of negative-number syntax across many more
+positions (record fields, tuples, nested application) now that round 2's
+own parser fix landed. 69 of 80 passed initially. 6 of the 11 failures are
+already explained by earlier rounds' own findings (#3, #5, #6, #7 — same
+`Map` API gap, the same parameterized-local-`let` parse gap, the same
+`Result`-via-`Collection`/`Context` arity mismatch, and the same
+`InstanceTargetNotNominal` blocking custom instances on records, now also
+confirmed for `Num` via `interfaces/vector2-custom-num.knot` — see finding
+#5's own updated text above). The other 5 all trace back to one single
+root cause, **not yet fixed**:
+
+11. **Operator sections aren't parseable as expressions at all** — `(+)`,
+    `(-)`, etc. are valid *method names* inside an `interface`/`instance`
+    declaration (spec §6.2's own `(+) :: a -> a -> a`), but there's no
+    corresponding expression-level syntax for referencing one as a
+    first-class value the way `zipWith (+) xs ys` or `combine (+) l r`
+    need to. `expr_paren_tuple_or_unit` only ever tries a full `self.expr()`
+    for whatever follows `(` (or treats an immediate `)` as `Unit`) — a
+    bare `+` there fails to start an atom, non-fatally, so `expr_app`'s own
+    trailing-argument loop quietly backs off and stops collecting
+    arguments right there, rather than surfacing a real error. The
+    enclosing binding ends up defined as just the un-applied head (e.g.
+    `sampleSums = zipWith`, dropping `(+) [1, 2, 3] [10, 20, 30]`
+    entirely), and everything after it is reported as leftover input —
+    the same *symptom* as round 2's own negation bug, but a different,
+    unrelated cause (a genuinely missing grammar rule, not a misclassified
+    existing one). Hits `collections/zip-and-unzip-manual.knot` and
+    `interpreter/calculator-with-errors.knot`, both extremely ordinary
+    higher-order-function idioms in an ML-family language. Neither the
+    language spec nor `knot-ast-parser-plan.md` mention operator sections
+    at all — an unaddressed gap, not a documented non-goal, and worth a
+    real design decision (Elm-style bare `(op)` only, vs. Haskell-style
+    partial sections `(op x)`/`(x op)` too) before implementing.

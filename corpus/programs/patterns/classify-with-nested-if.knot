@@ -1,0 +1,20 @@
+fizzBuzz :: Int -> String
+fizzBuzz n =
+  if mod n 15 == 0 then
+    "FizzBuzz"
+  else if mod n 3 == 0 then
+    "Fizz"
+  else if mod n 5 == 0 then
+    "Buzz"
+  else
+    show n
+
+fizzBuzzRange :: Int -> List String
+fizzBuzzRange n =
+  if n <= 0 then
+    []
+  else
+    fizzBuzzRange (n - 1) <> [fizzBuzz n]
+
+sampleFizzBuzz :: List String
+sampleFizzBuzz = fizzBuzzRange 20

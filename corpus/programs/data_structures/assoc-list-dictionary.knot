@@ -1,0 +1,36 @@
+type alias Dict k v = List (k, v)
+
+emptyDict :: Dict k v
+emptyDict = []
+
+removeKey :: Eq k => k -> Dict k v -> Dict k v
+removeKey key dict = case dict of
+  [] -> []
+  (k, v) : rest ->
+    if k == key then
+      removeKey key rest
+    else
+      (k, v) : removeKey key rest
+
+insert :: Eq k => k -> v -> Dict k v -> Dict k v
+insert key value dict = (key, value) : removeKey key dict
+
+get :: Eq k => k -> Dict k v -> Maybe v
+get key dict = case dict of
+  [] -> Nothing
+  (k, v) : rest ->
+    if k == key then
+      Just v
+    else
+      get key rest
+
+fromPairs :: Eq k => List (k, v) -> Dict k v
+fromPairs pairs =
+    foldl (\d pair -> case pair of
+        (k, v) -> insert k v d) emptyDict pairs
+
+sampleDict :: Dict String Int
+sampleDict = fromPairs [("a", 1), ("b", 2), ("c", 3)]
+
+sampleLookup :: Maybe Int
+sampleLookup = get "b" sampleDict

@@ -1,0 +1,15 @@
+type alias Base =
+    { id : Int
+    , label : String
+    }
+
+type alias Tagged = { ..Base, tag : String }
+
+instance Show Tagged where
+  show t = "#" <> show t.id <> " " <> t.label <> " [" <> t.tag <> "]"
+
+sampleTagged :: Tagged
+sampleTagged = { id = 1, label = "widget", tag = "featured" }
+
+describeTagged :: Tagged -> String
+describeTagged t = show t

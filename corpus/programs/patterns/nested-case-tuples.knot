@@ -1,0 +1,33 @@
+type Quadrant
+    = Origin
+    | AxisX
+    | AxisY
+    | Q1
+    | Q2
+    | Q3
+    | Q4
+
+classifyPoint :: (Int, Int) -> Quadrant
+classifyPoint point = case point of
+  (0, 0) -> Origin
+  (0, _) -> AxisY
+  (_, 0) -> AxisX
+  (x, y) ->
+    case (x > 0, y > 0) of
+      (True, True) -> Q1
+      (False, True) -> Q2
+      (False, False) -> Q3
+      (True, False) -> Q4
+
+describeQuadrant :: Quadrant -> String
+describeQuadrant q = case q of
+  Origin -> "at the origin"
+  AxisX -> "on the x-axis"
+  AxisY -> "on the y-axis"
+  Q1 -> "in quadrant I"
+  Q2 -> "in quadrant II"
+  Q3 -> "in quadrant III"
+  Q4 -> "in quadrant IV"
+
+describePoint :: (Int, Int) -> String
+describePoint point = describeQuadrant (classifyPoint point)

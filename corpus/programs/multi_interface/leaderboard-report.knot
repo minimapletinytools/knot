@@ -1,0 +1,40 @@
+type alias PlayerScore =
+    { name : String
+    , score : Int
+    }
+
+instance Eq PlayerScore where
+  (==) a b = a.name == b.name && a.score == b.score
+
+instance Ord PlayerScore where
+  compare a b = compare a.score b.score
+
+instance Show PlayerScore where
+  show p = p.name <> ": " <> show p.score
+
+insertSorted :: PlayerScore -> List PlayerScore -> List PlayerScore
+insertSorted p scores = case scores of
+  [] -> [p]
+  h : t ->
+    if p > h then
+      p : h : t
+    else
+      h : insertSorted p t
+
+sortDescending :: List PlayerScore -> List PlayerScore
+sortDescending scores = foldl (\sorted p -> insertSorted p sorted) [] scores
+
+renderLeaderboard :: List PlayerScore -> String
+renderLeaderboard scores = case sortDescending scores of
+  [] -> "no scores yet"
+  h : t -> foldl (\acc p -> acc <> "\n" <> show p) (show h) t
+
+samplePlayers :: List PlayerScore
+samplePlayers =
+    [ { name = "Ada", score = 92 }
+    , { name = "Grace", score = 88 }
+    , { name = "Alan", score = 95 }
+    ]
+
+leaderboard :: String
+leaderboard = renderLeaderboard samplePlayers

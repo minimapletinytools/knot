@@ -1,0 +1,34 @@
+splitAtMiddle :: List a -> Int -> Maybe (List a, a, List a)
+splitAtMiddle xs n = case xs of
+  [] -> Nothing
+  h : t ->
+    if n == 0 then
+      Just ([], h, t)
+    else
+      case splitAtMiddle t (n - 1) of
+        Nothing -> Nothing
+        Just (front, mid, back) -> Just (h : front, mid, back)
+
+binarySearchHelper :: Ord a => a -> List a -> Int -> Maybe Int
+binarySearchHelper target xs offset =
+  let
+      n = length xs
+  in
+  if n == 0 then
+    Nothing
+  else
+    case splitAtMiddle xs (div n 2) of
+      Nothing -> Nothing
+      Just (front, mid, back) ->
+        if mid == target then
+          Just (offset + length front)
+        else if target < mid then
+          binarySearchHelper target front offset
+        else
+          binarySearchHelper target back (offset + length front + 1)
+
+binarySearch :: Ord a => a -> List a -> Maybe Int
+binarySearch target xs = binarySearchHelper target xs 0
+
+sampleFound :: Maybe Int
+sampleFound = binarySearch 7 [1, 3, 5, 7, 9, 11]
