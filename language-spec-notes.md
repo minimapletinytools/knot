@@ -113,7 +113,7 @@ indent column, and every subsequent item at that block's level must align to it 
 there's no explicit block-closing token. 
 
 ### 4.4 File & Module Structure
-Every `.knot` file is exactly one module (§12). A module's declared name should match
+Every `.knot` file is exactly one module (§14). A module's declared name should match
 its file path, dot-separated (`Geometry.Shapes` lives at `Geometry/Shapes.knot`).
 
 ---
@@ -412,7 +412,7 @@ branch on argument shape with `case` (§8) inside the body instead.
 ### 10.1 The Closed Interface Set
 **Unique**
 The interface set is fixed (§2.4) — user-defined interfaces are not supported in v0
-(planned for v2, §18). Instances of these interfaces are open, though: both built-in
+(planned for v2, §20). Instances of these interfaces are open, though: both built-in
 and user-defined types may implement them. Users may also write their own function
 signatures constrained by these interfaces, e.g. `myMax :: Ord a => a -> a -> a`,
 usable with any type that has an `Ord` instance.
@@ -461,7 +461,7 @@ conflicting with it.
 **Similar to Haskell**
 The three numeric interfaces, shown here in interface-block notation purely to
 document their built-in signatures (users never write `interface ... where`
-themselves — §4.2, §18):
+themselves — §4.2, §20):
 
 ```knot
 interface Num a where
@@ -585,11 +585,161 @@ do
 
 ---
 
-## 12. Modules & Imports
+## 12. Prelude & Built-ins
+
+TODO this section needs some reorg rewrite
+
+**Different / Custom** *(planned — describes the intended split, not the
+current implementation, which today hand-builds every entry below in
+Rust regardless of which column it belongs in)*
+
+Knot's own prelude is not entirely one thing. Some of it is a genuine
+compiler primitive with no possible Knot-level definition; a lot of it is
+better expressed as ordinary Knot source — a bundled `prelude.knot`,
+parsed, canonicalized, and type-checked through the exact same pipeline
+as user code, its resulting types and instances merged into the
+"always in scope" environment every module starts with. Nothing about
+this split is visible to a user: a name resolves the same way, and has
+the same type, regardless of which side it lives on. The main benefit
+isn't purity for its own sake — it's that anything with a real Knot body
+can eventually be stepped through by a debugger like any other function,
+rather than needing a special "this one's opaque" exception.
+
+### 12.1 What Stays a Compiler Primitive
+
+| What | Why it can't move |
+|---|---|
+| Raw `Int`/`Float`/`String` arithmetic, comparison, and formatting | Nothing lower-level in Knot to bottom out to — this is where the recursion has to stop. |
+| The interface dispatch mechanism (which instance answers a given `show`/`compare`/`+`/...) | Compiler machinery, not user-writable Knot — the same sense in which Haskell's own dictionary passing isn't user-writable Haskell. |
+| The closed interface *set* itself, and each interface's own method shapes | A restatement of "no user-defined interfaces" (§2.3) — applies equally to `Collection`/`Context` as to any other interface. |
+| The `Collection`/`Context` kind-polymorphism machinery (`f` as a constructor variable, §10.6) | The type-system feature itself. *Using* it in an ordinary signature (`Collection f => f a -> f b`) is already fully open to users, though — see §10.6. This row is only about the underlying mechanism. |
+| Operator tokens, their precedence, and what each one desugars to | Grammar, not privilege — see §13. Teaching the parser a new token from Knot source isn't something to build, and the operator set is closed (§2.3) regardless of where anything else lives. |
+| `IO`'s own primitive actions | Side effects need a real runtime underneath; there's nothing to pattern-match. |
+
+### 12.2 What Moves to `prelude.knot`
+
+Everything below is expressible in ordinary, already-existing Knot syntax
+— no new grammar, no privileged constructs. Each one is just an ordinary
+`type` declaration or an ordinary `instance` declaration, exactly the
+shape a user could already write for their own type:
+
+- **`Bool`** — `type Bool = True | False deriving (Eq, Ord, Show)`
+  (§10.7). `True`/`False` are already ordinary constructor names, not
+  reserved syntax (§4.2).
+- **`not`** — `not b = case b of True -> False; False -> True`. No
+  interface dispatch involved at all.
+- **`Ordering`** — `type Ordering = LT | EQ | GT deriving (Eq, Ord, Show)`.
+- **`Maybe`, `Result`** — ordinary two-constructor ADTs; their
+  `Eq`/`Ord`/`Show`/`Context` instances (`pure`/`bind` via
+  pattern-matching) are the same shape a user's own `Context` instance
+  already is (§10.6).
+- **`List`** — structurally `Nil | Cons a (List a)`; its
+  `Eq`/`Ord`/`Show`/`Collection`/`Context`/`Semigroup`/`Monoid` instances
+  are all ordinary recursive pattern-matches. Surface syntax (`[]`,
+  `x : xs`, `[1, 2, 3]`) stays exactly as today — pure grammar sugar
+  (§13) desugaring to real `Cons`/`Nil` applications underneath.
+- **`Map`**, if wanted — a real (if naive, association-list-backed)
+  reference implementation, rather than an opaque stub.
+
+Moving something from the left column to the right doesn't change its
+type or behavior at all — only where its definition physically lives.
+
+---
+
+## 13. Syntax Sugar & Desugaring
+
+**Different / Custom** *(planned — describes the intended pipeline; the
+desugaring described here is currently scattered across parsing and
+constraint generation rather than living in one dedicated stage)*
+
+Compilation has a dedicated **desugaring** stage, sitting between
+parsing and canonicalization:
+
+```
+source text --parse--> surface AST --desugar--> reduced AST --canonicalize--> ...
+```
+
+This exists for a reason specific to Knot: the *surface*, pre-desugar
+syntax has its own meaning in the node-graph mapping (§3) that the
+*reduced* form doesn't — a pipe reads as a distinct "pipe" node, a `do`
+block as its own sequencing shape, a list literal as its own
+construction node, not as a generic function application
+indistinguishable from any other. If desugaring happened inline during
+parsing (or were skipped entirely and left for the type checker to sort
+out later, as `do` is today), there would be no artifact left anywhere
+for the graph mapping to work from. So parsing produces and keeps the
+sugared form; a separate pass reduces it to the smaller vocabulary
+canonicalization and type-checking actually need to understand, before
+either ever runs.
+
+Not everything that could be called "sugar" belongs in this stage,
+though — only sugar with its own distinct graph-node identity. Something
+that's purely a textual authoring convenience with no separate graph
+meaning (the stacked `@name(args)` vs. block `@{ ... }` annotation forms,
+§15.1/§15.2 — both just mean "here are some key-value pairs," and the
+editor presumably only cares about the resolved pairs, not which
+spelling produced them) can keep desugaring wherever's convenient, as it
+does today.
+
+### 13.1 What Desugars Here
+
+| Surface form | Reduces to |
+|---|---|
+| `[1, 2, 3]` | `Cons 1 (Cons 2 (Cons 3 Nil))` |
+| `x : xs` | `Cons x xs` |
+| `a \|> f` | `f a` |
+| `f >> g` | `\x -> g (f x)` |
+| `a >>= f` | `bind a f` |
+| `do { x <- e1; rest }` | `bind e1 (\x -> rest)` (§11) |
+| `(+)` (bare operator section, §7.6) | `\x y -> x + y` |
+
+`(+)` is included here — not resolved at parse time, despite the parser
+being what first recognizes the shape — specifically because it has its
+own graph-node reading too: a first-class reference to an operation,
+distinct from an ordinary two-argument lambda that happens to compute
+the same thing.
+
+### 13.2 What Doesn't
+
+**Interface-dispatched operators** (`+`, `-`, `*`, `==`, `<>`, `<`, ...)
+aren't sugar for a single fixed definition at all, so they don't desugar
+here — `a + b` stays a `BinOp` all the way to type-checking, which turns
+it into a `HasInstance("Num", ...)` obligation checked against whichever
+instance actually matches (§10.2). *Which* code runs — a compiler
+primitive for `Int`, or real Knot source for anything else, including a
+`prelude.knot`-defined type (§12) — is a completely separate question
+from desugaring, decided per call site by ordinary instance resolution,
+not by this pass.
+
+
+
+**`&&`/`||`** are a third case, distinct from both of the above: neither
+sugar for something else nor interface-dispatched — a fixed, concrete
+`Bool -> Bool -> Bool` operation with no instance lookup needed at all
+(§7.4). TODO this is a problem becasue we don't have syntax to declare operators in prelude.knot
+
+### 13.3 Representation
+
+Desugaring rewrites in place, using the same surface AST type parsing
+already produces, rather than introducing a separate, smaller "core"
+grammar. By the time canonicalization runs, certain shapes (`Do`, the
+sugar-only `BinOp` cases, bare operator sections, list literals) are
+guaranteed to no longer occur — rewritten into ordinary function- and
+constructor-application nodes — but the type itself doesn't yet
+*enforce* that; a stray sugar node reaching canonicalization would just
+be unreachable in practice, not a compile-time impossibility. Revisiting
+this once the node-graph mapping (§3) is designed in more depth, with a
+real "core" type replacing the surface one at this boundary, is a
+plausible future hardening pass, not needed to ship the desugaring stage
+itself.
+
+---
+
+## 14. Modules & Imports
 
 Knot adopts Elm-style module and import syntax. Every file defines a single module (§4.4).
 
-### 12.1 Module Declaration
+### 14.1 Module Declaration
 
 ```knot
 module Geometry exposing (Point, distance, Shape(..))
@@ -597,7 +747,7 @@ module Geometry exposing (Point, distance, Shape(..))
 module Geometry exposing (..)      -- expose everything
 ```
 
-### 12.2 Imports
+### 14.2 Imports
 
 Imports are **qualified by default** to prevent namespace pollution:
 
@@ -614,7 +764,7 @@ import String exposing (length, concat)
 
 ---
 
-## 13. Metadata & Annotations
+## 15. Metadata & Annotations
 
 Annotations can be attached to any named binding. They carry node graph layout metadata,
 stable IDs, reverse execution logic, documentation, and other tooling hints. They have
@@ -627,7 +777,7 @@ type-checked like any other Knot code.
 
 Two syntaxes are supported and can be freely mixed:
 
-### 13.1 Stacked single-key form: `@name(args)`
+### 15.1 Stacked single-key form: `@name(args)`
 
 Placed on the line(s) immediately above a top-level definition or a `let` binding.
 Good for simple scalar annotations:
@@ -650,7 +800,7 @@ Multiple `@` lines stack — all apply to the binding that follows.
 
 **Desugaring**: `@name(args)` desugars into a single key of the equivalent `@{ ... }` block — a single argument becomes a bare value (`@label("My Function")` ≡ `@{ label = "My Function" }`); multiple arguments become a tuple (`@position(100, 200)` ≡ `@{ position = (100, 200) }`).
 
-### 13.2 Block form: `@{ ... }`
+### 15.2 Block form: `@{ ... }`
 
 A single annotation block containing a record expression. Any valid Knot expression
 is allowed as a field value — function references, lambdas, conditionals, let bindings.
@@ -678,7 +828,7 @@ myFunc :: Int -> Int
 myFunc x = x + 1
 ```
 
-### 13.3 Inline sub-expression annotations
+### 15.3 Inline sub-expression annotations
 
 For annotating individual stages of a pipeline, `@annotation` is written **prefix**,
 immediately before the expression atom it targets. Both forms work inline:
@@ -700,7 +850,7 @@ x = @{ nodeId = "n1", position = (100.0, 200.0) } (f a b)
 
 Prefer extracting to named `let` bindings when inline annotations get unwieldy.
 
-### 13.4 Standard annotation keys
+### 15.4 Standard annotation keys
 
 | Key | Type | Meaning |
 |---|---|---|
@@ -711,11 +861,11 @@ Prefer extracting to named `let` bindings when inline annotations get unwieldy.
 | `color` | `String` | Node color (hex) |
 | `group` | `String` | Visual group/cluster |
 | `collapsed` | `Bool` | Whether node renders collapsed by default |
-| `unravel` | `Unraveler` | Reverse execution function — see §14 |
+| `unravel` | `Unraveler` | Reverse execution function — see §16 |
 
 The annotation set is open — new keys can be added without changing the language.
 
-### 13.5 Annotations Are Typed, Prefix Functions
+### 15.5 Annotations Are Typed, Prefix Functions
 
 An annotation key is not a special grammatical category — it's an ordinary, prefix-
 position Knot function with a real type signature, and `@key(args)` is checked exactly
@@ -724,7 +874,7 @@ parameter type, then the whole thing behaves as `identity` on the value it's att
 at runtime (per this section's "no effect on forward runtime semantics"). Standard keys'
 signatures:
 
-- `unravel :: Unraveler -> ...` — takes a **function type** (see §14; `Unraveler`'s exact
+- `unravel :: Unraveler -> ...` — takes a **function type** (see §16; `Unraveler`'s exact
   shape mirrors the annotated binding's own signature).
 - `nodeId`, `label`, `doc`, `color`, `group` — take `String`.
 - `position` — takes `(Float, Float)`.
@@ -736,21 +886,21 @@ New keys (the set is open, per above) are added the same way: give the key a typ
 function may reference anything in scope at the point the annotation is written: the
 same `let`-bound names, function parameters, and imports visible to the binding it
 annotates. This is what lets an `unravel` body close over its own function's parameters
-(§14.1's `\inputs sensitivity -> ...`).
+(§16.1's `\inputs sensitivity -> ...`).
 
 **Placement — the one special rule**: as ordinary prefix functions, annotations follow
-the expression-atom binding rule of §13.3. The one addition to that rule is that an
+the expression-atom binding rule of §15.3. The one addition to that rule is that an
 annotation may also be stacked immediately above three things that are *not* expression
 atoms: the right-hand side of a `let` binding, a function definition, and a `name ::
 Type` signature line. The first two are really just the atom rule applied with the whole
 bound value (or function body) as the atom; the signature-line case is the genuine
-exception, since a bare `:: Type` line isn't an expression at all — §13.1's stacked form
+exception, since a bare `:: Type` line isn't an expression at all — §15.1's stacked form
 is this rule combined with the AST-level merging of a signature and its definition into
 one binding.
 
 ---
 
-## 14. Unravel (Reverse Execution)
+## 16. Unravel (Reverse Execution)
 
 TODO review this section ,you never reviewed this lol.
 TODO you also need to add the special "unraveller" output node that attaches both to an output value to unravel, and an application output object for positioning in the UI
@@ -761,7 +911,7 @@ corresponding desired changes to its inputs. This is what enables the graph to b
 driven backwards: change a visualized output, propagate the change upstream to find
 which input values (typically literals) to modify.
 
-### 14.1 What an unravel function is
+### 16.1 What an unravel function is
 
 An unravel function is a regular Knot function attached to a binding via the `unravel`
 annotation key. Its signature mirrors the forward function but runs in reverse:
@@ -778,13 +928,13 @@ The runtime calls a node's unravel during a backward pass through the graph, pas
 the desired output change (sensitivity) and the original inputs. The unravel returns
 desired changes for each input, which are then propagated further upstream.
 
-### 14.2 Default unravelers
+### 16.2 Default unravelers
 
 Built-in operations have sensible default unravelers — no annotation needed for simple
 cases. For example, addition splits the output sensitivity evenly across its inputs by
 default. The annotation only needs to appear when overriding the default behavior.
 
-### 14.3 Unravel on higher-order functions
+### 16.3 Unravel on higher-order functions
 
 When a node takes a function as input (e.g. `foldl`, `map`), its unravel receives not
 just the function value but also that function's own unravel, and calls it during the
@@ -792,7 +942,7 @@ backward pass. Function strands in the graph carry their unravel bundled alongsi
 their forward implementation — passing a function to a higher-order node automatically
 makes its unravel available for the backward pass.
 
-### 14.4 Conflict resolution
+### 16.4 Conflict resolution
 
 When multiple downstream paths converge on the same node during a backward pass, that
 node may receive conflicting desired values from different paths. The default strategy
@@ -801,7 +951,7 @@ is to average them; this is configurable per-node via a `solver` annotation key
 number of iterations, it surfaces a warning rather than silently producing a wrong
 result.
 
-### 14.5 Annotation examples
+### 16.5 Annotation examples
 
 ```knot
 -- simple override: assign full delta to first argument instead of splitting
@@ -822,9 +972,9 @@ result = complexTransform input
 output = domainSpecificOp input
 ```
 
-### 14.6 `Sensitivity` Is a Recursive Type Function
+### 16.6 `Sensitivity` Is a Recursive Type Function
 
-`Sensitivity` (the output-change type threaded through §14.1's unravel signatures) is not
+`Sensitivity` (the output-change type threaded through §16.1's unravel signatures) is not
 an ordinary parametric type applied wholesale to a binding's output — it's a type-level
 function that recurses into that output type's *shape*, mirroring structure rather than
 wrapping it:
@@ -832,7 +982,7 @@ wrapping it:
 ```
 Sensitivity(record { f1 : T1, f2 : T2, ... }) = record { f1 : Sensitivity(T1), f2 : Sensitivity(T2), ... }
 Sensitivity(tuple(T1, T2, T3))                = tuple(Sensitivity(T1), Sensitivity(T2), Sensitivity(T3))
-Sensitivity(scalar T)                         = <leaf sensitivity vocabulary for T>  -- TBD, §17
+Sensitivity(scalar T)                         = <leaf sensitivity vocabulary for T>  -- TBD, §19
 ```
 
 This recursion applies uniformly to **user-defined record types**, not just built-in
@@ -841,7 +991,7 @@ its `Sensitivity Point` is `{ x : Sensitivity Float, y : Sensitivity Float }`. T
 an unravel caller constrain `x` while leaving `y` free, rather than being forced to
 specify (or leave entirely unconstrained) the whole record at once. The leaf case —
 `Sensitivity` of a scalar type — is where the actual constraint vocabulary lives; still
-open, see §17.
+open, see §19.
 
 **Scope of the recursion — product shapes only, so far.** The rule above only covers
 *product* shapes: record and tuple, where the set of fields is fixed and statically known.
@@ -858,16 +1008,16 @@ non-product type.
 
 ---
 
-## 15. Typed Holes
+## 17. Typed Holes
 
 Knot uses `_` as a **typed hole** in expression position — a placeholder for an expression
 that has not yet been supplied. Holes are intentionally invalid there: programs containing
 an expression-position hole do not compile, but the compiler reports the expected type at
 each hole site, making incomplete programs informative rather than silent. Named holes
 (`_name`) are a separate, narrower feature restricted to pattern/binding discard position
-(§15.2) — they are **not** valid as expression placeholders.
+(§17.2) — they are **not** valid as expression placeholders.
 
-### 15.1 Expression holes
+### 17.1 Expression holes
 
 `_` is valid in any expression position, in its bare unnamed form only — `_name` is not
 supported here (`f a _b c` is invalid; use `f a _ c`). The compiler reports what type is
@@ -884,21 +1034,21 @@ identity = \x -> _        -- error: _ :: a (the return type of the lambda)
 config = { host = "localhost", port = _ }   -- error: _ :: Int
 ```
 
-### 15.2 Pattern match and Binding holes (`let _ = ...`)
+### 17.2 Pattern match and Binding holes (`let _ = ...`)
 
 `_` in a pattern or `let`-binding LHS discards the value — this is valid, not an error
 (`let _ = expression` drops the result). A named variant is allowed here specifically:
 `let _debugValue = expression in ...` is also valid, purely as a self-documenting mnemonic
 for the reader — the name carries no compiler-checked meaning.
 
-### 15.3 Annotation compatibility
+### 17.3 Annotation compatibility
 
 Holes cannot carry annotations — `_ @nodeId("x")` is a parse error. Annotate
 the enclosing expression or the binding instead.
 
 ---
 
-## 16. Diagnostics: Errors & Warnings
+## 18. Diagnostics: Errors & Warnings
 
 A hard type error rejects the program; a warning does not. What falls in each bucket:
 
@@ -915,20 +1065,20 @@ of its scrutinee's type; a `case` arm that can never be reached (§8.3).
 
 ---
 
-## 17. Open Questions
+## 19. Open Questions
 
 1. **Logging / observable side effects** — what's the story for debug output or
    structured logging within `IO`? Needs user stories before designing.
 2. **`Sensitivity`'s leaf scalar vocabulary** — the constraint vocabulary for a
    scalar's own sensitivity (candidates seen elsewhere: `Exact`/`Range`/`Tolerance`/
-   `Free`) is still undesigned (§14.6).
+   `Free`) is still undesigned (§16.6).
 3. **`Sensitivity` over sum types** — letting an unravel constraint change *which
    constructor* is active, not just a fixed shape's fields, is a genuinely harder,
-   unsolved problem (§14.6).
+   unsolved problem (§16.6).
 
 ---
 
-## 18. Planned for v2
+## 20. Planned for v2
 
 - **User-defined interfaces** — allow users to declare their own interfaces and implement
   them for custom types. Requires a constraint-solving/dictionary-passing subsystem;
