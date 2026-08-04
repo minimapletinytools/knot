@@ -130,6 +130,10 @@ its file path, dot-separated (`Geometry.Shapes` lives at `Geometry/Shapes.knot`)
 | `String` | UTF-8 text            |
 | `Unit`   | `()` — the unit type  |
 
+`String` is fully opaque, like Elm's — there is no `Char` type at all, so a
+`String` can't be decomposed into or built up from a list of characters the
+way Haskell's `String = [Char]` can.
+
 ### 5.2 Type Aliases
 **Matching Elm** `type alias Name = Type` gives an existing type a new name — a naming convenience,
 not a new nominal type. Aliases are expanded away entirely before type checking, so
@@ -315,11 +319,12 @@ To ensure unambiguous parsing and 1-to-1 visual node graph mapping, Knot defines
 | 4 | `==`, `/=`, `<`, `<=`, `>`, `>=` | None | Comparison |
 | 3 | `&&` | Right | Logical AND (lazy evaluation) |
 | 2 | `\|\|` | Right | Logical OR (lazy evaluation) |
-| 1 | `\|>`, `>>` | Left | Forward pipe, forward composition |
+| 1 | `\|>`, `>>`, `>>=` | Left | Forward pipe, forward composition, monadic bind |
 
 ```knot
 x |> f |> g              -- forward pipe
 f >> g                    -- forward composition, equivalent to \x -> g (f x)
+m >>= f                   -- monadic bind, equivalent to bind m f (§10.6, §11)
 ```
 
 Because Knot's operator set is closed (§2.3 — no user-defined operators), this table is exhaustive and fixed at parse time; unlike Elm, a parser never needs to consult import declarations to learn an operator's fixity.
@@ -488,13 +493,26 @@ foldr  :: (a -> b -> b) -> b -> f a -> b
 filter :: (a -> Bool) -> f a -> f a
 length :: f a -> Int
 
--- Contextxt  
+-- Context
 pure :: a -> f a
 bind :: f a -> (a -> f b) -> f b   -- also exposed as (>>=)
 ```
 
 Built-in `Collection` instances: `List`, `Map`. Built-in `Context` instances:
-`Maybe`, `Result`, `IO`, `List`. 
+`Maybe`, `Result`, `IO`, `List`.
+
+A user's own function signature can be generic over `Collection`/`Context`
+too, the same way `map`/`bind`/etc. themselves are — `f` applied to an
+argument (`f a`) is valid anywhere in an ordinary `::` signature, not just
+in these two interfaces' own built-in method shapes:
+
+```knot
+countIt :: Collection f => f Int -> Int
+countIt xs = length xs
+
+countIt (Box 5)     -- works for any type with its own Collection instance
+countIt [1, 2, 3]   -- and for the builtins, through the same signature
+```
 
 ---
 

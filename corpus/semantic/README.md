@@ -113,15 +113,6 @@ Grouped by area. Each has an ID (`S#`) used in the interaction matrix below.
 - Cross-module alias/type resolution — not implemented; fixtures stay
   single-module.
 - User-defined interfaces — closed set only, by design (spec §2.3).
-- A type variable applied to an argument (`f a` where `f` is itself a
-  variable) has no grammar support at all (`knot-syntax`'s own
-  `type_variable_takes_no_arguments` test proves `a b` parses as `a` and
-  leftover ` b`). Consequence: a user's *own* signature can never be
-  generically constrained by `Collection`/`Context` — those interfaces are
-  reachable only through the built-in `map`/`foldl`/... functions or a
-  concrete instance's own method bodies, never abstracted over further by
-  user code. Worth one fixture pinning this down as intentional so a future
-  grammar change doesn't silently alter it.
 - Dictionary-*parameter* codegen for polymorphic bindings — existence
   checking only (`S24`'s `StillAbstract`), no runtime dictionary passing.
 
@@ -179,7 +170,7 @@ pass once the merge in §0 lands).
 | 4 | `S19` instance decl | `S20` superclass order | Declaring a subclass instance before its own superclass, same file. | ✅ confirmed bug (finding #1) — needs the fix first, then both orderings become `valid/` fixtures. |
 | 5 | `S7` constructor (polymorphic) | `S14` top-level generalization | A polymorphic constructor (`Box a`) must be usable at two different concrete types from two different top-level bindings in the same module. | Unit-tested in isolation already; add a fixture combining it with an interface use (`Eq`) at one of the two instantiations. |
 | 6 | `S6` ADT | `S19`/`S21` instance + method body | User declares `Eq`/`Ord` on their own recursive ADT, method body pattern-matches (`S11`) and recurses into sub-fields. | New — no existing test recurses an instance method body into `case` on the same ADT it's instancing. |
-| 7 | `S22` Collection/Context | `S6` user ADT + `S18` given constraints | Confirmed *not currently expressible*: a user's own signature can't be generic over "any Collection" (see §1's non-goals) since `f a` isn't parseable. Fixture should pin down what *is* possible: calling `map`/`foldl` directly against a concrete user `Collection` instance from inside an ordinary function. | New. |
+| 7 | `S22` Collection/Context | `S6` user ADT + `S18` given constraints | Was *not currently expressible* (`f a` had no grammar support at all) — now fixed: `knot-syntax::ast::ty::Type::VarApp` plus a matching `constrain::decl` case let a user's own signature be genuinely generic over `Collection`/`Context`. See `valid/collections/user-signature-generic-over-collection.knot`. | ✅ fixed, own fixture added. |
 | 8 | `S15` Do-notation | `S22` Context, user-defined | `do` blocks desugar to `bind`/`pure` — confirm this works against a *user*-declared `Context` instance, not just built-in `IO`/`List`/etc. | New — existing `Do` tests likely only exercise built-ins. |
 | 9 | `S13`/`S14` mutually recursive group | `S18` constrained signature | One member of a mutually-recursive SCC has a signature with a constraint (`Ord a =>`), another doesn't — confirm the `given` fact is visible to both without leaking to unrelated bindings. | New. |
 | 10 | `S24` ambiguous/dangling obligation | `S14` top-level generalization | A polymorphic top-level binding whose body's obligation is never resolved *in that module* — confirm `StillAbstract`, not a spurious `NoInstance`, and confirm it interacts correctly with a *second* binding that *does* use it concretely (so one binding's obligation resolves concretely while a sibling's stays abstract). | Partially unit-tested (`elaborate.rs`); no full-pipeline version. |
@@ -261,7 +252,12 @@ noted `invalid/`):
 - [x] Row 6 — recursive ADT × Eq instance × recursive pattern match
       (`valid/interfaces/recursive-adt-eq-recursion.knot`)
 - [x] Row 7 — Collection instance × concrete use from an ordinary function
-      (`valid/collections/collection-instance-used-concretely.knot`)
+      (`valid/collections/collection-instance-used-concretely.knot`). Follow-up
+      (2026-08-03): the row's own "user signature can't be generic over any
+      Collection" limitation is now fixed — see
+      `valid/collections/user-signature-generic-over-collection.knot` and
+      `invalid/collections/user-signature-generic-over-collection-rejects-
+      non-collection.knot`.
 - [x] Row 8 — Do-notation × user-defined Context instance
       (`valid/collections/do-notation-user-context.knot`)
 - [x] Row 9 — mutually recursive group × mixed constrained/unconstrained

@@ -35,6 +35,12 @@ pub fn resolve_type(env: &Env, ty: &Type, span: Span, errors: &mut Vec<CanonErro
             CType::Named(r, cargs)
         }
         Type::Var(v) => CType::Var(v.clone()),
+        Type::VarApp(v, args) => CType::VarApp(
+            v.clone(),
+            args.iter()
+                .map(|a| resolve_type(env, a, span, errors))
+                .collect(),
+        ),
         Type::Fn(a, b) => CType::Fn(
             Box::new(resolve_type(env, a, span, errors)),
             Box::new(resolve_type(env, b, span, errors)),
@@ -101,6 +107,12 @@ pub fn collect_type_vars(ty: &Type, out: &mut HashSet<String>) {
     match ty {
         Type::Var(v) => {
             out.insert(v.clone());
+        }
+        Type::VarApp(v, args) => {
+            out.insert(v.clone());
+            for a in args {
+                collect_type_vars(a, out);
+            }
         }
         Type::Named(_, args) => {
             for a in args {
@@ -188,6 +200,41 @@ mod tests {
         let mut errors = Vec::new();
         resolve_type(&env, &Type::Var("a".to_string()), s(), &mut errors);
         assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn var_app_resolves_its_own_arguments_and_needs_no_head_lookup() {
+        // `f a` (spec §10.6) -- `f`'s own head is a bare variable name, never
+        // resolved against anything, exactly like a plain Type::Var; only
+        // its arguments get the ordinary resolve_type treatment.
+        let env = Env::for_decls();
+        let mut errors = Vec::new();
+        let ty = Type::VarApp(
+            "f".to_string(),
+            vec![Type::Named("Int".to_string(), vec![])],
+        );
+        let cty = resolve_type(&env, &ty, s(), &mut errors);
+        assert!(errors.is_empty());
+        match cty {
+            CType::VarApp(name, args) => {
+                assert_eq!(name, "f");
+                assert!(matches!(
+                    args.as_slice(),
+                    [CType::Named(crate::ast::Ref::Builtin(_), _)]
+                ));
+            }
+            other => panic!("expected CType::VarApp, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn collect_type_vars_includes_a_var_apps_own_head() {
+        let mut out = HashSet::new();
+        collect_type_vars(
+            &Type::VarApp("f".to_string(), vec![Type::Var("a".to_string())]),
+            &mut out,
+        );
+        assert_eq!(out, HashSet::from(["f".to_string(), "a".to_string()]));
     }
 
     #[test]

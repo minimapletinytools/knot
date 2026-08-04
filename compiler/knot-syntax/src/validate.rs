@@ -100,7 +100,7 @@ fn check_type_tuple_arity(ty: &Type, span: Span, errors: &mut Vec<ValidationErro
                 check_type_tuple_arity(e, span, errors);
             }
         }
-        Type::Named(_, args) => {
+        Type::Named(_, args) | Type::VarApp(_, args) => {
             for a in args {
                 check_type_tuple_arity(a, span, errors);
             }

@@ -103,6 +103,13 @@ pub enum CPattern {
 pub enum CType {
     Named(Ref, Vec<CType>),
     Var(String),
+    /// `f a`, `f a b` — a constructor-*variable* application (spec §10.6),
+    /// only ever meaningful for a variable a signature's own constraint
+    /// list gives `Collection`/`Context`. The head is a bare `String`, not
+    /// a `Ref` — unlike `Named`'s head, it's never resolved against
+    /// anything (no lookup makes sense for an ordinary type variable name),
+    /// exactly like `Var`'s own head.
+    VarApp(String, Vec<CType>),
     Fn(Box<CType>, Box<CType>),
     Tuple(Vec<CType>),
     /// Fields, unresolved spread targets (`{ ..Name, ... }`), and an

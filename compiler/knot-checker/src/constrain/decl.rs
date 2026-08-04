@@ -268,6 +268,23 @@ fn instantiate_rigid(
             sub.fresh_bound(Structure::App(r.clone(), arg_tys))
         }
         CType::Var(name) => rigid_var(sub, rigids, name),
+        // `f a` (spec §10.6) -- `f` itself becomes a rigid var exactly like
+        // an ordinary type variable (`rigid_var`'s own shared `rigids` map
+        // guarantees the same TypeVarId across every mention of `f` within
+        // this one signature, so `Collection f => f a -> f b`'s two `f`s
+        // agree), then wrapped around its own recursively-instantiated
+        // arguments into a `Structure::VarApp` -- the same shape `unify.rs`
+        // and `check_instance`'s rigid-defers-to-`given` case already know
+        // how to handle, since it's the same one the hand-written
+        // `Collection`/`Context` prelude schemes have always produced.
+        CType::VarApp(name, args) => {
+            let f_var = rigid_var(sub, rigids, name);
+            let arg_tys = args
+                .iter()
+                .map(|a| instantiate_rigid(sub, a, rigids))
+                .collect();
+            sub.fresh_bound(Structure::VarApp(f_var, arg_tys))
+        }
         CType::Fn(a, b) => {
             let a_ty = instantiate_rigid(sub, a, rigids);
             let b_ty = instantiate_rigid(sub, b, rigids);
@@ -356,6 +373,20 @@ fn instantiate_flexible(
         CType::Var(name) => *vars
             .entry(name.clone())
             .or_insert_with(|| sub.fresh_unbound()),
+        // Mirrors `instantiate_rigid`'s own `VarApp` case, just flexible
+        // (`fresh_ctor_unbound`) instead of rigid -- e.g. a data
+        // constructor field typed `f a` for a type declared `type Wrapper f
+        // a = Wrap (f a)`.
+        CType::VarApp(name, args) => {
+            let f_var = *vars
+                .entry(name.clone())
+                .or_insert_with(|| sub.fresh_ctor_unbound());
+            let arg_tys = args
+                .iter()
+                .map(|a| instantiate_flexible(sub, a, vars))
+                .collect();
+            sub.fresh_bound(Structure::VarApp(f_var, arg_tys))
+        }
         CType::Fn(a, b) => {
             let a_ty = instantiate_flexible(sub, a, vars);
             let b_ty = instantiate_flexible(sub, b, vars);

@@ -1,0 +1,10 @@
+-- expect: countIt's own `Collection f =>` constraint must be genuinely
+-- enforced, not vacuously accepted just because the signature parses --
+-- Maybe is a Context, not a Collection (prelude.rs's own seeding), so
+-- calling countIt on a Maybe must fail.
+-- error-kind: NoInstance
+countIt :: Collection f => f Int -> Int
+countIt xs = length xs
+
+bad :: Int
+bad = countIt (Just 5)

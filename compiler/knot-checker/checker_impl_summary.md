@@ -341,6 +341,25 @@ missing entirely despite being an ordinary 3-ctor ADT the same shape as
 `Bool`'s `True`/`False`, so the everyday idiom `compare a b == LT` was a
 hard `NoInstance("Eq")`.
 
+**A user's own signed function can now be genuinely generic over
+`Collection`/`Context` too** (Fix #16, this session) — previously only the
+seven hand-built prelude schemes (`map`/`foldl`/`foldr`/`filter`/`length`/
+`pure`/`bind`) could ever produce a `Structure::VarApp`, since the surface
+grammar had no way to write "type variable applied to an argument" at all
+(`f a` parsed as a bare `f`, silently leaving `a` as leftover input).
+`knot-syntax::ast::ty::Type` gained a `VarApp(String, Vec<Type>)` variant
+(mirrored by `knot-canonical::ast::CType::VarApp`), and `constrain::decl`'s
+`instantiate_rigid`/`instantiate_flexible` gained a matching case that
+builds a real `Structure::VarApp` around a rigid (or flexible, for a data
+constructor's own field) variable. Nothing else needed to change:
+`unify.rs`'s own `VarApp`-vs-`App`/`VarApp`-vs-`VarApp` cases and
+`check_instance`'s rigid-defers-to-`given` dispatch already handled this
+shape generically (Fix #2's own `Collection`/`Context` schemes were
+already exercising both), so `Collection f => f a -> f b` written as an
+ordinary user signature just works once the grammar can parse it and the
+checker can build the right `Structure` for it — see `corpus/semantic/
+valid/collections/user-signature-generic-over-collection.knot`.
+
 **Numeric-literal polymorphism is real now too** (this session, reversing
 this document's own former praise of "no Haskell-style defaulting" as a
 design win): an int literal is `Num a => a`, unifying with `Int`,

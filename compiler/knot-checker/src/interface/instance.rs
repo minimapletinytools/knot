@@ -281,10 +281,19 @@ impl InstanceTable {
 /// `List`'s. `None` for a target this can't key by `Ref` at all
 /// (`Var`/`Fn`/`Unit`, or a `Record`/`Tuple` -- see `record_key`/
 /// `tuple_key` for those two's own separate paths) — see module docs.
+/// `VarApp` is here for exhaustiveness only, never actually reachable: an
+/// instance's own target is parsed via `type_atom`, which can never
+/// produce one (only `type_app`'s own trailing-argument loop can) — there's
+/// no `instance Eq f` syntax for a constructor variable to begin with.
 fn head_ref(target: &CType) -> Option<&Ref> {
     match target {
         CType::Named(r, _) => Some(r),
-        CType::Var(_) | CType::Fn(..) | CType::Tuple(_) | CType::Record(..) | CType::Unit => None,
+        CType::Var(_)
+        | CType::VarApp(..)
+        | CType::Fn(..)
+        | CType::Tuple(_)
+        | CType::Record(..)
+        | CType::Unit => None,
     }
 }
 
@@ -297,6 +306,17 @@ fn head_ref(target: &CType) -> Option<&Ref> {
 fn canonicalize_ctype(ty: &CType, seen: &mut HashMap<String, usize>) -> CanonicalType {
     match ty {
         CType::Var(name) => {
+            let next = seen.len();
+            CanonicalType::Var(*seen.entry(name.clone()).or_insert(next))
+        }
+        // A constructor-variable application (spec §10.6) inside a record/
+        // tuple field's own type -- never actually reachable as a real
+        // instance-target field in practice (same reasoning as
+        // `canonicalize_structure`'s own `Ctor`/`VarApp` case below): opaque
+        // and "generic, not concrete" is all this needs to answer, so it's
+        // keyed the same way a bare `Var` is, by name alone, dropping its
+        // own arguments from consideration.
+        CType::VarApp(name, _args) => {
             let next = seen.len();
             CanonicalType::Var(*seen.entry(name.clone()).or_insert(next))
         }

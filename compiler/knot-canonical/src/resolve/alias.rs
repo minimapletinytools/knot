@@ -147,7 +147,9 @@ fn ty_has_spread(ty: &CType) -> bool {
         CType::Record(fields, spreads, _) => {
             !spreads.is_empty() || fields.iter().any(|(_, t)| ty_has_spread(t))
         }
-        CType::Named(_, args) | CType::Tuple(args) => args.iter().any(ty_has_spread),
+        CType::Named(_, args) | CType::Tuple(args) | CType::VarApp(_, args) => {
+            args.iter().any(ty_has_spread)
+        }
         CType::Fn(a, b) => ty_has_spread(a) || ty_has_spread(b),
         CType::Var(_) | CType::Unit => false,
     }
@@ -177,6 +179,13 @@ fn collect_alias_refs(ty: &CType, defs: &HashMap<String, AliasDef>, out: &mut Ve
             }
         }
         CType::Var(_) | CType::Unit => {}
+        CType::VarApp(_, args) => {
+            // The head is a bare type variable, never itself an alias
+            // reference -- only its own arguments can be.
+            for a in args {
+                collect_alias_refs(a, defs, out);
+            }
+        }
         CType::Fn(a, b) => {
             collect_alias_refs(a, defs, out);
             collect_alias_refs(b, defs, out);
@@ -284,6 +293,32 @@ fn substitute_vars(
 ) -> CType {
     match ty {
         CType::Var(v) => mapping.get(v).cloned().unwrap_or_else(|| ty.clone()),
+        // `f a` where `f` is itself one of the alias's own declared
+        // parameters (e.g. `type alias Wrapper f a = { value : f a }`,
+        // used at `Wrapper List Int`) needs `f`'s own substitution merged
+        // *into* a real application, not just swapped in as a new head
+        // name -- `f -> List` then `f a` must become `List Int`, appending
+        // `a`'s own substituted argument onto whatever `List` already had
+        // (empty here, but not necessarily for a partially-applied head).
+        // Substituting in anything else concrete for a constructor-variable
+        // position (`Fn`/`Tuple`/`Record`/`Unit`) isn't meaningful -- left
+        // as a best-effort no-op on the head, same philosophy as the rest
+        // of this function's own fallback behavior.
+        CType::VarApp(v, args) => {
+            let sub_args: Vec<CType> = args
+                .iter()
+                .map(|a| substitute_vars(a, mapping, alias_name, errors, span))
+                .collect();
+            match mapping.get(v) {
+                Some(CType::Var(name)) => CType::VarApp(name.clone(), sub_args),
+                Some(CType::Named(r, existing_args)) => {
+                    let mut all_args = existing_args.clone();
+                    all_args.extend(sub_args);
+                    CType::Named(r.clone(), all_args)
+                }
+                Some(_) | None => CType::VarApp(v.clone(), sub_args),
+            }
+        }
         CType::Named(r, args) => CType::Named(
             r.clone(),
             args.iter()
@@ -429,6 +464,12 @@ fn substitute(
                 .collect(),
         ),
         CType::Var(_) | CType::Unit => ty.clone(),
+        CType::VarApp(v, args) => CType::VarApp(
+            v.clone(),
+            args.iter()
+                .map(|a| substitute(a, expanded, errors, span))
+                .collect(),
+        ),
         CType::Fn(a, b) => CType::Fn(
             Box::new(substitute(a, expanded, errors, span)),
             Box::new(substitute(b, expanded, errors, span)),
@@ -640,6 +681,29 @@ mod tests {
                     }
                 }
                 other => panic!("expected a Tuple, got {other:?}"),
+            },
+            other => panic!("expected a Fn shape, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_alias_parameterized_by_a_constructor_variable_merges_on_substitution() {
+        // type alias Wrapper f a = f a -- applying it to a concrete
+        // constructor (`Wrapper List Int`) must merge List's own (empty)
+        // argument list with the substituted `a`, producing a real `List
+        // Int`, not a dangling `VarApp("List", [Int])` -- see
+        // substitute_vars's own VarApp arm doc comment.
+        let cs = decls(
+            "type alias Wrapper f a = f a\nuseWrapper :: Wrapper List Int -> Int\nuseWrapper w = 0\n",
+        );
+        let ty = fn_sig_ty(&cs, "useWrapper");
+        match ty {
+            CType::Fn(a, _) => match *a {
+                CType::Named(Ref::Builtin(ref n), ref args) if n == "List" => {
+                    assert_eq!(args.len(), 1);
+                    assert!(matches!(args[0], CType::Named(Ref::Builtin(ref n), _) if n == "Int"));
+                }
+                other => panic!("expected List Int, got {other:?}"),
             },
             other => panic!("expected a Fn shape, got {other:?}"),
         }

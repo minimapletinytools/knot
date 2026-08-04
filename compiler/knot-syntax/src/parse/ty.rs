@@ -83,14 +83,24 @@ impl<'a> ParseState<'a> {
         }
     }
 
-    /// One or more atoms in a row: `Int`, `List a`, `Map k v`. Only a bare `Named`
-    /// head can take arguments this way — a type variable, tuple, record, or Unit
-    /// is always an atom on its own (`a b` is not valid Knot), so nothing is even
-    /// attempted, and no already-consumed input is ever silently dropped.
+    /// One or more atoms in a row: `Int`, `List a`, `Map k v`, or (spec
+    /// §10.6) `f a`, `f a b` for a lowercase constructor-*variable* head --
+    /// only these two head shapes can take arguments this way, since a
+    /// tuple, record, or `Unit` is always an atom on its own (`a b` where
+    /// `a` isn't the *head* of anything is not valid Knot; `(a, b) c` isn't
+    /// either). A variable head with zero trailing atoms stays a bare
+    /// `Type::Var` (unchanged from before this could ever take arguments at
+    /// all) rather than becoming a vacuous zero-arg `VarApp` -- the two
+    /// shapes mean different things downstream (an ordinary type variable
+    /// vs. one a constraint must give `Collection`/`Context` for anything
+    /// to ever resolve against it), so they should never collapse into one
+    /// representation just because they happen to coincide at zero args.
     fn type_app(&mut self) -> Result<Type, ParseError> {
         let head = self.type_atom()?;
-        let Type::Named(name, _) = head else {
-            return Ok(head);
+        let name = match &head {
+            Type::Named(name, _) => name.clone(),
+            Type::Var(name) => name.clone(),
+            _ => return Ok(head),
         };
         let mut args = Vec::new();
         loop {
@@ -109,7 +119,12 @@ impl<'a> ParseState<'a> {
                 }
             }
         }
-        Ok(Type::Named(name, args))
+        match head {
+            Type::Named(..) => Ok(Type::Named(name, args)),
+            Type::Var(..) if args.is_empty() => Ok(Type::Var(name)),
+            Type::Var(..) => Ok(Type::VarApp(name, args)),
+            _ => unreachable!("matched above"),
+        }
     }
 
     /// `pub` because M5's `instance` declarations reuse it directly for the
@@ -281,6 +296,32 @@ mod tests {
     }
 
     #[test]
+    fn a_lowercase_head_applied_to_one_argument_is_a_var_app() {
+        assert_eq!(
+            ty("f a"),
+            Type::VarApp("f".to_string(), vec![Type::Var("a".to_string())])
+        );
+    }
+
+    #[test]
+    fn a_lowercase_head_applied_to_two_arguments_collects_both() {
+        assert_eq!(
+            ty("f a b"),
+            Type::VarApp(
+                "f".to_string(),
+                vec![Type::Var("a".to_string()), Type::Var("b".to_string())]
+            )
+        );
+    }
+
+    #[test]
+    fn a_lowercase_head_with_no_trailing_atoms_stays_a_bare_var() {
+        // Zero args must not collapse into a vacuous VarApp("f", []) -- see
+        // type_app's own doc comment on why these stay distinct shapes.
+        assert_eq!(ty("f"), Type::Var("f".to_string()));
+    }
+
+    #[test]
     fn unit_type() {
         assert_eq!(ty("()"), Type::Unit);
     }
@@ -359,14 +400,17 @@ mod tests {
     }
 
     #[test]
-    fn type_variable_takes_no_arguments() {
-        // "a b" is not valid Knot at the type level -- `a` alone is a complete
-        // type_arrow, and the leftover ` b` triggers the `is_eof` assertion in the
-        // `ty()` test helper, proving `type_app` didn't silently swallow it.
+    fn a_lowercase_head_does_consume_trailing_atoms_as_a_var_app() {
+        // Was "a b is not valid Knot at the type level" before spec §10.6's
+        // constructor-variable support -- `a` applied to `b` is now a real
+        // VarApp, consuming the whole input, not two separate leftover atoms.
         let mut s = ParseState::new("a b");
         let result = s.type_arrow().unwrap();
-        assert_eq!(result, Type::Var("a".to_string()));
-        assert!(!s.is_eof());
+        assert_eq!(
+            result,
+            Type::VarApp("a".to_string(), vec![Type::Var("b".to_string())])
+        );
+        assert!(s.is_eof());
     }
 
     #[test]
@@ -514,6 +558,32 @@ mod tests {
             Type::Fn(
                 Box::new(Type::Var("a".to_string())),
                 Box::new(Type::Var("b".to_string()))
+            )
+        );
+    }
+
+    #[test]
+    fn signature_constrained_by_collection_over_a_var_app() {
+        let mut s = ParseState::new("Collection f => f a -> f b");
+        let sig = s.type_signature().unwrap();
+        assert_eq!(
+            sig.constraints,
+            vec![Constraint {
+                interface: "Collection".to_string(),
+                type_var: "f".to_string()
+            }]
+        );
+        assert_eq!(
+            sig.ty,
+            Type::Fn(
+                Box::new(Type::VarApp(
+                    "f".to_string(),
+                    vec![Type::Var("a".to_string())]
+                )),
+                Box::new(Type::VarApp(
+                    "f".to_string(),
+                    vec![Type::Var("b".to_string())]
+                ))
             )
         );
     }

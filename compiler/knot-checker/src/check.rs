@@ -222,6 +222,79 @@ mod tests {
     }
 
     #[test]
+    fn a_user_signature_can_be_generic_over_any_collection() {
+        // The feature this session's own VarApp grammar/canonical/checker
+        // work adds (spec §10.6): a user's own signed function, not just
+        // the hand-built prelude schemes, can now be genuinely polymorphic
+        // over "any Collection" -- one shared signature, called here
+        // against both a user-declared custom instance and the builtin
+        // List.
+        let cs = decls(concat!(
+            "type Box a = Box a\n",
+            "instance Collection Box where\n",
+            "  map f b = case b of\n",
+            "    Box x -> Box (f x)\n",
+            "  foldl f z b = case b of\n",
+            "    Box x -> f z x\n",
+            "  foldr f z b = case b of\n",
+            "    Box x -> f x z\n",
+            "  filter p b = b\n",
+            "  length b = 1\n",
+            "countIt :: Collection f => f Int -> Int\n",
+            "countIt xs = length xs\n",
+            "countedBox :: Int\n",
+            "countedBox = countIt (Box 5)\n",
+            "countedList :: Int\n",
+            "countedList = countIt [1, 2, 3]\n",
+        ));
+        let errors = check_module(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn a_user_signature_generic_over_collection_rejects_a_type_with_no_collection_instance() {
+        // Maybe is a Context, not a Collection (prelude.rs's own seeding) --
+        // proves the constraint is genuinely enforced, not vacuously
+        // accepted just because the signature parses.
+        let cs = decls(concat!(
+            "countIt :: Collection f => f Int -> Int\n",
+            "countIt xs = length xs\n",
+            "bad :: Int\n",
+            "bad = countIt (Just 5)\n",
+        ));
+        let errors = check_module(&cs);
+        assert!(errors.iter().any(|e| matches!(
+            &e.kind,
+            crate::error::TypeErrorKind::NoInstance { interface } if interface == "Collection"
+        )));
+    }
+
+    #[test]
+    fn a_user_signature_can_be_generic_over_any_context() {
+        // Same feature, the other constructor-shaped interface -- a signed
+        // function using bind/pure through a rigid Context-constrained `f`,
+        // called against a user-declared custom instance, a builtin Maybe,
+        // and a builtin Result.
+        let cs = decls(concat!(
+            "type Box a = Box a\n",
+            "instance Context Box where\n",
+            "  pure x = Box x\n",
+            "  bind b f = case b of\n",
+            "    Box x -> f x\n",
+            "passThrough :: Context f => f Int -> f Int\n",
+            "passThrough fa = bind fa (\\x -> pure x)\n",
+            "throughBox :: Box Int\n",
+            "throughBox = passThrough (Box 5)\n",
+            "throughMaybe :: Maybe Int\n",
+            "throughMaybe = passThrough (Just 5)\n",
+            "throughResult :: Result String Int\n",
+            "throughResult = passThrough (Ok 5)\n",
+        ));
+        let errors = check_module(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
     fn a_nested_let_over_a_rigid_ord_constrained_parameter_is_not_ambiguous() {
         // Fix #13: a hand-rolled quicksort's `smaller`/`larger`, each a
         // zero-arg `let`-binding built from a comparison against the

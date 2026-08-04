@@ -5,6 +5,17 @@ pub enum Type {
     /// `Int`, `List a`, `Map k v`, `Maybe a`, ...
     Named(Name, Vec<Type>),
     Var(String),
+    /// `f a`, `f a b` — a type application headed by a lowercase type
+    /// *variable* rather than a fixed name, e.g. `Collection f => f a -> f
+    /// b` (spec §10.6). Named to match `knot-checker::ty::Structure::
+    /// VarApp`, the shape this eventually becomes once the variable is
+    /// pinned to a concrete constructor — see that type's own doc comment.
+    /// Only ever meaningful for a variable a signature's own constraint
+    /// list gives `Collection`/`Context` (the only two interfaces with
+    /// constructor-shaped methods); nothing here enforces that yet, since
+    /// using an unconstrained or wrongly-constrained one simply has no way
+    /// to ever resolve any obligation the body places on it.
+    VarApp(String, Vec<Type>),
     Fn(Box<Type>, Box<Type>),
     /// Arity is checked post-parse (≤ 3) — see `validate.rs`.
     Tuple(Vec<Type>),

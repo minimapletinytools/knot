@@ -1,0 +1,40 @@
+-- expect: a user's own signed function can now be genuinely polymorphic
+-- over "any Collection" (spec §10.6), not just the hand-built prelude
+-- schemes (map/foldl/foldr/filter/length themselves) -- countIt's own
+-- signature is called here against both a user-declared custom Collection
+-- instance and the builtin List, through the exact same rigid, given-
+-- Collection type variable.
+type Box a
+    = Box a
+
+
+instance Collection Box where
+    map f b =
+        case b of
+            Box x -> Box (f x)
+
+    foldl f z b =
+        case b of
+            Box x -> f z x
+
+    foldr f z b =
+        case b of
+            Box x -> f x z
+
+    filter p b =
+        b
+
+    length b =
+        1
+
+
+countIt :: Collection f => f Int -> Int
+countIt xs = length xs
+
+
+countedBox :: Int
+countedBox = countIt (Box 5)
+
+
+countedList :: Int
+countedList = countIt [1, 2, 3]
