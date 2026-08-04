@@ -268,6 +268,36 @@ re-checked against a real call site's own field type, via
 never enforced (a real, demonstrated unsoundness before this session's
 fix).
 
+**A user ADT can now `deriving (...)` `Eq`/`Ord`/`Show`/`Semigroup`/
+`Monoid` too** (Fix #17, this session) — `derive_instances`, called from
+`build_instance_table` alongside its existing hand-written-instance scan,
+walks every field of every constructor for each derived interface and
+either computes a positional `requires` (a bare use of one of the type's
+own declared parameters contributes a requirement, exactly like a
+hand-written `instance Eq a => Eq (List a)`; a *canonical* self-reference
+— the type's own name applied to its own parameters in the same order —
+contributes nothing, its correctness following inductively once the entry
+itself is inserted; a concrete zero-argument type needs an existing
+instance already in `builtins`, deliberately builtins-only for now, not
+cross-referencing another type in the same module) or reports a new
+`CannotDeriveInterface` error for a field shape too complex for this pass
+(a nested generic argument, a tuple/record, a non-canonical self-
+reference) or an interface this feature doesn't support deriving at all
+(`Num`/`Fractional`/`Integral` — mechanically possible via the same
+pointwise trick but with no single obviously-correct meaning for `*`;
+`Collection`/`Context` — needs real traversal logic, not a field scan).
+`Semigroup`/`Monoid` are additionally restricted to a single-constructor
+type (no sane `<>` between two different constructors of a sum type). A
+derived instance is folded into the *same* `declared` list a hand-written
+`instance` produces, so coherence and superclass checking apply with zero
+special-casing — `deriving (Ord)` without `Eq` correctly reports
+`MissingSuperclassInstance`, and `deriving (Eq)` alongside a hand-written
+`instance Eq` on the same type correctly reports `DuplicateInstance`.
+There is deliberately no actual method-body synthesis anywhere in this —
+since there's still no execution backend at all (see TM7's own "Full
+dictionary-passing codegen doesn't exist" note), a derived instance is a
+trusted table entry with no body to check, exactly like a builtin one.
+
 **`annotation::table`**: derives an annotation key's expected type — fixed
 shapes for `nodeId`/`position`/`label`/`doc`/`color`/`group`/`collapsed`,
 and the real derivation rule for `unravel`. **Still true**: nothing yet

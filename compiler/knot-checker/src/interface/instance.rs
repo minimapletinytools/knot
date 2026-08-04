@@ -566,6 +566,188 @@ type DeclaredInstance<'a> = (&'a str, DeclaredHead, knot_syntax::span::Span);
 /// `Bool`), so a *newly* declared instance (one `builtins` doesn't already
 /// have, or pass 1 would have rejected it as a duplicate) can never have a
 /// superclass obligation only `builtins` could satisfy.
+/// The interfaces `deriving` actually supports — deliberately a small,
+/// hand-picked subset of the full closed interface set (`interface::
+/// table::INTERFACES`), not everything `is_known_interface` accepts.
+/// `Num`/`Fractional`/`Integral` are excluded even though a pointwise
+/// derivation is *mechanically* possible for a single-constructor product
+/// type (the same trick `Semigroup`/`Monoid` use here): `+`/`-` pointwise
+/// is reasonable, but `*` pointwise has no single obviously-correct
+/// meaning for an arbitrary user type, so a silent default there is more
+/// likely to be a footgun than a convenience. `Collection`/`Context` are
+/// excluded because deriving `map`/`foldl`/`pure`/`bind` needs real
+/// traversal logic (knowing which parameter position is "the contained
+/// one", recursing correctly into self-referential fields) — a
+/// meaningfully harder problem than a field-by-field scan, not something
+/// "structurally easy" covers.
+const DERIVABLE_INTERFACES: &[&str] = &["Eq", "Ord", "Show", "Semigroup", "Monoid"];
+
+/// Scans every `deriving (...)` clause across `decls`, producing a
+/// `DeclaredHead::Nominal` for each interface whose derivation succeeds —
+/// folded into `build_instance_table`'s own `declared` list by its caller,
+/// so a derived instance gets exactly the same coherence/superclass
+/// treatment a hand-written one does, no special-casing needed there at
+/// all — and a `CannotDeriveInterface` error for each one that doesn't.
+///
+/// **What counts as "easy enough" to derive** (`Eq`/`Ord`/`Show`/
+/// `Semigroup`/`Monoid` only — anything else was never a valid `deriving`
+/// entry in the first place, already reported as `UnknownInterface` during
+/// canonicalization): every field of every constructor must be one of —
+/// - a bare use of one of the type's own declared parameters (contributes
+///   a positional requirement, exactly like a hand-written `instance Eq a
+///   => Eq (List a)`'s own `Eq a`);
+/// - a *canonical* self-reference (the type's own name applied to its own
+///   parameters, in the same order — `Tree a`'s own `Tree a` fields) —
+///   contributes nothing on its own: its correctness follows inductively
+///   from whatever the type's *other* fields already require, once the
+///   entry being built here is inserted;
+/// - a concrete, zero-argument type that already has the interface in
+///   `builtins` (deliberately builtins-only for now — checking against
+///   another type in the *same* module, declared or derived, would need
+///   real dependency-ordering between derivations, out of scope for this
+///   first pass);
+/// - (`Eq`/`Ord`/`Show` only) `Unit`, which already derives these three
+///   structurally and unconditionally (`check_instance`'s own hardcoded
+///   rule).
+///
+/// Anything else — a field with its own non-canonical type arguments
+/// (`List a`, a differently-ordered self-reference), a tuple, a record, a
+/// function type, or `Semigroup`/`Monoid` on more than one constructor
+/// (there's no sane `<>` between two different constructors of a sum
+/// type) — reports `CannotDeriveInterface` naming the offending
+/// field/constructor, rather than silently accepting something wrong or
+/// half-working.
+fn derive_instances<'a>(
+    decls: &'a [Spanned<CDecl>],
+    builtins: &InstanceTable,
+    errors: &mut Vec<TypeError>,
+) -> Vec<DeclaredInstance<'a>> {
+    let mut declared = Vec::new();
+    for d in decls {
+        let CDecl::TypeDecl(type_name, params, variants, deriving) = &d.node else {
+            continue;
+        };
+        for interface in deriving {
+            if !is_known_interface(interface) {
+                // Already reported as UnknownInterface during
+                // canonicalization -- avoid a second, redundant error here.
+                continue;
+            }
+            if !DERIVABLE_INTERFACES.contains(&interface.as_str()) {
+                // A real interface (Num, Collection, ...) this checker just
+                // doesn't know how to derive at all -- deliberately checked
+                // before anything field-shape-specific, so e.g. `deriving
+                // (Num)` on a single-Int-field type can't slip through just
+                // because Int happens to already have a builtin Num
+                // instance (the field-shape scan below has no idea "Num"
+                // isn't one of the five this feature actually supports).
+                errors.push(TypeError {
+                    span: d.span,
+                    kind: TypeErrorKind::CannotDeriveInterface {
+                        interface: interface.clone(),
+                        type_name: type_name.clone(),
+                        reason: format!(
+                            "{interface} cannot be derived automatically -- write the instance \
+                             by hand"
+                        ),
+                    },
+                });
+                continue;
+            }
+            if matches!(interface.as_str(), "Semigroup" | "Monoid") && variants.len() != 1 {
+                errors.push(TypeError {
+                    span: d.span,
+                    kind: TypeErrorKind::CannotDeriveInterface {
+                        interface: interface.clone(),
+                        type_name: type_name.clone(),
+                        reason: format!(
+                            "{interface} can only be derived for a type with exactly one \
+                             constructor, not {}",
+                            variants.len()
+                        ),
+                    },
+                });
+                continue;
+            }
+            match derive_requires(type_name, params, variants, interface, builtins) {
+                Ok(requires) => declared.push((
+                    interface.as_str(),
+                    DeclaredHead::Nominal(Ref::TopLevel(type_name.clone()), requires),
+                    d.span,
+                )),
+                Err(reason) => errors.push(TypeError {
+                    span: d.span,
+                    kind: TypeErrorKind::CannotDeriveInterface {
+                        interface: interface.clone(),
+                        type_name: type_name.clone(),
+                        reason,
+                    },
+                }),
+            }
+        }
+    }
+    declared
+}
+
+/// The per-`(type, interface)` field scan `derive_instances` delegates to —
+/// see that function's own doc comment for exactly what qualifies.
+fn derive_requires(
+    type_name: &str,
+    params: &[String],
+    variants: &[(String, Vec<CType>)],
+    interface: &str,
+    builtins: &InstanceTable,
+) -> Result<Vec<(usize, String)>, String> {
+    let mut requires: std::collections::BTreeSet<(usize, String)> =
+        std::collections::BTreeSet::new();
+    for (ctor_name, field_types) in variants {
+        for field_ty in field_types {
+            match field_ty {
+                CType::Var(name) => {
+                    let pos = params.iter().position(|p| p == name).expect(
+                        "canonicalization already rejects a field using a type variable \
+                         absent from the ADT's own parameter list",
+                    );
+                    requires.insert((pos, interface.to_string()));
+                }
+                CType::Named(Ref::TopLevel(name), args) if name == type_name => {
+                    let canonical_self: Vec<CType> =
+                        params.iter().map(|p| CType::Var(p.clone())).collect();
+                    if args != &canonical_self {
+                        return Err(format!(
+                            "constructor `{ctor_name}`'s own self-reference to `{type_name}` \
+                             doesn't reuse its type parameters in the same order, which this \
+                             checker can't derive {interface} through yet"
+                        ));
+                    }
+                    // Contributes nothing further -- inductively covered by
+                    // whatever this type's other fields already require.
+                }
+                CType::Named(head, args) if args.is_empty() => {
+                    if !builtins.has_instance(interface, head) {
+                        return Err(format!(
+                            "constructor `{ctor_name}`'s own field type isn't a builtin type \
+                             with an existing {interface} instance (deriving through another \
+                             declared or derived type in the same module isn't supported yet)"
+                        ));
+                    }
+                }
+                CType::Unit if matches!(interface, "Eq" | "Ord" | "Show") => {
+                    // Already derives these three structurally and
+                    // unconditionally -- nothing further needed.
+                }
+                _ => {
+                    return Err(format!(
+                        "constructor `{ctor_name}` has a field type too complex to derive \
+                         {interface} for automatically -- write the instance by hand"
+                    ));
+                }
+            }
+        }
+    }
+    Ok(requires.into_iter().collect())
+}
+
 pub fn build_instance_table(
     decls: &[Spanned<CDecl>],
     builtins: &InstanceTable,
@@ -611,6 +793,7 @@ pub fn build_instance_table(
             }),
         }
     }
+    declared.extend(derive_instances(decls, builtins, &mut errors));
 
     let mut accepted = vec![false; declared.len()];
     for (i, (interface, head, span)) in declared.iter().enumerate() {
@@ -851,6 +1034,136 @@ mod tests {
         let raw = state.parse_decls().unwrap();
         assert!(state.is_eof(), "leftover input: {src}");
         knot_canonical::canonicalize_decls(&raw).unwrap_or_else(|errs| panic!("{errs:?}"))
+    }
+
+    #[test]
+    fn a_non_generic_adt_can_derive_eq_ord_show() {
+        let mut builtins = InstanceTable::new();
+        builtins.insert_builtin("Eq", Ref::Builtin("Float".to_string()), vec![]);
+        builtins.insert_builtin("Ord", Ref::Builtin("Float".to_string()), vec![]);
+        builtins.insert_builtin("Show", Ref::Builtin("Float".to_string()), vec![]);
+        let cs = decls(
+            "type Shape\n  = Circle Float\n  | Rectangle Float Float\n  deriving (Eq, Ord, Show)\n",
+        );
+        let (table, errors) = build_instance_table(&cs, &builtins);
+        assert!(errors.is_empty(), "{errors:?}");
+        let shape = Ref::TopLevel("Shape".to_string());
+        assert!(table.has_instance("Eq", &shape));
+        assert!(table.has_instance("Ord", &shape));
+        assert!(table.has_instance("Show", &shape));
+    }
+
+    #[test]
+    fn a_generic_adt_derives_a_positional_requirement_for_each_parameter_used() {
+        let cs = decls("type Box a = Box a\n  deriving (Eq)\n");
+        let (table, errors) = build_instance_table(&cs, &InstanceTable::new());
+        assert!(errors.is_empty(), "{errors:?}");
+        let entry = table
+            .entry("Eq", &Ref::TopLevel("Box".to_string()))
+            .expect("derived Eq Box should be registered");
+        assert_eq!(entry.requires, vec![(0, "Eq".to_string())]);
+    }
+
+    #[test]
+    fn a_recursive_adt_can_derive_show_via_a_canonical_self_reference() {
+        let cs = decls("type Tree a\n  = Leaf\n  | Node (Tree a) a (Tree a)\n  deriving (Show)\n");
+        let (table, errors) = build_instance_table(&cs, &InstanceTable::new());
+        assert!(errors.is_empty(), "{errors:?}");
+        let entry = table
+            .entry("Show", &Ref::TopLevel("Tree".to_string()))
+            .expect("derived Show Tree should be registered");
+        assert_eq!(entry.requires, vec![(0, "Show".to_string())]);
+    }
+
+    #[test]
+    fn a_single_constructor_type_can_derive_semigroup_and_monoid() {
+        let mut builtins = InstanceTable::new();
+        builtins.insert_builtin("Semigroup", Ref::Builtin("String".to_string()), vec![]);
+        builtins.insert_builtin("Monoid", Ref::Builtin("String".to_string()), vec![]);
+        let cs = decls("type Wrapper = Wrap String\n  deriving (Semigroup, Monoid)\n");
+        let (table, errors) = build_instance_table(&cs, &builtins);
+        assert!(errors.is_empty(), "{errors:?}");
+        let wrapper = Ref::TopLevel("Wrapper".to_string());
+        assert!(table.has_instance("Semigroup", &wrapper));
+        assert!(table.has_instance("Monoid", &wrapper));
+    }
+
+    #[test]
+    fn deriving_semigroup_on_a_multi_constructor_type_is_rejected() {
+        // There's no sane `<>` between two different constructors of a sum
+        // type.
+        let cs = decls("type Shape\n  = Circle Float\n  | Square Float\n  deriving (Semigroup)\n");
+        let (_table, errors) = build_instance_table(&cs, &InstanceTable::new());
+        assert!(errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::CannotDeriveInterface { interface, type_name, .. }
+                if interface == "Semigroup" && type_name == "Shape"
+        )));
+    }
+
+    #[test]
+    fn deriving_num_is_rejected_even_though_its_only_field_already_has_num() {
+        // Num is deliberately excluded from DERIVABLE_INTERFACES -- must be
+        // rejected regardless of whether the field-shape scan would
+        // otherwise have accepted it.
+        let mut builtins = InstanceTable::new();
+        builtins.insert_builtin("Num", Ref::Builtin("Int".to_string()), vec![]);
+        let cs = decls("type MyNum = MyNum Int\n  deriving (Num)\n");
+        let (_table, errors) = build_instance_table(&cs, &builtins);
+        assert!(errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::CannotDeriveInterface { interface, .. } if interface == "Num"
+        )));
+    }
+
+    #[test]
+    fn deriving_eq_with_a_nested_generic_field_is_rejected_as_too_complex() {
+        let cs = decls("type Wrapper a = Wrap (List a)\n  deriving (Eq)\n");
+        let (_table, errors) = build_instance_table(&cs, &InstanceTable::new());
+        assert!(errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::CannotDeriveInterface { interface, .. } if interface == "Eq"
+        )));
+    }
+
+    #[test]
+    fn deriving_with_a_concrete_field_that_has_no_instance_is_rejected() {
+        let cs = decls("type Weird = Weird Int\n  deriving (Semigroup)\n");
+        let (_table, errors) = build_instance_table(&cs, &InstanceTable::new());
+        assert!(errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::CannotDeriveInterface { interface, .. } if interface == "Semigroup"
+        )));
+    }
+
+    #[test]
+    fn deriving_eq_on_a_unit_field_is_accepted() {
+        let cs = decls("type Event = Clicked ()\n  deriving (Eq)\n");
+        let (table, errors) = build_instance_table(&cs, &InstanceTable::new());
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(table.has_instance("Eq", &Ref::TopLevel("Event".to_string())));
+    }
+
+    #[test]
+    fn deriving_semigroup_on_a_unit_field_is_rejected() {
+        // Unit only derives Eq/Ord/Show structurally, never Semigroup/Monoid
+        // -- matches check_instance's own existing asymmetry for Unit.
+        let cs = decls("type Event = Clicked ()\n  deriving (Semigroup)\n");
+        let (_table, errors) = build_instance_table(&cs, &InstanceTable::new());
+        assert!(errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::CannotDeriveInterface { interface, .. } if interface == "Semigroup"
+        )));
+    }
+
+    #[test]
+    fn deriving_rejects_a_non_canonical_self_reference() {
+        let cs = decls("type Weird a b = Weird (Weird b a)\n  deriving (Eq)\n");
+        let (_table, errors) = build_instance_table(&cs, &InstanceTable::new());
+        assert!(errors.iter().any(|e| matches!(
+            &e.kind,
+            TypeErrorKind::CannotDeriveInterface { interface, .. } if interface == "Eq"
+        )));
     }
 
     #[test]

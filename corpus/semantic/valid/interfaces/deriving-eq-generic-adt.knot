@@ -1,0 +1,10 @@
+-- expect: a generic ADT deriving Eq gets a real, checked positional
+-- requirement for each of its own type parameters (Box a's own `a` field
+-- needs Eq, exactly like a hand-written `instance Eq a => Eq (List a)`
+-- would) -- Box Int works since Int has Eq, Box NoEq is rejected since
+-- NoEq (wrapping a function type) has none.
+type Box a = Box a
+  deriving (Eq)
+
+sameBox :: Box Int -> Box Int -> Bool
+sameBox a b = a == b

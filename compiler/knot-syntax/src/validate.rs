@@ -51,7 +51,7 @@ fn check_decl_tuple_arity(decl: &Decl, span: Span, errors: &mut Vec<ValidationEr
     match decl {
         Decl::Fn(f) => check_fn_def_tuple_arity(f, span, errors),
         Decl::TypeAlias(_, _, ty) => check_type_tuple_arity(ty, span, errors),
-        Decl::TypeDecl(_, _, variants) => {
+        Decl::TypeDecl(_, _, variants, _) => {
             for (_, args) in variants {
                 for ty in args {
                     check_type_tuple_arity(ty, span, errors);

@@ -1,0 +1,11 @@
+-- expect: Semigroup/Monoid can be derived too, restricted to a
+-- single-constructor type (there's no sane `<>` between two different
+-- constructors of a sum type) whose own field already has both.
+type Wrapper = Wrap String
+  deriving (Semigroup, Monoid)
+
+combine :: Wrapper -> Wrapper -> Wrapper
+combine a b = a <> b
+
+emptyWrapper :: Wrapper
+emptyWrapper = empty

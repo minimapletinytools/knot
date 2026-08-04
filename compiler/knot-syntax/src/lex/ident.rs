@@ -46,6 +46,7 @@ pub const RESERVED_WORDS: &[&str] = &[
     "interface",
     "where",
     "instance",
+    "deriving",
 ];
 
 fn is_ident_start(byte: u8) -> bool {

@@ -126,7 +126,7 @@ fn decl_has_spread(decl: &CDecl) -> bool {
     match decl {
         CDecl::Fn(fndef) => fndef_has_spread(fndef),
         CDecl::TypeAlias(_, _, ty) => ty_has_spread(ty),
-        CDecl::TypeDecl(_, _, variants) => variants
+        CDecl::TypeDecl(_, _, variants, _) => variants
             .iter()
             .any(|(_, args)| args.iter().any(ty_has_spread)),
         CDecl::Instance(inst) => {
@@ -597,7 +597,7 @@ fn rewrite_decl(
     match decl {
         CDecl::Fn(fndef) => rewrite_fndef(fndef, expanded, errors),
         CDecl::TypeAlias(_, _, ty) => *ty = substitute(ty, expanded, errors, span),
-        CDecl::TypeDecl(_, _, variants) => {
+        CDecl::TypeDecl(_, _, variants, _) => {
             for (_, arg_types) in variants.iter_mut() {
                 for t in arg_types.iter_mut() {
                     *t = substitute(t, expanded, errors, span);
@@ -768,7 +768,7 @@ mod tests {
         let variant_ty = cs
             .iter()
             .find_map(|d| match &d.node {
-                CDecl::TypeDecl(name, _, variants) if name == "Shape" => {
+                CDecl::TypeDecl(name, _, variants, _) if name == "Shape" => {
                     Some(variants[0].1[0].clone())
                 }
                 _ => None,

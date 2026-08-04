@@ -160,7 +160,13 @@ pub struct CInstanceDecl {
 pub enum CDecl {
     Fn(CFnDef),
     TypeAlias(String, Vec<String>, CType),
-    TypeDecl(String, Vec<String>, Vec<(String, Vec<CType>)>),
+    /// Name, type params, variants, and derived interfaces (mirrors
+    /// `knot_syntax::ast::decl::Decl::TypeDecl` — see its own doc comment).
+    /// Each name here is already confirmed to be a real, known interface
+    /// (`UnknownInterface` reported otherwise, same as an instance's own
+    /// constraint list); whether the ADT's own shape actually qualifies for
+    /// it is a `knot-checker` policy question, not checked here.
+    TypeDecl(String, Vec<String>, Vec<(String, Vec<CType>)>, Vec<String>),
     Instance(CInstanceDecl),
 }
 

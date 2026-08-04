@@ -1,0 +1,9 @@
+-- expect: Semigroup/Monoid can only be derived for a single-constructor
+-- type -- there's no sane `<>` between two different constructors of a
+-- sum type, so a multi-constructor type naming Semigroup in its own
+-- deriving clause must be rejected.
+-- error-kind: CannotDeriveInterface
+type Shape
+  = Circle Float
+  | Square Float
+  deriving (Semigroup)

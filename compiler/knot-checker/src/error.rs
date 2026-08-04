@@ -88,4 +88,18 @@ pub enum TypeErrorKind {
     InstanceTargetNotNominal {
         interface: String,
     },
+    /// A `deriving (Interface, ...)` clause named an interface this checker
+    /// doesn't know how to derive for the given ADT's own shape — see
+    /// `interface::instance::derive_instances`'s own doc comment for
+    /// exactly which field shapes qualify as "easy enough" (a bare use of
+    /// one of the type's own declared parameters, a canonical self-
+    /// reference, a zero-argument concrete builtin type that already has
+    /// the interface, or — `Eq`/`Ord`/`Show` only — `Unit`). Reported
+    /// rather than silently accepted or left to surface as a confusing
+    /// `NoInstance` at some unrelated call site.
+    CannotDeriveInterface {
+        interface: String,
+        type_name: String,
+        reason: String,
+    },
 }

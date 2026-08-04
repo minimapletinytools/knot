@@ -83,7 +83,7 @@ impl CtorTable {
     pub fn from_decls(decls: &[Spanned<CDecl>]) -> Self {
         let mut table = CtorTable::new();
         for d in decls {
-            if let CDecl::TypeDecl(_name, _params, variants) = &d.node {
+            if let CDecl::TypeDecl(_name, _params, variants, _deriving) = &d.node {
                 let group: Vec<(Ref, usize)> = variants
                     .iter()
                     .map(|(ctor_name, args)| (Ref::TopLevel(ctor_name.clone()), args.len()))

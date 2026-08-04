@@ -159,7 +159,8 @@ type Result e a
   | Err e
 ```
 
-using the `type` keyword, and current Haskell's `deriving` is not supported.
+using the `type` keyword. A limited form of Haskell's `deriving` *is*
+supported — see §10.7.
 
 ### 5.4 Records
 
@@ -442,9 +443,16 @@ compile error — order of declaration within a module doesn't matter.
 
 ### 10.4 Structural Automatic Derivation
 
-**Differs from Hasell** 
-Not supported right now, must always manually derive with `instance ...`.
-Support for `deriving` is a V2 feature, omit for now.
+**Differs from Haskell**
+`Eq`, `Ord`, and `Show` derive automatically, field-by-field/element-by-
+element, for any `Tuple`, `Record` (closed or open), or `Unit` value with
+no declared instance — no `deriving` clause, and no instance declaration
+at all, needed for the common case. A custom instance for one of these
+three targets *overrides* the automatic derivation rather than
+conflicting with it. Every other interface (`Num`, `Semigroup`, and
+anything a target doesn't have a structural instance for) has no such
+fallback — an explicit `instance` (or, for a user ADT, `deriving` — see
+§10.7) is required.
 
 ### 10.5 Numeric Interfaces: Exponentiation & Conversion
 **Similar to Haskell**
@@ -513,6 +521,48 @@ countIt xs = length xs
 countIt (Box 5)     -- works for any type with its own Collection instance
 countIt [1, 2, 3]   -- and for the builtins, through the same signature
 ```
+
+### 10.7 `deriving` for User ADTs
+
+**Different / Custom**
+A `type` declaration (never `type alias` — see §10.4 above for why
+records/tuples don't need this) can opt into `Eq`, `Ord`, `Show`,
+`Semigroup`, or `Monoid` without writing an instance body at all:
+
+```knot
+type Shape
+  = Circle Float
+  | Rectangle Float Float
+  deriving (Eq, Ord, Show)
+```
+
+A single interface needs no parens (`deriving Eq`). `deriving` only
+covers field shapes that are "structurally easy" to derive automatically
+— every field of every constructor must be one of:
+- a bare use of one of the type's own declared parameters (`Box a`'s own
+  `a` field needs the derived interface, exactly like a hand-written
+  `instance Eq a => Eq (List a)`'s own `Eq a`);
+- a canonical self-reference — the type's own name applied to its own
+  parameters, in the same order (`Tree a`'s own `Tree a` fields);
+- a concrete, zero-argument builtin type that already has the interface
+  (`Float`, `Int`, ...);
+- (`Eq`/`Ord`/`Show` only) `Unit`, which already derives these three
+  automatically (§10.4).
+
+Anything else — a field with its own nested generic argument (`List a`),
+a tuple, a record, a function type, a differently-ordered self-reference,
+or a field referencing another declared or derived type in the same
+module — is rejected rather than silently accepted or left to surface as
+a confusing missing-instance error somewhere else. `Semigroup`/`Monoid`
+are further restricted to a single-constructor type: there's no sane
+`<>` between two different constructors of a sum type. `Num`/
+`Fractional`/`Integral` and `Collection`/`Context` can't be derived at
+all — the former have no single obviously-correct pointwise meaning
+(especially `*`), and the latter need real traversal logic, not a field
+scan. A derived instance participates in ordinary coherence and
+superclass checking exactly like a hand-written one: `deriving (Ord)`
+without `Eq` is a missing-superclass error, and `deriving (Eq)` alongside
+a hand-written `instance Eq` on the same type is a duplicate.
 
 ---
 

@@ -295,6 +295,82 @@ mod tests {
     }
 
     #[test]
+    fn a_derived_eq_ord_show_adt_type_checks_end_to_end() {
+        let cs = decls(concat!(
+            "type Shape\n",
+            "  = Circle Float\n",
+            "  | Rectangle Float Float\n",
+            "  deriving (Eq, Ord, Show)\n",
+            "sameShape :: Shape -> Shape -> Bool\n",
+            "sameShape a b = a == b\n",
+            "orderShapes :: Shape -> Shape -> Bool\n",
+            "orderShapes a b = a < b\n",
+            "describeShape :: Shape -> String\n",
+            "describeShape s = show s\n",
+        ));
+        let errors = check_module(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn deriving_ord_without_eq_still_reports_a_missing_superclass() {
+        // Superclass checking applies to a derived instance exactly like a
+        // hand-written one -- no special-casing needed in
+        // build_instance_table's own two passes.
+        let cs = decls("type Shape\n  = Circle Float\n  deriving (Ord)\n");
+        let errors = check_module(&cs);
+        assert!(errors.iter().any(|e| matches!(
+            &e.kind,
+            crate::error::TypeErrorKind::MissingSuperclassInstance { interface, superclass }
+                if interface == "Ord" && superclass == "Eq"
+        )));
+    }
+
+    #[test]
+    fn deriving_an_interface_a_hand_written_instance_already_has_is_a_duplicate() {
+        let cs = decls(concat!(
+            "type Shape\n",
+            "  = Circle Float\n",
+            "  deriving (Eq)\n",
+            "instance Eq Shape where\n",
+            "  (==) a b = True\n",
+        ));
+        let errors = check_module(&cs);
+        assert!(errors.iter().any(|e| matches!(
+            &e.kind,
+            crate::error::TypeErrorKind::DuplicateInstance { interface } if interface == "Eq"
+        )));
+    }
+
+    #[test]
+    fn a_generic_derived_eq_recurses_into_its_own_type_parameter() {
+        let cs = decls(concat!(
+            "type Box a = Box a\n",
+            "  deriving (Eq)\n",
+            "sameBox :: Box Int -> Box Int -> Bool\n",
+            "sameBox a b = a == b\n",
+        ));
+        let errors = check_module(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn a_generic_derived_eq_rejects_a_type_argument_with_no_eq_instance() {
+        let cs = decls(concat!(
+            "type NoEq = NoEq (Int -> Int)\n",
+            "type Box a = Box a\n",
+            "  deriving (Eq)\n",
+            "bad :: Box NoEq -> Box NoEq -> Bool\n",
+            "bad a b = a == b\n",
+        ));
+        let errors = check_module(&cs);
+        assert!(errors.iter().any(|e| matches!(
+            &e.kind,
+            crate::error::TypeErrorKind::NoInstance { interface } if interface == "Eq"
+        )));
+    }
+
+    #[test]
     fn a_nested_let_over_a_rigid_ord_constrained_parameter_is_not_ambiguous() {
         // Fix #13: a hand-rolled quicksort's `smaller`/`larger`, each a
         // zero-arg `let`-binding built from a comparison against the

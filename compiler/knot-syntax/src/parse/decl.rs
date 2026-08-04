@@ -9,9 +9,9 @@ use crate::error::{ErrorKind, ParseError};
 use crate::span::{Span, Spanned};
 use crate::state::ParseState;
 
-/// Mirrors `Decl::TypeDecl`'s own field shape: name, type params, and variants
-/// (each a constructor name plus its argument types).
-type TypeDeclParts = (String, Vec<String>, Vec<(String, Vec<Type>)>);
+/// Mirrors `Decl::TypeDecl`'s own field shape: name, type params, variants
+/// (each a constructor name plus its argument types), and derived interfaces.
+type TypeDeclParts = (String, Vec<String>, Vec<(String, Vec<Type>)>, Vec<String>);
 
 impl<'a> ParseState<'a> {
     /// A declaration list with no module header/imports required — most of the
@@ -188,8 +188,8 @@ impl<'a> ParseState<'a> {
             let (name, params, ty) = self.type_alias_decl()?;
             Ok(Decl::TypeAlias(name, params, ty))
         } else {
-            let (name, params, variants) = self.type_decl()?;
-            Ok(Decl::TypeDecl(name, params, variants))
+            let (name, params, variants, deriving) = self.type_decl()?;
+            Ok(Decl::TypeDecl(name, params, variants, deriving))
         }
     }
 
@@ -237,7 +237,43 @@ impl<'a> ParseState<'a> {
             self.skip_trivia()?;
             variants.push(self.type_variant()?);
         }
-        Ok((name, params, variants))
+        let checkpoint = self.clone();
+        self.skip_trivia()?;
+        let deriving = if self.peek_keyword("deriving") {
+            self.deriving_clause()?
+        } else {
+            *self = checkpoint;
+            Vec::new()
+        };
+        Ok((name, params, variants, deriving))
+    }
+
+    /// `deriving (Eq, Ord, Show)` or the single-name form `deriving Eq`, with
+    /// the `deriving` keyword itself not yet consumed. Which interfaces can
+    /// actually be derived (and whether a given ADT's own shape qualifies)
+    /// is a semantic question for `knot-checker`, not this layer -- this
+    /// only ever collects whatever uppercase names appear here, exactly
+    /// like `single_constraint`'s own interface name doesn't get checked
+    /// against the closed set until canonicalization either.
+    fn deriving_clause(&mut self) -> Result<Vec<String>, ParseError> {
+        self.expect_keyword("deriving")?;
+        self.skip_trivia()?;
+        if self.peek() == Some(b'(') {
+            self.bump();
+            self.skip_trivia()?;
+            let mut names = vec![self.upper_ident_segment()?.node];
+            self.skip_trivia()?;
+            while self.peek() == Some(b',') {
+                self.bump();
+                self.skip_trivia()?;
+                names.push(self.upper_ident_segment()?.node);
+                self.skip_trivia()?;
+            }
+            self.expect_byte(b')')?;
+            Ok(names)
+        } else {
+            Ok(vec![self.upper_ident_segment()?.node])
+        }
     }
 
     fn type_variant(&mut self) -> Result<(String, Vec<Type>), ParseError> {
@@ -389,7 +425,7 @@ mod tests {
     fn adt_multi_variant_declaration() {
         let src = "type Shape\n  = Circle Float\n  | Rectangle Float Float\n  | Triangle Float Float Float";
         let ds = decls(src);
-        let [Decl::TypeDecl(name, params, variants)] = ds.as_slice() else {
+        let [Decl::TypeDecl(name, params, variants, _deriving)] = ds.as_slice() else {
             panic!("expected TypeDecl")
         };
         assert_eq!(name, "Shape");
@@ -407,7 +443,7 @@ mod tests {
         // (upper_ident_segment, which parses constructor names, never
         // consulted that lowercase-only list in the first place).
         let ds = decls("type Toggle\n  = True\n  | False");
-        let [Decl::TypeDecl(name, params, variants)] = ds.as_slice() else {
+        let [Decl::TypeDecl(name, params, variants, _deriving)] = ds.as_slice() else {
             panic!("expected TypeDecl")
         };
         assert_eq!(name, "Toggle");
@@ -417,9 +453,39 @@ mod tests {
     }
 
     #[test]
+    fn adt_with_no_deriving_clause_has_an_empty_list() {
+        let ds = decls("type Shape\n  = Circle Float");
+        let [Decl::TypeDecl(_, _, _, deriving)] = ds.as_slice() else {
+            panic!("expected TypeDecl")
+        };
+        assert!(deriving.is_empty());
+    }
+
+    #[test]
+    fn adt_deriving_a_single_interface_needs_no_parens() {
+        let ds = decls("type Shape\n  = Circle Float\n  deriving Eq");
+        let [Decl::TypeDecl(_, _, _, deriving)] = ds.as_slice() else {
+            panic!("expected TypeDecl")
+        };
+        assert_eq!(deriving, &vec!["Eq".to_string()]);
+    }
+
+    #[test]
+    fn adt_deriving_multiple_interfaces_needs_parens() {
+        let ds = decls("type Shape\n  = Circle Float\n  deriving (Eq, Ord, Show)");
+        let [Decl::TypeDecl(_, _, _, deriving)] = ds.as_slice() else {
+            panic!("expected TypeDecl")
+        };
+        assert_eq!(
+            deriving,
+            &vec!["Eq".to_string(), "Ord".to_string(), "Show".to_string()]
+        );
+    }
+
+    #[test]
     fn generic_adt_declaration() {
         let ds = decls("type Option a\n  = Some a\n  | None");
-        let [Decl::TypeDecl(name, params, variants)] = ds.as_slice() else {
+        let [Decl::TypeDecl(name, params, variants, _deriving)] = ds.as_slice() else {
             panic!("expected TypeDecl")
         };
         assert_eq!(name, "Option");

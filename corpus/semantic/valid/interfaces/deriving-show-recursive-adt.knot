@@ -1,0 +1,14 @@
+-- expect: a recursive ADT can derive Show through a canonical self-
+-- reference (Tree a's own `Tree a` fields reuse its declared parameter in
+-- the same order) -- contributes nothing extra to the derived
+-- requirement beyond what the bare `a` field already needs.
+type Tree a
+  = Leaf
+  | Node (Tree a) a (Tree a)
+  deriving (Show)
+
+sampleTree :: Tree Int
+sampleTree = Node (Node Leaf 1 Leaf) 2 (Node Leaf 3 Leaf)
+
+describeTree :: Tree Int -> String
+describeTree t = show t

@@ -451,7 +451,7 @@ pub fn seed_user_constructors(
     decls: &[Spanned<CDecl>],
 ) {
     for d in decls {
-        let CDecl::TypeDecl(type_name, params, variants) = &d.node else {
+        let CDecl::TypeDecl(type_name, params, variants, _deriving) = &d.node else {
             continue;
         };
         for (ctor_name, field_types) in variants {

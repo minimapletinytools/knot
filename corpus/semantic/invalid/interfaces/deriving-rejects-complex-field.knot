@@ -1,0 +1,8 @@
+-- expect: deriving is deliberately scoped to "structurally easy" field
+-- shapes only -- a field with its own nested generic type argument
+-- (`List a`, rather than a bare `a`) is too complex for this checker to
+-- derive Eq through automatically, and must be rejected rather than
+-- silently accepted or produce a confusing NoInstance somewhere else.
+-- error-kind: CannotDeriveInterface
+type Wrapper a = Wrap (List a)
+  deriving (Eq)

@@ -34,8 +34,12 @@ pub struct InstanceDecl {
 pub enum Decl {
     Fn(FnDef),
     TypeAlias(String, Vec<String>, Type),
-    /// ADT: name, type params, variants (each a constructor name + its argument types).
-    TypeDecl(String, Vec<String>, Vec<(String, Vec<Type>)>),
+    /// ADT: name, type params, variants (each a constructor name + its
+    /// argument types), and derived interfaces (`deriving (Eq, Ord, Show)`,
+    /// empty if no `deriving` clause at all) — `type alias` has no
+    /// equivalent, since a closed/open record or tuple alias already gets
+    /// automatic structural `Eq`/`Ord`/`Show` a different way (spec §10.4).
+    TypeDecl(String, Vec<String>, Vec<(String, Vec<Type>)>, Vec<String>),
     Instance(InstanceDecl),
 }
 

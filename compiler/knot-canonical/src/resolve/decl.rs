@@ -74,7 +74,7 @@ fn collect_top_level(env: &mut Env, decls: &[Spanned<Decl>]) {
         match &decl.node {
             Decl::Fn(fndef) => env.declare_top_level_value(&fndef.name),
             Decl::TypeAlias(name, _, _) => env.declare_top_level_type(name),
-            Decl::TypeDecl(name, _, variants) => {
+            Decl::TypeDecl(name, _, variants, _) => {
                 env.declare_top_level_type(name);
                 for (ctor_name, arg_types) in variants {
                     env.declare_ctor(ctor_name, arg_types.len(), name);
@@ -103,7 +103,7 @@ fn resolve_decl(
             let cty = ty::resolve_type(env, ty, span, errors);
             CDecl::TypeAlias(name.clone(), params.clone(), cty)
         }
-        Decl::TypeDecl(name, params, variants) => {
+        Decl::TypeDecl(name, params, variants, deriving) => {
             let mut used = HashSet::new();
             for (_, arg_types) in variants {
                 for t in arg_types {
@@ -121,7 +121,19 @@ fn resolve_decl(
                     (vname.clone(), ctys)
                 })
                 .collect();
-            CDecl::TypeDecl(name.clone(), params.clone(), cvariants)
+            // Same validation an instance's own constraint list gets
+            // (`ty::resolve_constraint`) -- a typo'd or nonexistent
+            // interface name is caught here; whether the *shape* actually
+            // supports deriving it is `knot-checker`'s own job.
+            for interface in deriving {
+                if !prelude::is_builtin_interface(interface) {
+                    errors.push(CanonError::new(
+                        CanonErrorKind::UnknownInterface(interface.clone()),
+                        span,
+                    ));
+                }
+            }
+            CDecl::TypeDecl(name.clone(), params.clone(), cvariants, deriving.clone())
         }
         Decl::Instance(inst) => CDecl::Instance(resolve_instance(env, inst, span, errors)),
     };
@@ -275,6 +287,28 @@ type Shape = Circle Float
         assert!(matches!(
             errors[0].kind,
             CanonErrorKind::UnboundTypeVariable { .. }
+        ));
+    }
+
+    #[test]
+    fn a_deriving_clauses_interface_names_pass_through_to_the_cdecl() {
+        let src = "type Shape\n  = Circle Float\n  deriving (Eq, Show)\n";
+        let decls = parse(src);
+        let (cdecls, errors) = resolve_decls(&decls);
+        assert!(errors.is_empty(), "{errors:?}");
+        let CDecl::TypeDecl(_, _, _, deriving) = &cdecls[0].node else {
+            panic!("expected TypeDecl")
+        };
+        assert_eq!(deriving, &vec!["Eq".to_string(), "Show".to_string()]);
+    }
+
+    #[test]
+    fn an_unknown_interface_in_a_deriving_clause_is_an_error() {
+        let src = "type Shape\n  = Circle Float\n  deriving Frobnicable\n";
+        let decls = parse(src);
+        let (_cdecls, errors) = resolve_decls(&decls);
+        assert!(errors.iter().any(
+            |e| matches!(&e.kind, CanonErrorKind::UnknownInterface(name) if name == "Frobnicable")
         ));
     }
 
