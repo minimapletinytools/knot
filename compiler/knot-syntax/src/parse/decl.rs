@@ -401,6 +401,22 @@ mod tests {
     }
 
     #[test]
+    fn a_user_type_can_reuse_true_and_false_as_its_own_constructor_names() {
+        // True/False are prelude constructors, not reserved words -- removed
+        // from RESERVED_WORDS since they were dead entries there anyway
+        // (upper_ident_segment, which parses constructor names, never
+        // consulted that lowercase-only list in the first place).
+        let ds = decls("type Toggle\n  = True\n  | False");
+        let [Decl::TypeDecl(name, params, variants)] = ds.as_slice() else {
+            panic!("expected TypeDecl")
+        };
+        assert_eq!(name, "Toggle");
+        assert!(params.is_empty());
+        assert_eq!(variants[0].0, "True");
+        assert_eq!(variants[1].0, "False");
+    }
+
+    #[test]
     fn generic_adt_declaration() {
         let ds = decls("type Option a\n  = Some a\n  | None");
         let [Decl::TypeDecl(name, params, variants)] = ds.as_slice() else {

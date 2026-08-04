@@ -8,7 +8,17 @@ use crate::error::{ErrorKind, ParseError};
 use crate::span::{Span, Spanned};
 use crate::state::ParseState;
 
-/// Reserved words that can never be used as a `lower` or `upper` identifier.
+/// Reserved words that can never be used as a `lower` identifier — checked
+/// only by `lower_ident`, since every entry here is itself lowercase-leading
+/// and an uppercase identifier could never collide with one regardless (see
+/// `upper_ident_segment`, which never consults this list at all). `True`/
+/// `False` deliberately aren't here for exactly that reason: they're
+/// uppercase-leading prelude *constructors* (`knot-canonical::prelude::
+/// BUILTIN_CONSTRUCTORS`), not syntax keywords, so listing them achieved
+/// nothing but a misleading appearance of enforcement — a user can already
+/// write `type Toggle = True | False` today, reusing those names as
+/// perfectly ordinary constructors, since constructor parsing never checks
+/// this list either.
 ///
 /// `div`/`mod` are deliberately *not* here — lexically they're ordinary lowercase
 /// identifiers; recognizing them as bare-word infix operators is the expression
@@ -33,8 +43,6 @@ pub const RESERVED_WORDS: &[&str] = &[
     "case",
     "of",
     "do",
-    "True",
-    "False",
     "interface",
     "where",
     "instance",
