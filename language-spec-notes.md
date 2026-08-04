@@ -433,6 +433,13 @@ no fixed, exact shape to key an instance by in those cases.
 At most one instance may exist per `(interface, type)` pair, across the whole program
 — this includes builtin types.
 
+Note `instance` can be used on record types by alias or by its full declaration
+
+`type alias MyRecord = { field: Int }`
+both `instance Num { field: Int } where` and `instance Num MyRecord where` are allowed
+
+Orphan instances are allowed and conflicts are always an error
+ 
 ### 10.3 Superclasses
 **Matching Haskell**
 Some interfaces imply another: `Ord` implies `Eq`, `Monoid` implies `Semigroup`,
@@ -443,16 +450,12 @@ compile error — order of declaration within a module doesn't matter.
 
 ### 10.4 Structural Automatic Derivation
 
-**Differs from Haskell**
-`Eq`, `Ord`, and `Show` derive automatically, field-by-field/element-by-
+**Matching Elm** `Eq`, `Ord`, and `Show` derive automatically, field-by-field/element-by-
 element, for any `Tuple`, `Record` (closed or open), or `Unit` value with
 no declared instance — no `deriving` clause, and no instance declaration
 at all, needed for the common case. A custom instance for one of these
 three targets *overrides* the automatic derivation rather than
-conflicting with it. Every other interface (`Num`, `Semigroup`, and
-anything a target doesn't have a structural instance for) has no such
-fallback — an explicit `instance` (or, for a user ADT, `deriving` — see
-§10.7) is required.
+conflicting with it. 
 
 ### 10.5 Numeric Interfaces: Exponentiation & Conversion
 **Similar to Haskell**

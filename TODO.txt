@@ -92,6 +92,11 @@ note that the UI willalso store these hashse as semi stable ids that do presist 
 some additional notes, the UI also serializes an ephemeral state file that prsecribes annotations to expressions via their expression hashes (this is useful for stuff like positions, we don't want to store every position into the file cuz it would bloat it so better to store it as a sidecar file, esp since we don't worry about losing stuff here)
 alternatively, the UI can serialize the state directly into the file with special annotations that get dropped in the editor when displaying to the user, but this kind asucks cuz agent has extra shit to parse so no
 
+:: CONSIDERATIONS
+-consider supporting explicit named types e.g. `newtype Record = Record { field: Int }` which is distinct from `{field: Int}`
+-consider supporting/not supporting trailing `'` (not valid in elm, valid in haskell, choose)
+-consider switching to data for type, and type for type alias (matchig hassell)
+-consider renaming Record Spreads or getting rid of it  
 
 
 
@@ -110,21 +115,22 @@ alternatively, the UI can serialize the state directly into the file with specia
 -knot compiler todo
     DONE-change : to :: for records
     DONE-Option to Maybe
-    -operators are implement as a prelude file thing, but it's also built and and users aren't allowed to add more.
-        -add >>= Operators & Precedence
-    -remove automatic derivtaino for Eq, Ord, Show
-    - NOT TRUE, FIX:
+    DONE-remove automatic derivtaino for Eq, Ord, Show and add deriving keyword
+        -for now strtuctural deriving only supported on eq ord show
+    DONE- NOT TRUE, FIX:
   `Collection` and `Context` work differently from the other eight: a user's own function signature can't be generic over "any `Collection`" or "any `Context`" (this grammar has no higher-kinded type variables), so they're only ever reachable through the built-in `map`/`foldl`/`foldr`/`filter`/`length`/`pure`/`bind` functions themselves — though a user's own type constructor can still have a `Collection`/`Context` **instance** declared for it, exactly like any other interface.
-
-
-    -string as an opaque bulit in type like elm (or just mke it an alias for bytestring)
-    -I think some of the prelude stuff got mistaken for bulit in so remove it from the parser
-    -**TODO** trailing `'` (not valid in elm, valid in haskell, choose)
-    -consider switching to data for type, and type for type alias (matchig hassell)
-    -consider ading deriving (probably a V2 feature though)
-    -consider renaming Record Spreads or getting rid of it  
+    DONE-string as an opaque bulit in type like elm (or just mke it an alias for bytestring)
+    DONE-mention that unboxed types are not supported (or should you just support them? IDK what tha even means, look into it)
+    -figure out how to have builtin stuff implementd in knot, it's in particluar interesting for the built in typeclasses and operators
+    -add >>= Operators & Precedence
+        -operators are implement as a prelude file thing, but it's also built and and users aren't allowed to add more.
+        
     
-    -mention that unboxed types are not supported (or should you just support them? IDK what tha even means, look into it)
+    
+
+
+    
+    
 -do linter rules
 -UI spec gaps
     -finish pattern matching node stuff
