@@ -148,6 +148,7 @@ fn check_pattern_tuple_arity(pat: &Pattern, span: Span, errors: &mut Vec<Validat
         | Pattern::Var(_)
         | Pattern::Literal(_)
         | Pattern::Nil
+        | Pattern::Record(_)
         | Pattern::Unit => {}
     }
 }

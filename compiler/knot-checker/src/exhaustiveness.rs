@@ -138,6 +138,12 @@ fn head_kind(p: &CPattern) -> Head {
         CPattern::Tuple(_) => Head::Tuple,
         CPattern::Cons(..) => Head::Cons,
         CPattern::Nil => Head::Nil,
+        // Shorthand-only fields are always irrefutable var-binds (spec
+        // §8.1) -- a record pattern can never restrict *which* values
+        // match, only introduce bindings, so it behaves exactly like a
+        // bare wildcard for reachability purposes. Deliberately not its
+        // own `Head` case.
+        CPattern::Record(_) => Head::Wildcard,
         CPattern::Unit => Head::Unit,
         CPattern::As(..) => unreachable!("unwrap_as already peeled every As"),
     }

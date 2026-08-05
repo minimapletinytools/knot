@@ -130,6 +130,11 @@ pub enum TPattern {
     Tuple(Vec<TypedPattern>),
     Cons(Box<TypedPattern>, Box<TypedPattern>),
     Nil,
+    /// `{ x, y }` — each field's own fresh type variable, open-row
+    /// constrained exactly like `TExpr::FieldAccess`/`RecordUpdate` already
+    /// are (see `constrain::pattern`'s own `CPattern::Record` case). No
+    /// obligations possible — purely structural, same as `Tuple`.
+    Record(Vec<(String, TypeVarId)>),
     As(Box<TypedPattern>, String),
     Unit,
 }

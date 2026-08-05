@@ -498,6 +498,17 @@ condensed pointer, not a replacement:
   as Fix #13, independently present in `constrain_method_body_against`
   (instance methods' own separate code path from ordinary bindings),
   found the same way (a real fixture, not inspection).
+- **Elm-style shorthand record patterns**: `{ x, y }` (spec §5.4/§8.1) —
+  there was previously no pattern-level grammar for this at all (`{`
+  wasn't a recognized `pattern_atom` start). `CPattern::Record`/
+  `TPattern::Record` carry a plain field-name list (no renaming, no
+  nested field patterns, matching Elm exactly), typed as an *open* row
+  (`Structure::Record(fields, Some(rest))`) the same way `FieldAccess`/
+  `RecordUpdate` already are — `{ x, y }` only ever demands *at least*
+  those fields. `exhaustiveness.rs` deliberately maps it to
+  `Head::Wildcard` rather than a new `Head` case: shorthand-only fields
+  are always irrefutable var-binds, so a record pattern can never
+  restrict which values match, exactly like a bare `_`/name.
 
 All fixes in this section were found the same way: writing (or reading)
 real code and watching it fail for the wrong reason, not by auditing the

@@ -1,0 +1,3 @@
+getX point =
+  case point of
+    { x, y } -> x

@@ -1,0 +1,5 @@
+sumXY point =
+  let { x, y } = point in x + y
+
+movePoint { x, y } =
+  { x = x + 1.0, y = y }

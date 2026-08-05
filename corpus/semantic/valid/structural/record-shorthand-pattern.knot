@@ -1,0 +1,26 @@
+-- expect: `{ x, y }` shorthand record patterns work in `let`, function
+-- parameter, and `case` position, and infer an open row -- a function
+-- whose only parameter is `{ x, y }` still accepts a record with more
+-- fields than just those two (spec §5.4/§8.1).
+sumXYViaLet point =
+    let { x, y } = point in x + y
+
+
+sumXYViaParam :: { r | x : Float, y : Float } -> Float
+sumXYViaParam { x, y } =
+    x + y
+
+
+getXViaCase point =
+    case point of
+        { x, y } -> x
+
+
+widerRecord :: { x : Float, y : Float, z : Float }
+widerRecord =
+    { x = 1.0, y = 2.0, z = 3.0 }
+
+
+useOnAWiderRecord :: Float
+useOnAWiderRecord =
+    sumXYViaParam widerRecord

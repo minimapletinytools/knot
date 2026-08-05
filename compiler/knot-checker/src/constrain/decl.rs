@@ -178,6 +178,7 @@ fn collect_pattern_refs(pattern: &CPattern, out: &mut HashSet<String>) {
         | CPattern::Var(_)
         | CPattern::Literal(_)
         | CPattern::Nil
+        | CPattern::Record(_)
         | CPattern::Unit => {}
     }
 }

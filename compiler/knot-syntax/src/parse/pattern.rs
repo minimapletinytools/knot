@@ -1,8 +1,8 @@
 //! Pattern grammar: wildcards/named holes, `Int`/`String` literals (no `Float` —
 //! forbidden, unsound equality, matches Elm), constructors (including `True`/
-//! `False` as 0-arity ctors), tuples, `()`, `[]`/`:` for lists, and `as` aliases.
-//! No record-shorthand destructuring and no pattern guards — both are enforced
-//! simply by not existing as a grammar production here (or, for guards, in the
+//! `False` as 0-arity ctors), tuples, `()`, `[]`/`:` for lists, `{ x, y }`
+//! shorthand-only record destructuring, and `as` aliases. No pattern guards —
+//! enforced simply by not existing as a grammar production (in the
 //! `case`-arm grammar in M4).
 
 use crate::ast::pattern::{Pattern, PatternLiteral};
@@ -110,6 +110,7 @@ impl<'a> ParseState<'a> {
             }
             Some(b'(') => self.pattern_paren_tuple_or_unit(),
             Some(b'[') => self.pattern_nil(),
+            Some(b'{') => self.pattern_record(),
             Some(b'"') => {
                 let lit = self.string_literal()?;
                 Ok(Spanned::new(
@@ -214,6 +215,34 @@ impl<'a> ParseState<'a> {
         Ok(Spanned::new(
             Span::new(start.offset, self.pos.offset),
             Pattern::Nil,
+        ))
+    }
+
+    /// `{ x, y }` — Elm's own shorthand-only record destructuring (spec
+    /// §8.1): a comma-separated list of field names, each binding to that
+    /// field's own value. No renaming (`{ x = a }`) and no nested pattern on
+    /// a field's own value -- neither is a grammar production here, matching
+    /// Elm exactly. `{}` is accepted trivially (matches any record, binds
+    /// nothing), symmetric with `()` above.
+    fn pattern_record(&mut self) -> Result<Spanned<Pattern>, ParseError> {
+        let start = self.pos;
+        self.bump(); // '{'
+        self.skip_trivia()?;
+        let mut fields = Vec::new();
+        if self.peek() != Some(b'}') {
+            fields.push(self.lower_ident()?);
+            self.skip_trivia()?;
+            while self.peek() == Some(b',') {
+                self.bump();
+                self.skip_trivia()?;
+                fields.push(self.lower_ident()?);
+                self.skip_trivia()?;
+            }
+        }
+        self.expect_byte(b'}')?;
+        Ok(Spanned::new(
+            Span::new(start.offset, self.pos.offset),
+            Pattern::Record(fields),
         ))
     }
 }
@@ -397,8 +426,36 @@ mod tests {
     }
 
     #[test]
-    fn record_shorthand_pattern_is_rejected() {
-        let mut s = ParseState::new("{ x, y }");
-        assert!(s.pattern().is_err());
+    fn record_shorthand_pattern() {
+        let Pattern::Record(fields) = pat("{ x, y }") else {
+            panic!("expected Record")
+        };
+        assert_eq!(
+            fields.iter().map(|f| f.node.clone()).collect::<Vec<_>>(),
+            vec!["x".to_string(), "y".to_string()]
+        );
+    }
+
+    #[test]
+    fn record_shorthand_pattern_single_field() {
+        let Pattern::Record(fields) = pat("{ x }") else {
+            panic!("expected Record")
+        };
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].node, "x");
+    }
+
+    #[test]
+    fn empty_record_pattern() {
+        assert_eq!(pat("{}"), Pattern::Record(Vec::new()));
+    }
+
+    #[test]
+    fn record_pattern_as_alias() {
+        let Pattern::As(inner, name) = pat("{ x, y } as full") else {
+            panic!("expected As")
+        };
+        assert_eq!(name, "full");
+        assert!(matches!(inner.node, Pattern::Record(_)));
     }
 }

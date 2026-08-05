@@ -128,6 +128,12 @@ fn resolve_inner(
             Box::new(resolve_inner(env, tail, bound, errors)),
         ),
         Pattern::Nil => CPattern::Nil,
+        Pattern::Record(fields) => {
+            for field in fields {
+                bind_checked(env, &field.node, bound, field.span, errors);
+            }
+            CPattern::Record(fields.iter().map(|f| f.node.clone()).collect())
+        }
         Pattern::As(inner, alias) => {
             let cinner = resolve_inner(env, inner, bound, errors);
             bind_checked(env, alias, bound, span, errors);
@@ -170,6 +176,48 @@ mod tests {
         let pat = sp(Pattern::Tuple(vec![
             sp(Pattern::Var("x".to_string())),
             sp(Pattern::Var("x".to_string())),
+        ]));
+        resolve_pattern(&mut env, &pat, &mut errors);
+        assert_eq!(errors.len(), 1);
+        assert!(matches!(
+            errors[0].kind,
+            CanonErrorKind::DuplicateBindingInPattern(_)
+        ));
+    }
+
+    #[test]
+    fn record_shorthand_pattern_binds_each_field() {
+        let mut env = Env::for_decls();
+        env.push_scope();
+        let mut errors = Vec::new();
+        let pat = sp(Pattern::Record(vec![
+            Spanned::new(Span::new(0, 1), "x".to_string()),
+            Spanned::new(Span::new(0, 1), "y".to_string()),
+        ]));
+        let c = resolve_pattern(&mut env, &pat, &mut errors);
+        assert!(errors.is_empty());
+        assert_eq!(
+            c.node,
+            CPattern::Record(vec!["x".to_string(), "y".to_string()])
+        );
+        assert_eq!(
+            env.resolve_value("x").ok(),
+            Some(crate::ast::Ref::Local("x".to_string()))
+        );
+        assert_eq!(
+            env.resolve_value("y").ok(),
+            Some(crate::ast::Ref::Local("y".to_string()))
+        );
+    }
+
+    #[test]
+    fn duplicate_field_in_one_record_pattern_is_an_error() {
+        let mut env = Env::for_decls();
+        env.push_scope();
+        let mut errors = Vec::new();
+        let pat = sp(Pattern::Record(vec![
+            Spanned::new(Span::new(0, 1), "x".to_string()),
+            Spanned::new(Span::new(0, 1), "x".to_string()),
         ]));
         resolve_pattern(&mut env, &pat, &mut errors);
         assert_eq!(errors.len(), 1);

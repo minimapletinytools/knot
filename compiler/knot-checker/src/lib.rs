@@ -472,6 +472,24 @@
 //! left open (one gap now: annotation values never checked against their
 //! own derived expected type), including `corpus/programs/known_gaps/`'s
 //! own runnable fixture pinning it down.
+//!
+//! **Elm-style shorthand record patterns** (`{ x, y }`, spec §5.4/§8.1) —
+//! `CPattern::Record`/`TPattern::Record` typed as an open row exactly like
+//! `FieldAccess`/`RecordUpdate` already are, `exhaustiveness.rs` mapping it
+//! to `Head::Wildcard` rather than a new case (see `checker_impl_summary.md`
+//! for the full writeup). Writing this feature's own corpus fixture (a
+//! signature-less function whose only parameter is `{ x, y }`, called
+//! against a record with *more* fields than that) surfaced a real,
+//! pre-existing bug, unrelated to records specifically: `solve::
+//! generalize`'s dangling-`"Num"`-defaults-to-`Int` heuristic (meant for a
+//! genuinely unconstrained literal like `x = 5`) also fires for an
+//! ordinary polymorphic function like `add x y = x + y` the moment it has
+//! no signature of its own — `add`'s parameter type gets defaulted to
+//! `Int` *before* any call site (even one at `Float`) ever gets a chance
+//! to constrain it, wrongly rejecting what should be ordinary `Num`
+//! polymorphism. Reproduces with plain `Var` params, no record or tuple
+//! pattern involved at all — not fixed here, flagged for a deliberate,
+//! separate pass rather than folded into this change.
 
 pub mod annotation;
 pub mod ast;

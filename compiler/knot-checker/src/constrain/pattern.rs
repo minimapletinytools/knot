@@ -116,6 +116,22 @@ pub fn constrain_pattern(
             let elem_ty = sub.fresh_unbound();
             wrap(app1(sub, "List", elem_ty), crate::ast::TPattern::Nil)
         }
+        // Open row, exactly like `constrain::expr`'s own `FieldAccess`/
+        // `RecordUpdate` -- `{ x, y }` only ever demands *at least* an `x`
+        // and a `y` field (spec §5.4/§8.1), never these fields exactly.
+        CPattern::Record(fields) => {
+            let mut field_tys = std::collections::BTreeMap::new();
+            let mut typed_fields = Vec::with_capacity(fields.len());
+            for name in fields {
+                let ty = sub.fresh_unbound();
+                scope.bind(name, ty);
+                field_tys.insert(name.clone(), ty);
+                typed_fields.push((name.clone(), ty));
+            }
+            let rest = sub.fresh_unbound();
+            let record_ty = sub.fresh_bound(Structure::Record(field_tys, Some(rest)));
+            wrap(record_ty, crate::ast::TPattern::Record(typed_fields))
+        }
         CPattern::As(inner, name) => {
             let inner_typed = constrain_pattern(sub, scope, inner, constraints);
             scope.bind(name, inner_typed.ty);
@@ -286,6 +302,33 @@ mod tests {
             other => panic!("expected a Tuple shape, got {other:?}"),
         }
         assert!(matches!(typed.node, crate::ast::TPattern::Tuple(ref subs) if subs.len() == 2));
+    }
+
+    #[test]
+    fn record_pattern_binds_each_field_and_is_an_open_row() {
+        let mut sub = Substitution::new();
+        let mut scope = LocalScope::new();
+        scope.push();
+        let mut cs = Vec::new();
+        let typed = constrain_pattern(
+            &mut sub,
+            &mut scope,
+            &p(CPattern::Record(vec!["x".to_string(), "y".to_string()])),
+            &mut cs,
+        );
+        match sub.resolve_structure(typed.ty) {
+            Some(Structure::Record(fields, rest)) => {
+                assert_eq!(fields.len(), 2);
+                assert_eq!(fields.get("x"), Some(&scope.lookup("x").header_ty()));
+                assert_eq!(fields.get("y"), Some(&scope.lookup("y").header_ty()));
+                // Open, not closed -- `{ x, y }` demands *at least* these
+                // fields, same reasoning as an explicit `{ r | x : ..., y :
+                // ... }` signature (spec §5.4/§8.1).
+                assert!(rest.is_some());
+            }
+            other => panic!("expected an open Record shape, got {other:?}"),
+        }
+        assert!(matches!(typed.node, crate::ast::TPattern::Record(ref fs) if fs.len() == 2));
     }
 
     #[test]

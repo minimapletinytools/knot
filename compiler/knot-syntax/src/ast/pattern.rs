@@ -15,6 +15,12 @@ pub enum Pattern {
     /// `x : xs`
     Cons(Box<Spanned<Pattern>>, Box<Spanned<Pattern>>),
     Nil,
+    /// `{ x, y }` — Elm's own shorthand-only record destructuring (spec §8.1):
+    /// each name binds to the same-named field's value. No renaming (`{ x = a
+    /// }`) and no nested pattern on a field's own value, so this is just a
+    /// list of field names, not `Vec<Spanned<Pattern>>` the way `Tuple`/`Ctor`
+    /// are.
+    Record(Vec<Spanned<String>>),
     As(Box<Spanned<Pattern>>, String),
     /// `()` — its own variant for the same reason `Expr`/`Type` each have one:
     /// `()` isn't spelled with an identifier, so it can never arise via `Ctor`.

@@ -99,6 +99,12 @@ pub enum CPattern {
     Tuple(Vec<Spanned<CPattern>>),
     Cons(Box<Spanned<CPattern>>, Box<Spanned<CPattern>>),
     Nil,
+    /// `{ x, y }` — see `knot_syntax::ast::pattern::Pattern::Record`. Field
+    /// names are never resolved against anything global (same as
+    /// `CExpr::Record`'s own fields) — this is a straight passthrough, with
+    /// duplicate-name checking already done by `resolve::pattern` (each name
+    /// goes through the same `bind_checked` a `Var` pattern does).
+    Record(Vec<String>),
     As(Box<Spanned<CPattern>>, String),
     Unit,
 }
