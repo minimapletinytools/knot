@@ -97,29 +97,33 @@ alternatively, the UI can serialize the state directly into the file with specia
 -consider supporting/not supporting trailing `'` (not valid in elm, valid in haskell, choose)
 -consider switching to data for type, and type for type alias (matchig hassell)
 -consider renaming Record Spreads or getting rid of it  
-
-
+-should we add support for Rational primitive type? (can just go into prelude)
+-annotations not allowed on expression holes, we could techinacly allow this maybe?
 
 
 :: TODO
 
+-update parser to support (+)
+
 -do the prelude refactor thing
     -primitive operators are baked into compiler
-    -YES 
+    PICK-YES 
         -just allow user defined operators, NBD, it's not encouraged though, the bulit in ones still have special interpretation in UI
         -you'll need to update spec with custom operator and fixity declarations
-    -NO
+    SKIP-NO
         -syntax sugar operators are baked into compiler
         -so all that's left is &&/|| which need prelude.knot defs, so I guess you allow operator syntax in just htis file or something
     -list out prelude.rs stuff that also has special compiler stuff (e.g. list literal syntax, do notation for monads)
     -list out prelude.rs stuff that has special tangel interpretation (maybe it's just syntax sugared operators which aren't in prelude, or maybe do them in prelude but also make them magical)
     -copy relevant methods from https://hackage.haskell.org/package/base-4.4.1.0/docs/src/Prelude.html
 
--should we add support for Rational primitive type? (can just go into prelude)
+
+-allow `let {f1 f2 f3} = someRecrod` pattern matching syntax, or allwo it and use it to enable the special pattern match record let binding syntax (actually that's probably better than implicit field access for special let bound record node) 
+
 -actually go over type checker implementation details seems to be kinda broken a lot
--make prelude file
--you probabyl need some special annotation to indicate something is treated lie a bulit in in the language
-    
+IGNORE-you probabyl need some special annotation to indicate something is treated lie a bulit in in the language
+
+
 -do linter rules
 -UI spec gaps
     -finish pattern matching node stuff
@@ -127,8 +131,8 @@ alternatively, the UI can serialize the state directly into the file with specia
     -figure out how to do note stuff for let bindings on patterns, especially irrefutable patterns/incomplete pattern
     -figure out how to do node stuff for `as` bindings
     -define all reserved keywords (sohuld eb same as elm plus a few extra?)
-    -consider getting rid of `let {f1 f2 f3} = someRecrod` pattern matching syntax, or allwo it and use it to enable the special record let binding syntax (actually that's probably better than implicit field access for special let bound record node) 
-    -annotations not allowed on expression holes, we could techinacly allow this maybe?
+    
+    
     DONE-change postfix annotation to prefix notation
     -polymorphic output types, do they need special treatment
         -e.g.
@@ -137,9 +141,6 @@ alternatively, the UI can serialize the state directly into the file with specia
             z = 3 + x (x is an int)
         -so there are actually 2 x's in the runtime. Compiler secretly sees x as x :: (Num a) => (typeclass dict) -> a
         -with that idea, x is actually scretly a boxed node
-    -we probbaly want this
-        Option B — real user-declared structural instances (bigger, new mechanism): a genuine structural key type in InstanceTable (closed shapes only, no open rows), a canonical hash/equality over a resolved Structure, and reusing the existing requires-style machinery for parametric fields. This lets you write the custom body you originally wrote ((<>) a b = { x = a.x + b.x }), not just field-by-field combination.
-    -see record-spread-proposal.md
 
 
 :: TODONE
