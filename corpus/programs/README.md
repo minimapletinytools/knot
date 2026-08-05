@@ -335,9 +335,10 @@ root cause, **not yet fixed**:
     input. Hit `collections/zip-and-unzip-manual.knot` and
     `interpreter/calculator-with-errors.knot` — both now pass.
     **Decided Elm-style, not Haskell-style**: only the bare `(op)` form is
-    supported (desugars to `\x y -> x op y` at parse time, in
-    `try_operator_section`, reusing `expr_binop_prec`'s own `peek_binop`
-    table so it can't drift out of sync) — no partial sections like
+    supported (parses to its own `Expr::OpRef` node in `try_operator_section`
+    — does not desugar to a lambda, spec §7.6 — reusing `expr_binop_prec`'s
+    own `peek_binop` table so it can't drift out of sync) — no partial
+    sections like
     `(+ 1)`/`(1 +)`, which now hard-fail with a message pointing at the
     lambda-form alternative. Two things needed care: a bare `(-)` is
     unambiguously the *subtraction* function (never negation, matching

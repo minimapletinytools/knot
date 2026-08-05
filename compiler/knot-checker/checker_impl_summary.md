@@ -472,10 +472,14 @@ condensed pointer, not a replacement:
   own `requires` needed a `given`-only type (`instance Ord a => Semigroup
   (Max a)`) and self-referential ones (`instance Show a => Show (Tree a)`).
 - **Elm-style bare operator sections**: `(+)`, `(::)`, `(<>)`, ... as
-  first-class values (`\x y -> x op y`) — there was previously no
-  expression-level grammar for this at all, only for naming an interface
-  method inside `instance`/`interface ... where`. Deliberately no
-  Haskell-style partial sections (`(+ 1)`/`(1 +)`).
+  first-class values — there was previously no expression-level grammar
+  for this at all, only for naming an interface method inside
+  `instance`/`interface ... where`. Deliberately no Haskell-style partial
+  sections (`(+ 1)`/`(1 +)`). Does **not** desugar to a lambda (spec
+  §7.6) — `Expr::OpRef`/`CExpr::OpRef`/`TExpr::OpRef` is its own node
+  through the whole pipeline, typed as the operator's curried function
+  type (reusing `constrain_binop` against two fresh type variables), so
+  `(+) a b` type-checks via ordinary `App`, identically to `a + b`.
 - **`let`-bound local functions can take parameters**: `let go acc rest =
   ... in ...` was a hard parse error; only the `\acc rest -> ...`-lambda
   workaround used to work.

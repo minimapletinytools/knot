@@ -48,6 +48,10 @@ pub enum CExpr {
     Lambda(Vec<Spanned<CPattern>>, Box<Spanned<CExpr>>),
     App(Box<Spanned<CExpr>>, Box<Spanned<CExpr>>),
     BinOp(BinOp, Box<Spanned<CExpr>>, Box<Spanned<CExpr>>),
+    /// A bare operator reference (`(+)`) -- see `knot_syntax::ast::expr::
+    /// Expr::OpRef`. No name to resolve (keyed by the closed `BinOp` enum,
+    /// not a string), so this is a straight passthrough from the surface AST.
+    OpRef(BinOp),
     Negate(Box<Spanned<CExpr>>),
     If(
         Box<Spanned<CExpr>>,

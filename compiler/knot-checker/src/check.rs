@@ -123,6 +123,17 @@ mod tests {
     }
 
     #[test]
+    fn a_bare_operator_reference_applied_like_a_function_type_checks_the_same_as_infix() {
+        // `(+)` no longer desugars to a lambda (spec §7.6) -- it's a plain
+        // `OpRef`, and `(+) a b` is ordinary application. Confirms that
+        // second representation type-checks identically to the infix one
+        // right above, through the real end-to-end pipeline.
+        let cs = decls("addX :: Float -> Float -> Float\naddX a b = (+) a b\n");
+        let errors = check_module(&cs);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
     fn redeclaring_a_builtin_instance_through_the_real_entry_point_is_a_duplicate_error() {
         // Task #40, end to end through check_module itself (not just
         // build_instance_table directly) -- confirms the fix reaches all

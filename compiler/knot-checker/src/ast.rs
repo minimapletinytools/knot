@@ -13,9 +13,10 @@
 //!
 //! **Two mechanisms for interface obligations, not one** — see
 //! `constrain::expr`'s own doc comment for the generation-time half:
-//! `BinOp`/`Negate` know their own `(interface, TypeVarId)` pairs already,
-//! at generation time (the same values pushed as `Constraint::HasInstance`),
-//! so those live directly on the node (`TExpr::BinOp`/`TExpr::Negate`'s own
+//! `BinOp`/`OpRef`/`Negate` know their own `(interface, TypeVarId)` pairs
+//! already, at generation time (the same values pushed as
+//! `Constraint::HasInstance`), so those live directly on the node
+//! (`TExpr::BinOp`/`TExpr::OpRef`/`TExpr::Negate`'s own
 //! `Vec<(String, TypeVarId)>` field). A `Var`/`Ctor` resolved via `Lookup`/
 //! `LookupLocal` doesn't know its obligations until the referenced scheme is
 //! *instantiated*, which only happens during solving — so those carry no
@@ -99,6 +100,14 @@ pub enum TExpr {
         Box<TypedExpr>,
         Vec<(String, TypeVarId)>,
     ),
+    /// A bare operator reference (`(+)`), typed as the operator's own
+    /// curried function type (`Num a => a -> a -> a` for `Add`, say) --
+    /// see `constrain::expr`'s own `CExpr::OpRef` case. Carries its
+    /// obligation(s) directly on the node, same reasoning as `BinOp`/
+    /// `Negate` (module docs): no children to recurse into at all, unlike
+    /// those two, since the operands only show up once this is applied
+    /// (`App`), same as calling any other function.
+    OpRef(BinOp, Vec<(String, TypeVarId)>),
     Negate(Box<TypedExpr>, Vec<(String, TypeVarId)>),
     If(Box<TypedExpr>, Box<TypedExpr>, Box<TypedExpr>),
     Let(Vec<(TypedPattern, TypedExpr)>, Box<TypedExpr>),

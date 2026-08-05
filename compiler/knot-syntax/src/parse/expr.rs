@@ -393,8 +393,9 @@ impl<'a> ParseState<'a> {
     }
 
     /// A bare operator section (`(+)`, `(::`-shaped `(:)`, `(<>)`, ...): a
-    /// first-class reference to that operator's own function, `\x y -> x op
-    /// y`. Elm-style only -- no Haskell partial sections (`(+ 1)`/`(1 +)`),
+    /// first-class reference to that operator's own function -- `Expr::
+    /// OpRef`, not a synthesized lambda (spec §7.6: this does not desugar).
+    /// Elm-style only -- no Haskell partial sections (`(+ 1)`/`(1 +)`),
     /// by spec decision. Must be called with the cursor immediately after
     /// `(` (trivia already skipped, already confirmed not to be `)`, i.e.
     /// not the unit case) -- returns `Ok(None)` with the cursor untouched if
@@ -458,22 +459,7 @@ impl<'a> ParseState<'a> {
         }
         self.bump(); // ')'
         let span = Span::new(start.offset, self.pos.offset);
-        let params = vec![
-            Spanned::new(span, Pattern::Var("x".to_string())),
-            Spanned::new(span, Pattern::Var("y".to_string())),
-        ];
-        let body = Spanned::new(
-            span,
-            Expr::BinOp(
-                m.op,
-                Box::new(Spanned::new(span, Expr::Var("x".to_string()))),
-                Box::new(Spanned::new(span, Expr::Var("y".to_string()))),
-            ),
-        );
-        Ok(Some(Spanned::new(
-            span,
-            Expr::Lambda(params, Box::new(body)),
-        )))
+        Ok(Some(Spanned::new(span, Expr::OpRef(m.op))))
     }
 
     fn expr_list(&mut self) -> Result<Spanned<Expr>, ParseError> {
@@ -1021,35 +1007,18 @@ mod tests {
     }
 
     #[test]
-    fn bare_operator_section_desugars_to_a_two_arg_lambda() {
+    fn bare_operator_section_is_an_opref_not_a_lambda() {
         // "(+)" -- Elm-style bare section only, no Haskell partial sections.
-        let Expr::Lambda(params, body) = ex("(+)") else {
-            panic!("expected Lambda")
-        };
-        assert_eq!(params.len(), 2);
-        assert!(matches!(params[0].node, Pattern::Var(ref n) if n == "x"));
-        assert!(matches!(params[1].node, Pattern::Var(ref n) if n == "y"));
-        assert_eq!(
-            body.node,
-            Expr::BinOp(
-                BinOp::Add,
-                Box::new(Spanned::new(body.span, Expr::Var("x".to_string()))),
-                Box::new(Spanned::new(body.span, Expr::Var("y".to_string())))
-            )
-        );
+        // Does not desugar (spec §7.6): it's a first-class reference to the
+        // operator's own function, the same "regular function call"
+        // representation any other name would have, not a synthesized lambda.
+        assert_eq!(ex("(+)"), Expr::OpRef(BinOp::Add));
     }
 
     #[test]
     fn cons_and_append_sections_use_their_own_operator() {
-        let Expr::Lambda(_, body) = ex("(:)") else {
-            panic!("expected Lambda")
-        };
-        assert!(matches!(body.node, Expr::BinOp(BinOp::Cons, _, _)));
-
-        let Expr::Lambda(_, body) = ex("(<>)") else {
-            panic!("expected Lambda")
-        };
-        assert!(matches!(body.node, Expr::BinOp(BinOp::Append, _, _)));
+        assert_eq!(ex("(:)"), Expr::OpRef(BinOp::Cons));
+        assert_eq!(ex("(<>)"), Expr::OpRef(BinOp::Append));
     }
 
     #[test]
@@ -1057,15 +1026,14 @@ mod tests {
         // "(-)" -- immediately followed by `)`, so unambiguously the
         // subtraction function, matching Haskell's own convention (never
         // negation, which always needs a following operand).
-        let Expr::Lambda(_, body) = ex("(-)") else {
-            panic!("expected Lambda")
-        };
-        assert!(matches!(body.node, Expr::BinOp(BinOp::Sub, _, _)));
+        assert_eq!(ex("(-)"), Expr::OpRef(BinOp::Sub));
     }
 
     #[test]
     fn operator_section_used_as_an_application_argument() {
-        // "zipWith (+) xs ys" -- the whole motivating use case.
+        // "zipWith (+) xs ys" -- the whole motivating use case. `(+)` is an
+        // ordinary atom now, so this is ordinary nested application, exactly
+        // as if `zipWith`'s second argument were any other named function.
         let Expr::App(f, arg) = ex("zipWith (+) xs") else {
             panic!("expected App")
         };
@@ -1073,7 +1041,7 @@ mod tests {
             panic!("expected nested App")
         };
         assert_eq!(f2.node, Expr::Var("zipWith".to_string()));
-        assert!(matches!(arg1.node, Expr::Lambda(_, _)));
+        assert_eq!(arg1.node, Expr::OpRef(BinOp::Add));
         assert_eq!(arg.node, Expr::Var("xs".to_string()));
     }
 

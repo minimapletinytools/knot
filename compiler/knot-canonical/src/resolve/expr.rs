@@ -72,6 +72,7 @@ pub fn resolve_expr(
             Box::new(resolve_expr(env, l, errors)),
             Box::new(resolve_expr(env, r, errors)),
         ),
+        Expr::OpRef(op) => CExpr::OpRef(*op),
         Expr::Negate(inner) => CExpr::Negate(Box::new(resolve_expr(env, inner, errors))),
         Expr::If(c, t, e) => CExpr::If(
             Box::new(resolve_expr(env, c, errors)),

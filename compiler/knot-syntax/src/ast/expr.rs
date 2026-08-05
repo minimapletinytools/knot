@@ -24,6 +24,14 @@ pub enum Expr {
     /// from imports; Knot's operator set is closed, so this parser resolves it
     /// directly via precedence-climbing over the §7.4 table).
     BinOp(BinOp, Box<Spanned<Expr>>, Box<Spanned<Expr>>),
+    /// A bare operator section (`(+)`, `(:)`, `(<>)`, ...): a first-class
+    /// reference to that operator's own function, spelled the same
+    /// parenthesized way `decl_name` names one. This does **not** desugar
+    /// into a lambda (spec §7.6) — it's a second, "regular function call"
+    /// representation of the same operator alongside `BinOp`'s infix one;
+    /// `(+) a b` is ordinary application (`App(App(OpRef(Add), a), b)`),
+    /// ordinary `expr_app` handles building that, nothing here does.
+    OpRef(BinOp),
     /// Unary negation — whitespace-disambiguated from subtraction, see spec §7.5.
     Negate(Box<Spanned<Expr>>),
     If(Box<Spanned<Expr>>, Box<Spanned<Expr>>, Box<Spanned<Expr>>),

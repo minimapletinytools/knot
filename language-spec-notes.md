@@ -350,7 +350,8 @@ ordinary subtraction. The remaining case — whitespace *after* `-` but not befo
 with parentheses or by fixing the spacing.
 
 ### 7.6 Operator Sections
-**Matching Elm** A bare operator in parens is a first-class function: `(+)` is `\x y -> x + y`. Unlike Haskell, there are no *partial* sections — `(+2)`/`(2+)` are both unsupported; write
+**Matching Elm** A bare operator in parens is a first-class function: `(+)` is the same function `+` already refers to — not a synthesized lambda. `a + b` and `(+) a b` are two surface
+spellings of applying that one function, infix vs. ordinary application; neither one desugars into the other. Unlike Haskell, there are no *partial* sections — `(+2)`/`(2+)` are both unsupported; write
 the lambda out (`\x -> x + 2`) instead.
 
 ---

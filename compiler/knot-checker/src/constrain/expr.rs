@@ -483,6 +483,20 @@ pub fn constrain_expr(
                 TExpr::BinOp(*op, Box::new(typed_l), Box::new(typed_r), obligations),
             )
         }
+        // `(+)`: the same scheme `a + b` would need, curried into an
+        // ordinary function type instead of applied immediately -- `App`
+        // then handles `(+) a b` exactly like calling any other function,
+        // no separate application logic needed here at all.
+        CExpr::OpRef(op) => {
+            let left = sub.fresh_unbound();
+            let right = sub.fresh_unbound();
+            let before = constraints.len();
+            let result = constrain_binop(sub, *op, span, left, right, constraints);
+            let obligations = collect_has_instance(constraints, before);
+            let inner_fn = sub.fresh_bound(Structure::Fn(right, result));
+            let fn_ty = sub.fresh_bound(Structure::Fn(left, inner_fn));
+            wrap(fn_ty, TExpr::OpRef(*op, obligations))
+        }
         CExpr::Negate(e) => {
             let typed_e = constrain_expr(sub, scope, e, constraints);
             constraints.push(Constraint::HasInstance {

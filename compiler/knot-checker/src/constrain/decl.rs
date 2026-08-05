@@ -102,6 +102,7 @@ fn collect_top_level_refs(expr: &CExpr, out: &mut HashSet<String>) {
             collect_top_level_refs(&l.node, out);
             collect_top_level_refs(&r.node, out);
         }
+        CExpr::OpRef(_) => {}
         CExpr::Negate(e) => collect_top_level_refs(&e.node, out),
         CExpr::If(c, t, e) => {
             collect_top_level_refs(&c.node, out);

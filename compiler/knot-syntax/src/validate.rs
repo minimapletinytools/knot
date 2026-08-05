@@ -235,6 +235,7 @@ fn check_expr_tuple_arity(expr: &Expr, span: Span, errors: &mut Vec<ValidationEr
         | Expr::Unit
         | Expr::Var(_)
         | Expr::Ctor(_)
+        | Expr::OpRef(_)
         | Expr::Hole => {}
     }
 }

@@ -385,6 +385,7 @@ fn walk_expr(ctors: &CtorTable, expr: &Spanned<CExpr>, warnings: &mut Vec<Warnin
             walk_expr(ctors, l, warnings);
             walk_expr(ctors, r, warnings);
         }
+        CExpr::OpRef(_) => {}
         CExpr::Negate(inner) => walk_expr(ctors, inner, warnings),
         CExpr::If(c, t, e) => {
             walk_expr(ctors, c, warnings);

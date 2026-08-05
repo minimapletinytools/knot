@@ -344,11 +344,14 @@
 //! deliberately closed in one pass, followed by a fourth, monad-`do`-
 //! notation-focused round that found one more:
 //! - **Elm-style bare operator sections**: `(+)`/`(::)`/`(<>)`/... as
-//!   first-class values, desugaring to `\x y -> x op y` at parse time in
-//!   `knot-syntax::parse::expr::try_operator_section`. Deliberately no
-//!   Haskell-style partial sections (`(+ 1)`/`(1 +)`) — a real design
-//!   decision, not a shortcut; those now hard-fail with a message pointing
-//!   at the lambda-form alternative instead of silently misparsing.
+//!   first-class values, parsed into their own `Expr::OpRef` node in
+//!   `knot-syntax::parse::expr::try_operator_section` (does not desugar to
+//!   a lambda, spec §7.6 — `(+) a b` is ordinary application, type-checked
+//!   identically to `a + b` by giving `OpRef` the operator's own curried
+//!   function type). Deliberately no Haskell-style partial sections
+//!   (`(+ 1)`/`(1 +)`) — a real design decision, not a shortcut; those now
+//!   hard-fail with a message pointing at the lambda-form alternative
+//!   instead of silently misparsing.
 //! - **`let`-bound local functions can take parameters**: `let go acc rest
 //!   = ... in ...` was a hard parse error; `knot-syntax::parse::expr::
 //!   let_binding` now runs the identical params-loop a top-level `FnDef`

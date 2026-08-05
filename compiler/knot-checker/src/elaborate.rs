@@ -239,6 +239,13 @@ fn walk_expr(
                 );
             }
         }
+        TExpr::OpRef(_, node_obligations) => {
+            for (interface, ty) in node_obligations {
+                resolve_one(
+                    sub, table, given, interface, *ty, typed.span, resolved, errors,
+                );
+            }
+        }
         TExpr::Negate(inner, node_obligations) => {
             recurse(inner, resolved, errors);
             for (interface, ty) in node_obligations {
