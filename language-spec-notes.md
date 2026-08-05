@@ -46,10 +46,10 @@ Knot represents a middle ground between Haskell and Elm, tailored specifically t
 * **List cons operator**: list cons (`:`) preserved.
 * **Monadic/List Operators**: `do` syntax and bind operator (`>>=`) preserved — `bind`/`pure` are the `Context` interface's own methods (§2.4).
 * **Holes**: `_` and `_somename` can be used in place of expressions as holes
+* **User-Defined Operators**
 
 ### 2.3 Omitted from Haskell/Elm
 * **No user-defined typeclasses**: Unlike Haskell's typeclasses (or Elm's extensible record polymorphism), the *set* of interfaces in v0 is closed — fixed, see §2.4 for the full list — to keep compile-time dictionary passing and type checking simple; users cannot declare a brand-new interface. Instances of these existing interfaces are open, though — see §2.4.
-* **No custom symbolic operators**: Unlike both Haskell and Elm, users cannot define new operators (e.g., `+++`), ensuring 1-to-1 parsing and node-graph mapping remain clean.
 * **No List Comprehensions**: Haskell's list comprehension syntax (`[x | x <- xs]`) is omitted in favor of standard map/filter functions.
 * **No Record Shorthand Destructuring**: Elm's shorthand record pattern matching (`{ x, y }`) is omitted.
 * **Right to Left functor operators `<|` `<<` `=<<`**: not supported
@@ -72,7 +72,6 @@ Knot represents a middle ground between Haskell and Elm, tailored specifically t
   | `Integral`   | `div`, `mod` (implies `Num`, `Ord`)              | `Integral`                                                                             |
   | `Collection` | `map`, `foldl`, `foldr`, `filter`, `length`      | `Functor` + `Foldable`, merged into one interface                                      |
   | `Context`    | `pure`, `bind`                                  | `Applicative` + `Monad`, merged into one interface — replaces `Monad` and its `>>=`    |
-* **Metadata & Annotations (`@name(...)` / `@{...}`)**: A compiler-checked layout and tool annotation system designed for graph coordinates, documentation, and metadata.
 * **Unravel System (Reverse Execution)**: Backwards execution solving rule annotations (`unravel`), allowing changes to flow in reverse through the graph.
 * **Holes in LHS of let bindings**: `let _ = expression` is allowed and dropped by the compiler.
 * **Record Spreads**: A record can be defined to contain all fields of  `A` with `..A` syntax e.g. `type B = { ..A, someField : Int }`. works with row polymorphic constraints to e.g. `{a | ..A}`
@@ -102,7 +101,7 @@ types, constructors, and modules.
 
 Reserved words (never usable as an identifier): `module`, `exposing`, `import`, `as`,
 `type`, `alias`, `let`, `in`, `if`, `then`, `else`, `case`, `of`, `do`, `True`, `False`,
-`interface`, `where`, `instance`. (`interface`/`where` are reserved even though a user
+`interface`, `where`, `instance`, `infixl`, `infixr`, `infix`. (`interface`/`where` are reserved even though a user
 never writes an `interface ... where` block themselves — see §10 — since `where` is
 real, user-facing syntax via `instance ... where`.)
 
@@ -307,16 +306,28 @@ See §8 for the full pattern-matching story.
 
 ### 7.4 Operators & Precedence
 
-**Differs from Haskell/Elm**
+**Matching Haskell**
 
-To ensure unambiguous parsing and 1-to-1 visual node graph mapping, Knot defines a strict set of built-in operators and precedence rules:
+
+A new operator gets its precedence and
+associativity the same way Haskell's does: a top-level fixity
+declaration, `infixl`/`infixr`/`infix` like Haskell, conflicting fixity declarations is an error.
+
+```knot
+infixl 6 (+++)   -- left-associative, same tier as + and -
+infixr 5 (:)     -- right-associative — this is List's own cons getting its fixity
+infix  4 (~=)    -- non-associative: chaining a ~= b ~= c is a parse error
+```
+
+the table below is the *standard* set `prelude.knot` establishes, not an exhaustive
+enumeration the grammar bakes in. 
 
 | Precedence | Operators | Associativity | Description |
 |:---|:---|:---|:---|
 | 8 | `^` | Right | Exponentiation |
 | 7 | `*`, `/`, `div`, `mod` | Left | Multiplication, division, modulo |
 | 6 | `+`, `-`, `<>` | Left | Addition, subtraction, semigroup append |
-| 5 | `:` | Right | List construction (cons) |
+| 5 | `:` | Right | List construction — `List`'s own cons constructor, used infix (§12.2) |
 | 4 | `==`, `/=`, `<`, `<=`, `>`, `>=` | None | Comparison |
 | 3 | `&&` | Right | Logical AND (lazy evaluation) |
 | 2 | `\|\|` | Right | Logical OR (lazy evaluation) |
@@ -327,10 +338,6 @@ x |> f |> g              -- forward pipe
 f >> g                    -- forward composition, equivalent to \x -> g (f x)
 m >>= f                   -- monadic bind, equivalent to bind m f (§10.6, §11)
 ```
-
-Because Knot's operator set is closed (§2.3 — no user-defined operators), this table is exhaustive and fixed at parse time; unlike Elm, a parser never needs to consult import declarations to learn an operator's fixity.
-
-#### Boolean Operators
 
 ### 7.5 Unary Negation
 
@@ -587,8 +594,6 @@ do
 
 ## 12. Prelude & Built-ins
 
-TODO this section needs some reorg rewrite
-
 **Different / Custom** *(planned — describes the intended split, not the
 current implementation, which today hand-builds every entry below in
 Rust regardless of which column it belongs in)*
@@ -613,33 +618,47 @@ rather than needing a special "this one's opaque" exception.
 | The interface dispatch mechanism (which instance answers a given `show`/`compare`/`+`/...) | Compiler machinery, not user-writable Knot — the same sense in which Haskell's own dictionary passing isn't user-writable Haskell. |
 | The closed interface *set* itself, and each interface's own method shapes | A restatement of "no user-defined interfaces" (§2.3) — applies equally to `Collection`/`Context` as to any other interface. |
 | The `Collection`/`Context` kind-polymorphism machinery (`f` as a constructor variable, §10.6) | The type-system feature itself. *Using* it in an ordinary signature (`Collection f => f a -> f b`) is already fully open to users, though — see §10.6. This row is only about the underlying mechanism. |
-| Operator tokens, their precedence, and what each one desugars to | Grammar, not privilege — see §13. Teaching the parser a new token from Knot source isn't something to build, and the operator set is closed (§2.3) regardless of where anything else lives. |
 | `IO`'s own primitive actions | Side effects need a real runtime underneath; there's nothing to pattern-match. |
+
+Operators are deliberately *not* in this table anymore — unlike an
+earlier draft of this section, they're not compiler primitives at all
+(§2.4). The lexer/parser still needs *some* fixed notion of "this looks
+like an operator" to tokenize one in the first place, but which specific
+operators exist, and what each one means, is no longer hardcoded — see
+§12.2 and §13.
 
 ### 12.2 What Moves to `prelude.knot`
 
 Everything below is expressible in ordinary, already-existing Knot syntax
 — no new grammar, no privileged constructs. Each one is just an ordinary
-`type` declaration or an ordinary `instance` declaration, exactly the
-shape a user could already write for their own type:
+`type`, `instance`, or plain (possibly operator-named) top-level
+declaration, exactly the shape a user could already write themselves:
 
 - **`Bool`** — `type Bool = True | False deriving (Eq, Ord, Show)`
   (§10.7). `True`/`False` are already ordinary constructor names, not
   reserved syntax (§4.2).
-- **`not`** — `not b = case b of True -> False; False -> True`. No
-  interface dispatch involved at all.
+- **`not`, `(&&)`, `(||)`** — e.g. `(&&) a b = case a of { True -> b;
+  False -> False }` (§7.4). No interface dispatch involved for any of the
+  three; laziness alone already makes the short-circuiting correct.
 - **`Ordering`** — `type Ordering = LT | EQ | GT deriving (Eq, Ord, Show)`.
 - **`Maybe`, `Result`** — ordinary two-constructor ADTs; their
   `Eq`/`Ord`/`Show`/`Context` instances (`pure`/`bind` via
   pattern-matching) are the same shape a user's own `Context` instance
   already is (§10.6).
-- **`List`** — structurally `Nil | Cons a (List a)`; its
+- **`List`** — `type List a = [] | a : List a` (`infixr 5 (:)`, §7.4),
+  matching Haskell's own `data [a] = [] | a : [a]` exactly: `:` and `[]`
+  are the real constructor names, not stand-ins for a differently-spelled
+  `Cons`/`Nil` that surface syntax quietly rewrites to. `x : xs` is
+  already in reduced form the moment it's parsed — no desugaring needed
+  (§13); only the bracket literal `[1, 2, 3]` is genuine sugar, for the
+  `1 : 2 : 3 : []` chain written longhand. Its
   `Eq`/`Ord`/`Show`/`Collection`/`Context`/`Semigroup`/`Monoid` instances
-  are all ordinary recursive pattern-matches. Surface syntax (`[]`,
-  `x : xs`, `[1, 2, 3]`) stays exactly as today — pure grammar sugar
-  (§13) desugaring to real `Cons`/`Nil` applications underneath.
+  are all ordinary recursive pattern-matches.
 - **`Map`**, if wanted — a real (if naive, association-list-backed)
   reference implementation, rather than an opaque stub.
+- **The standard sugar operators** — `(|>)`, `(>>)`, `(>>=)` are ordinary
+  `prelude.knot` bindings too (§13), the same way `(&&)`/`(||)` are —
+  `(|>) x f = f x`, and so on.
 
 Moving something from the left column to the right doesn't change its
 type or behavior at all — only where its definition physically lives.
@@ -652,86 +671,46 @@ type or behavior at all — only where its definition physically lives.
 desugaring described here is currently scattered across parsing and
 constraint generation rather than living in one dedicated stage)*
 
-Compilation has a dedicated **desugaring** stage, sitting between
-parsing and canonicalization:
+Compilation has a dedicated **desugaring** stage between parsing and
+canonicalization:
 
 ```
 source text --parse--> surface AST --desugar--> reduced AST --canonicalize--> ...
 ```
 
-This exists for a reason specific to Knot: the *surface*, pre-desugar
-syntax has its own meaning in the node-graph mapping (§3) that the
-*reduced* form doesn't — a pipe reads as a distinct "pipe" node, a `do`
-block as its own sequencing shape, a list literal as its own
-construction node, not as a generic function application
-indistinguishable from any other. If desugaring happened inline during
-parsing (or were skipped entirely and left for the type checker to sort
-out later, as `do` is today), there would be no artifact left anywhere
-for the graph mapping to work from. So parsing produces and keeps the
-sugared form; a separate pass reduces it to the smaller vocabulary
-canonicalization and type-checking actually need to understand, before
-either ever runs.
-
-Not everything that could be called "sugar" belongs in this stage,
-though — only sugar with its own distinct graph-node identity. Something
-that's purely a textual authoring convenience with no separate graph
-meaning (the stacked `@name(args)` vs. block `@{ ... }` annotation forms,
-§15.1/§15.2 — both just mean "here are some key-value pairs," and the
-editor presumably only cares about the resolved pairs, not which
-spelling produced them) can keep desugaring wherever's convenient, as it
-does today.
+This exists because the *surface*, pre-desugar syntax carries meaning
+the node-graph mapping (§3) needs and the reduced form doesn't — a `do`
+block is its own sequencing shape, a list literal its own construction
+node, not a generic application indistinguishable from any other.
+Parsing keeps the sugared form; desugaring reduces it to the smaller
+vocabulary canonicalization actually needs. Only sugar with its own
+distinct graph-node identity belongs here — a purely textual convenience
+with no separate graph meaning (`@name(args)` vs. `@{ ... }`,
+§15.1/§15.2) can keep desugaring wherever's convenient, as today.
 
 ### 13.1 What Desugars Here
 
+Operators aren't compiler primitives (§2.4, §12), so this stage doesn't
+touch them at all anymore — what's left is only what genuinely needs
+rewriting into a different shape:
+
 | Surface form | Reduces to |
 |---|---|
-| `[1, 2, 3]` | `Cons 1 (Cons 2 (Cons 3 Nil))` |
-| `x : xs` | `Cons x xs` |
-| `a \|> f` | `f a` |
-| `f >> g` | `\x -> g (f x)` |
-| `a >>= f` | `bind a f` |
+| `[1, 2, 3]` | `1 : 2 : 3 : []` |
 | `do { x <- e1; rest }` | `bind e1 (\x -> rest)` (§11) |
-| `(+)` (bare operator section, §7.6) | `\x y -> x + y` |
 
-`(+)` is included here — not resolved at parse time, despite the parser
-being what first recognizes the shape — specifically because it has its
-own graph-node reading too: a first-class reference to an operation,
-distinct from an ordinary two-argument lambda that happens to compute
-the same thing.
+(V2) We may consider supporting partial sections that desugar into lambdas e.g. (+1)
+(V2) We may consiter desugaring some of the prelude.knot operators in the future
 
-### 13.2 What Doesn't
-
-**Interface-dispatched operators** (`+`, `-`, `*`, `==`, `<>`, `<`, ...)
-aren't sugar for a single fixed definition at all, so they don't desugar
-here — `a + b` stays a `BinOp` all the way to type-checking, which turns
-it into a `HasInstance("Num", ...)` obligation checked against whichever
-instance actually matches (§10.2). *Which* code runs — a compiler
-primitive for `Int`, or real Knot source for anything else, including a
-`prelude.knot`-defined type (§12) — is a completely separate question
-from desugaring, decided per call site by ordinary instance resolution,
-not by this pass.
-
-
-
-**`&&`/`||`** are a third case, distinct from both of the above: neither
-sugar for something else nor interface-dispatched — a fixed, concrete
-`Bool -> Bool -> Bool` operation with no instance lookup needed at all
-(§7.4). TODO this is a problem becasue we don't have syntax to declare operators in prelude.knot
-
-### 13.3 Representation
+### 13.2 Representation
 
 Desugaring rewrites in place, using the same surface AST type parsing
-already produces, rather than introducing a separate, smaller "core"
-grammar. By the time canonicalization runs, certain shapes (`Do`, the
-sugar-only `BinOp` cases, bare operator sections, list literals) are
-guaranteed to no longer occur — rewritten into ordinary function- and
-constructor-application nodes — but the type itself doesn't yet
-*enforce* that; a stray sugar node reaching canonicalization would just
-be unreachable in practice, not a compile-time impossibility. Revisiting
-this once the node-graph mapping (§3) is designed in more depth, with a
-real "core" type replacing the surface one at this boundary, is a
-plausible future hardening pass, not needed to ship the desugaring stage
-itself.
+already produces, rather than a separate "core" grammar. By the time
+canonicalization runs, sugar shapes (`Do`, bare operator sections, list
+literals) are guaranteed gone in practice, though the type doesn't yet
+*enforce* it — a real "core" type replacing the surface one at this
+boundary is a plausible future hardening pass, not needed to ship this
+stage.
 
 ---
 
@@ -996,11 +975,11 @@ open, see §19.
 **Scope of the recursion — product shapes only, so far.** The rule above only covers
 *product* shapes: record and tuple, where the set of fields is fixed and statically known.
 It does not (yet) cover *sum* shapes — any multi-constructor `type` (§5.3), including
-`List` (`Nil | Cons a (List a)` — `:`/`[]` are surface sugar over an ordinary recursive ADT
-here, exactly as in Haskell/Elm, not a structurally distinct case), `Maybe`, `Result`, or a
-user's own `type Shape = Circle Float | Rectangle Float Float`. Recursing `Sensitivity` into
-a sum type would mean letting a constraint change *which constructor* is active (`Cons h t`
-becoming `Nil`, `Just x` becoming `Nothing`) — a change to the value's shape, not just to a
+`List` (`[] | a : List a` — an ordinary recursive ADT, exactly as in Haskell, not a
+structurally distinct case; §12.2), `Maybe`, `Result`, or a user's own
+`type Shape = Circle Float | Rectangle Float Float`. Recursing `Sensitivity` into
+a sum type would mean letting a constraint change *which constructor* is active (`x : xs`
+becoming `[]`, `Just x` becoming `Nothing`) — a change to the value's shape, not just to a
 field within a fixed shape — and that's a genuinely harder, unsolved problem, not merely an
 unimplemented case of the rule above. Until it's designed, `Sensitivity` of any sum type
 (built-in or user-defined, `List` included) falls to the same scalar leaf case as any other
@@ -1075,6 +1054,13 @@ of its scrutinee's type; a `case` arm that can never be reached (§8.3).
 3. **`Sensitivity` over sum types** — letting an unravel constraint change *which
    constructor* is active, not just a fixed shape's fields, is a genuinely harder,
    unsolved problem (§16.6).
+4. **The allowed operator-character set** — which characters can form an operator
+   token at all (`+++` clearly should work; where the boundary with other symbols
+   like `@`/`.`/`_` falls isn't pinned down).
+5. **Conflicting cross-module fixity** — §7.4 settles *how* an operator's own
+   module declares its fixity and how an importer inherits it, but not what
+   happens when two imported modules declare *different* fixity for the same
+   operator symbol.
 
 ---
 

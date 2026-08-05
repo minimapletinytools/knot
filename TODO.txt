@@ -102,34 +102,23 @@ alternatively, the UI can serialize the state directly into the file with specia
 
 
 :: TODO
--actually go over type checker implementation details seems to be kinda broken a lot
--create prelude section in language spec, here is stuff tha is not prelude
-    -List syntax — [], :, and [a, b, c] literal syntax are special-cased by the parser, though the [] type itself (data [] a = [] | a : [a]) is defined in GHC.Types, just with compiler magic for the syntax.
-    - Tuple syntax — (a, b), (a, b, c), etc., and their types, are built-in syntax (arbitrarily-sized tuples aren't expressible as a normal user-defined type family).
-    - Numeric literals — 5 desugars to fromInteger 5, 3.2 desugars to fromRational ... — this desugaring rule is compiler-built-in, though fromInteger/Num themselves are just a class.
-    - Char, Int, Integer, Double, Word primitive types — these need compiler/runtime support (unboxed representations, etc.) even though their interfaces look like ordinary types.
-    - IO — needs special compiler/runtime treatment to sequence real-world effects (though the Monad IO instance itself is just ordinary type class code).
 
+-do the prelude refactor thing
+    -primitive operators are baked into compiler
+    -YES 
+        -just allow user defined operators, NBD, it's not encouraged though, the bulit in ones still have special interpretation in UI
+        -you'll need to update spec with custom operator and fixity declarations
+    -NO
+        -syntax sugar operators are baked into compiler
+        -so all that's left is &&/|| which need prelude.knot defs, so I guess you allow operator syntax in just htis file or something
+    -list out prelude.rs stuff that also has special compiler stuff (e.g. list literal syntax, do notation for monads)
+    -list out prelude.rs stuff that has special tangel interpretation (maybe it's just syntax sugared operators which aren't in prelude, or maybe do them in prelude but also make them magical)
+    -copy relevant methods from https://hackage.haskell.org/package/base-4.4.1.0/docs/src/Prelude.html
+
+-should we add support for Rational primitive type? (can just go into prelude)
+-actually go over type checker implementation details seems to be kinda broken a lot
 -make prelude file
 -you probabyl need some special annotation to indicate something is treated lie a bulit in in the language
--knot compiler todo
-    DONE-change : to :: for records
-    DONE-Option to Maybe
-    DONE-remove automatic derivtaino for Eq, Ord, Show and add deriving keyword
-        -for now strtuctural deriving only supported on eq ord show
-    DONE- NOT TRUE, FIX:
-  `Collection` and `Context` work differently from the other eight: a user's own function signature can't be generic over "any `Collection`" or "any `Context`" (this grammar has no higher-kinded type variables), so they're only ever reachable through the built-in `map`/`foldl`/`foldr`/`filter`/`length`/`pure`/`bind` functions themselves — though a user's own type constructor can still have a `Collection`/`Context` **instance** declared for it, exactly like any other interface.
-    DONE-string as an opaque bulit in type like elm (or just mke it an alias for bytestring)
-    DONE-mention that unboxed types are not supported (or should you just support them? IDK what tha even means, look into it)
-    -figure out how to have builtin stuff implementd in knot, it's in particluar interesting for the built in typeclasses and operators
-    -add >>= Operators & Precedence
-        -operators are implement as a prelude file thing, but it's also built and and users aren't allowed to add more.
-        
-    
-    
-
-
-    
     
 -do linter rules
 -UI spec gaps
@@ -153,7 +142,27 @@ alternatively, the UI can serialize the state directly into the file with specia
     -see record-spread-proposal.md
 
 
-
+:: TODONE
+DONE-create prelude section in language spec, here is stuff tha is not prelude
+    -List syntax — [], :, and [a, b, c] literal syntax are special-cased by the parser, though the [] type itself (data [] a = [] | a : [a]) is defined in GHC.Types, just with compiler magic for the syntax.
+    - Tuple syntax — (a, b), (a, b, c), etc., and their types, are built-in syntax (arbitrarily-sized tuples aren't expressible as a normal user-defined type family).
+    - Numeric literals — 5 desugars to fromInteger 5, 3.2 desugars to fromRational ... — this desugaring rule is compiler-built-in, though fromInteger/Num themselves are just a class.
+    - Char, Int, Integer, Double, Word primitive types — these need compiler/runtime support (unboxed representations, etc.) even though their interfaces look like ordinary types.
+    - IO — needs special compiler/runtime treatment to sequence real-world effects (though the Monad IO instance itself is just ordinary type class code).
+DONE-knot compiler todo 1
+    DONE-change : to :: for records
+    DONE-Option to Maybe
+    DONE-remove automatic derivtaino for Eq, Ord, Show and add deriving keyword
+        -for now strtuctural deriving only supported on eq ord show
+    DONE- NOT TRUE, FIX:
+  `Collection` and `Context` work differently from the other eight: a user's own function signature can't be generic over "any `Collection`" or "any `Context`" (this grammar has no higher-kinded type variables), so they're only ever reachable through the built-in `map`/`foldl`/`foldr`/`filter`/`length`/`pure`/`bind` functions themselves — though a user's own type constructor can still have a `Collection`/`Context` **instance** declared for it, exactly like any other interface.
+    DONE-string as an opaque bulit in type like elm (or just mke it an alias for bytestring)
+    DONE-mention that unboxed types are not supported (or should you just support them? IDK what tha even means, look into it)
+    DONE-add >>= Operators & Precedence
+        -operators are implement as a prelude file thing, but it's also built and and users aren't allowed to add more.
+    DONE-figure out how to have builtin stuff implementd in knot, it's in particluar interesting for the built in typeclasses and operators
+    
+        
 
 
 :: archive
