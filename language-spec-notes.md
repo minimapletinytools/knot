@@ -27,7 +27,7 @@ decision below.
 Knot represents a middle ground between Haskell and Elm, tailored specifically to visual node graphs.
 
 ### 2.1 From Elm
-* **Record Syntax**: `{ field = value }` for construction, `{ record | field = value }` for updates, and dot access without spaces (`record.field`).
+* **Record Syntax**: `{ field = value }` for construction, `{ record | field = value }` for updates, dot access without spaces (`record.field`), and `{ x, y }` shorthand destructuring in patterns (§8.1).
 * **Type Declarations**: ADTs are defined using the `type` keyword instead of `data`, and aliases use `type alias`.
 * **Module & Import System**: Every file is a module, imports are qualified by default, and namespace control is managed via the `exposing` keyword.
 * **No `where` clauses**: All local scope bindings must use `let...in` (matching Elm's let-only scoping).
@@ -51,7 +51,6 @@ Knot represents a middle ground between Haskell and Elm, tailored specifically t
 ### 2.3 Omitted from Haskell/Elm
 * **No user-defined typeclasses**: Unlike Haskell's typeclasses (or Elm's extensible record polymorphism), the *set* of interfaces in v0 is closed — fixed, see §2.4 for the full list — to keep compile-time dictionary passing and type checking simple; users cannot declare a brand-new interface. Instances of these existing interfaces are open, though — see §2.4.
 * **No List Comprehensions**: Haskell's list comprehension syntax (`[x | x <- xs]`) is omitted in favor of standard map/filter functions.
-* **No Record Shorthand Destructuring**: Elm's shorthand record pattern matching (`{ x, y }`) is omitted.
 * **Right to Left functor operators `<|` `<<` `=<<`**: not supported
 * **No `.` function composition operator**
 * **No multi-clause function definitions**: Unlike Haskell's `f 0 = ...` / `f n = ...` style, a function name may be bound by only one equation; branch on argument patterns using `case`, matching Elm.
@@ -179,7 +178,13 @@ variable in record position instead means "any record with at least these fields
 distance :: { r | x : Float, y : Float } -> Float
 ```
 
-Note that Elm's record pattern matching syntax e.g. `{ x, y }` is not supported.
+**Record patterns** (`{ x, y }`) use Elm's own shorthand-only destructuring — see §8.1 for
+the pattern grammar and examples. A record pattern's own inferred type is open/row-polymorphic
+exactly like this section's own `distance` example above: `{ x, y }` only ever demands *at
+least* an `x` and a `y` field, so the same value can still satisfy a wider record type
+elsewhere — a function whose only parameter is `{ x, y }` is itself automatically
+row-polymorphic, the same way one written with an explicit `{ r | x : Float, y : Float }`
+signature already is.
 
 **Record Spreads**: a record type can be defined to contain all of another's fields via
 `..Name`, and this composes with row polymorphism:
@@ -385,10 +390,22 @@ case list of
     (x : xs) as fullList -> fullList
   ```
 - **No Float literal patterns** (matches Elm — float equality is unsound): compare explicitly with `if` inside the match arm instead. `Int` and `String` literal patterns are both fine (also matching Elm).
+- **Record shorthand patterns** (`{ x, y }`): binds each named field to a same-named
+  variable; fields the value has but the pattern doesn't name are simply ignored. Shorthand
+  only, matching Elm exactly — no renaming (`{ x = a }`) and no nested pattern on a field's
+  own value (`{ x = Just a }`), neither of which Elm supports either; reach for those via a
+  separate `case`/`let` on `.x` instead (or an `as` alias, above). Works in every pattern
+  position, not just `case`:
+  ```knot
+  let { x, y } = point in x + y
+
+  movePoint :: { x : Float, y : Float } -> { x : Float, y : Float }
+  movePoint { x, y } = { x = x + 1.0, y = y }
+  ```
+  A record pattern's own type is open/row-polymorphic — see §5.4.
 
 **Differs from Haskell/Elm**
 
-- **No record shorthand** (see §2.3): match via alias + dot notation instead: `r as point -> point.x`.
 - **No `@` aliases** use `as` instead
 
 

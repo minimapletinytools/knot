@@ -103,7 +103,10 @@ alternatively, the UI can serialize the state directly into the file with specia
 
 :: TODO
 
--update parser to support (+)
+DONE-update parser to support (+)
+IGNORE-you probabyl need some special annotation to indicate something is treated lie a bulit in in the language
+-allow `let {f1 f2 f3} = someRecrod` pattern matching syntax, or allwo it and use it to enable the special pattern match record let binding syntax (actually that's probably better than implicit field access for special let bound record node) 
+
 
 -do the prelude refactor thing
     -primitive operators are baked into compiler
@@ -118,29 +121,32 @@ alternatively, the UI can serialize the state directly into the file with specia
     -copy relevant methods from https://hackage.haskell.org/package/base-4.4.1.0/docs/src/Prelude.html
 
 
--allow `let {f1 f2 f3} = someRecrod` pattern matching syntax, or allwo it and use it to enable the special pattern match record let binding syntax (actually that's probably better than implicit field access for special let bound record node) 
+
 
 -actually go over type checker implementation details seems to be kinda broken a lot
-IGNORE-you probabyl need some special annotation to indicate something is treated lie a bulit in in the language
 
 
--do linter rules
+
+-do linter rules research
 -UI spec gaps
+    DONE-change postfix annotation to prefix notation
     -finish pattern matching node stuff
     -figure out how operator precedence is expressed in graph
     -figure out how to do note stuff for let bindings on patterns, especially irrefutable patterns/incomplete pattern
     -figure out how to do node stuff for `as` bindings
     -define all reserved keywords (sohuld eb same as elm plus a few extra?)
-    
-    
-    DONE-change postfix annotation to prefix notation
-    -polymorphic output types, do they need special treatment
+    -polymorphic types, do they get special treatment?
         -e.g.
             let x :: (Num a) => a = 5.
             y = 0.5 + x (x is a float)
             z = 3 + x (x is an int)
         -so there are actually 2 x's in the runtime. Compiler secretly sees x as x :: (Num a) => (typeclass dict) -> a
-        -with that idea, x is actually scretly a boxed node
+            -with that idea, x is actually scretly a boxed node 
+            -in general, all typeclass vars are secretly boxed nodes
+            -I don't think they need special treatement, but maybe have some specila color to indicate they are a polymorphic type
+        -so actually this applies to any polymoprhic tiype not just outputs, they may get different instantiations, 
+
+
 
 
 :: TODONE
